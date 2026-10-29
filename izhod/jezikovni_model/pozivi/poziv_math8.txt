@@ -1,0 +1,278 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math3.distribution.DiscreteRealDistributionTest::testIssue942
+java.lang.ArrayStoreException: org.apache.commons.math3.distribution.DiscreteRealDistributionTest$2
+	at org.apache.commons.math3.distribution.DiscreteDistribution.sample(DiscreteDistribution.java:190)
+	at org.apache.commons.math3.distribution.DiscreteRealDistributionTest.testIssue942(DiscreteRealDistributionTest.java:212)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math3.distribution.DiscreteDistribution#sample  (lines 156-171)
+156:     public T sample() {
+157:         final double randomValue = random.nextDouble();
+158:         double sum = 0;
+159: 
+160:         for (int i = 0; i < probabilities.length; i++) {
+161:             sum += probabilities[i];
+162:             if (randomValue < sum) {
+163:                 return singletons.get(i);
+164:             }
+165:         }
+166: 
+167:         /* This should never happen, but it ensures we will return a correct
+168:          * object in case the loop above has some floating point inequality
+169:          * problem on the final iteration. */
+170:         return singletons.get(singletons.size() - 1);
+171:     }
+
+[2] org.apache.commons.math3.random.AbstractWell#AbstractWell  (lines 71-73)
+71:     protected AbstractWell(final int k, final int m1, final int m2, final int m3) {
+72:         this(k, m1, m2, m3, null);
+73:     }
+
+[3] org.apache.commons.math3.random.Well19937c#next  (lines 83-113)
+83:     @Override
+84:     protected int next(final int bits) {
+85: 
+86:         final int indexRm1 = iRm1[index];
+87:         final int indexRm2 = iRm2[index];
+88: 
+89:         final int v0       = v[index];
+90:         final int vM1      = v[i1[index]];
+91:         final int vM2      = v[i2[index]];
+92:         final int vM3      = v[i3[index]];
+93: 
+94:         final int z0 = (0x80000000 & v[indexRm1]) ^ (0x7FFFFFFF & v[indexRm2]);
+95:         final int z1 = (v0 ^ (v0 << 25))  ^ (vM1 ^ (vM1 >>> 27));
+96:         final int z2 = (vM2 >>> 9) ^ (vM3 ^ (vM3 >>> 1));
+97:         final int z3 = z1      ^ z2;
+98:         int z4 = z0 ^ (z1 ^ (z1 << 9)) ^ (z2 ^ (z2 << 21)) ^ (z3 ^ (z3 >>> 21));
+99: 
+100:         v[index]     = z3;
+101:         v[indexRm1]  = z4;
+102:         v[indexRm2] &= 0x80000000;
+103:         index        = indexRm1;
+104: 
+105: 
+106:         // add Matsumoto-Kurita tempering
+107:         // to get a maximally-equidistributed generator
+108:         z4 = z4 ^ ((z4 <<  7) & 0xe46e1700);
+109:         z4 = z4 ^ ((z4 << 15) & 0x9b868000);
+110: 
+111:         return z4 >>> (32 - bits);
+112: 
+113:     }
+
+[4] org.apache.commons.math3.random.AbstractWell#setSeed  (lines 177-180)
+177:     @Override
+178:     public void setSeed(final long seed) {
+179:         setSeed(new int[] { (int) (seed >>> 32), (int) (seed & 0xffffffffl) });
+180:     }
+
+[5] org.apache.commons.math3.util.Pair#getKey  (lines 64-66)
+64:     public K getKey() {
+65:         return key;
+66:     }
+
+[6] org.apache.commons.math3.random.AbstractWell#AbstractWell  (lines 94-122)
+94:     protected AbstractWell(final int k, final int m1, final int m2, final int m3, final int[] seed) {
+95: 
+96:         // the bits pool contains k bits, k = r w - p where r is the number
+97:         // of w bits blocks, w is the block size (always 32 in the original paper)
+98:         // and p is the number of unused bits in the last block
+99:         final int w = 32;
+100:         final int r = (k + w - 1) / w;
+101:         this.v      = new int[r];
+102:         this.index  = 0;
+103: 
+104:         // precompute indirection index tables. These tables are used for optimizing access
+105:         // they allow saving computations like "(j + r - 2) % r" with costly modulo operations
+106:         iRm1 = new int[r];
+107:         iRm2 = new int[r];
+108:         i1   = new int[r];
+109:         i2   = new int[r];
+110:         i3   = new int[r];
+111:         for (int j = 0; j < r; ++j) {
+112:             iRm1[j] = (j + r - 1) % r;
+113:             iRm2[j] = (j + r - 2) % r;
+114:             i1[j]   = (j + m1)    % r;
+115:             i2[j]   = (j + m2)    % r;
+116:             i3[j]   = (j + m3)    % r;
+117:         }
+118: 
+119:         // initialize the pool content
+120:         setSeed(seed);
+121: 
+122:     }
+
+[7] org.apache.commons.math3.distribution.AbstractRealDistribution#AbstractRealDistribution  (lines 76-78)
+76:     protected AbstractRealDistribution(RandomGenerator rng) {
+77:         random = rng;
+78:     }
+
+[8] org.apache.commons.math3.random.RandomDataGenerator#RandomDataGenerator  (lines 131-132)
+131:     public RandomDataGenerator() {
+132:     }
+
+[9] org.apache.commons.math3.random.BitsStreamGenerator#BitsStreamGenerator  (lines 40-42)
+40:     public BitsStreamGenerator() {
+41:         nextGaussian = Double.NaN;
+42:     }
+
+[10] org.apache.commons.math3.random.BitsStreamGenerator#nextDouble  (lines 89-93)
+89:     public double nextDouble() {
+90:         final long high = ((long) next(26)) << 26;
+91:         final int  low  = next(26);
+92:         return (high | low) * 0x1.0p-52d;
+93:     }
+
+[11] org.apache.commons.math3.util.Pair#Pair  (lines 45-48)
+45:     public Pair(K k, V v) {
+46:         key = k;
+47:         value = v;
+48:     }
+
+[12] org.apache.commons.math3.distribution.DiscreteDistribution#sample  (lines 181-195)
+181:     public T[] sample(int sampleSize) throws NotStrictlyPositiveException {
+182:         if (sampleSize <= 0) {
+183:             throw new NotStrictlyPositiveException(LocalizedFormats.NUMBER_OF_SAMPLES,
+184:                     sampleSize);
+185:         }
+186: 
+187:         final T[]out = (T[]) java.lang.reflect.Array.newInstance(singletons.get(0).getClass(), sampleSize);
+188: 
+189:         for (int i = 0; i < sampleSize; i++) {
+190:             out[i] = sample();
+191:         }
+192: 
+193:         return out;
+194: 
+195:     }
+
+[13] org.apache.commons.math3.random.RandomDataImpl#RandomDataImpl  (lines 114-116)
+114:     public RandomDataImpl() {
+115:         delegate = new RandomDataGenerator();
+116:     }
+
+[14] org.apache.commons.math3.random.BitsStreamGenerator#clear  (lines 169-171)
+169:     public void clear() {
+170:         nextGaussian = Double.NaN;
+171:     }
+
+[15] org.apache.commons.math3.random.AbstractWell#setSeed  (lines 152-170)
+152:     @Override
+153:     public void setSeed(final int[] seed) {
+154:         if (seed == null) {
+155:             setSeed(System.currentTimeMillis() + System.identityHashCode(this));
+156:             return;
+157:         }
+158: 
+159:         System.arraycopy(seed, 0, v, 0, Math.min(seed.length, v.length));
+160: 
+161:         if (seed.length < v.length) {
+162:             for (int i = seed.length; i < v.length; ++i) {
+163:                 final long l = v[i - seed.length];
+164:                 v[i] = (int) ((1812433253l * (l ^ (l >> 30)) + i) & 0xffffffffL);
+165:             }
+166:         }
+167: 
+168:         index = 0;
+169:         clear();  // Clear normal deviate cache
+170:     }
+
+[16] org.apache.commons.math3.util.Pair#getValue  (lines 73-75)
+73:     public V getValue() {
+74:         return value;
+75:     }
+
+[17] org.apache.commons.math3.util.MathArrays#normalizeArray  (lines 1247-1277)
+1247:      public static double[] normalizeArray(double[] values, double normalizedSum)
+1248:          throws MathIllegalArgumentException, MathArithmeticException {
+1249:          if (Double.isInfinite(normalizedSum)) {
+1250:              throw new MathIllegalArgumentException(LocalizedFormats.NORMALIZE_INFINITE);
+1251:          }
+1252:          if (Double.isNaN(normalizedSum)) {
+1253:              throw new MathIllegalArgumentException(LocalizedFormats.NORMALIZE_NAN);
+1254:          }
+1255:          double sum = 0d;
+1256:          final int len = values.length;
+1257:          double[] out = new double[len];
+1258:          for (int i = 0; i < len; i++) {
+1259:              if (Double.isInfinite(values[i])) {
+1260:                  throw new MathIllegalArgumentException(LocalizedFormats.INFINITE_ARRAY_ELEMENT, values[i], i);
+1261:              }
+1262:              if (!Double.isNaN(values[i])) {
+1263:                  sum += values[i];
+1264:              }
+1265:          }
+1266:          if (sum == 0) {
+1267:              throw new MathArithmeticException(LocalizedFormats.ARRAY_SUMS_TO_ZERO);
+1268:          }
+1269:          for (int i = 0; i < len; i++) {
+1270:              if (Double.isNaN(values[i])) {
+1271:                  out[i] = Double.NaN;
+1272:              } else {
+1273:                  out[i] = values[i] * normalizedSum / sum;
+1274:              }
+1275:          }
+1276:          return out;
+1277:      }
+
+[18] org.apache.commons.math3.distribution.DiscreteDistribution#DiscreteDistribution  (lines 85-102)
+85:     public DiscreteDistribution(final RandomGenerator rng, final List<Pair<T, Double>> samples)
+86:         throws NotPositiveException, MathArithmeticException, MathIllegalArgumentException {
+87:         random = rng;
+88: 
+89:         singletons = new ArrayList<T>(samples.size());
+90:         final double[] probs = new double[samples.size()];
+91: 
+92:         for (int i = 0; i < samples.size(); i++) {
+93:             final Pair<T, Double> sample = samples.get(i);
+94:             singletons.add(sample.getKey());
+95:             if (sample.getValue() < 0) {
+96:                 throw new NotPositiveException(sample.getValue());
+97:             }
+98:             probs[i] = sample.getValue();
+99:         }
+100: 
+101:         probabilities = MathArrays.normalizeArray(probs, 1.0);
+102:     }
+
+[19] org.apache.commons.math3.distribution.DiscreteDistribution#DiscreteDistribution  (lines 67-70)
+67:     public DiscreteDistribution(final List<Pair<T, Double>> samples)
+68:         throws NotPositiveException, MathArithmeticException, MathIllegalArgumentException {
+69:         this(new Well19937c(), samples);
+70:     }
+
+[20] org.apache.commons.math3.distribution.DiscreteRealDistribution#DiscreteRealDistribution  (lines 64-67)
+64:     public DiscreteRealDistribution(final double[] singletons, final double[] probabilities)
+65:         throws DimensionMismatchException, NotPositiveException, MathArithmeticException, MathIllegalArgumentException {
+66:         this(new Well19937c(), singletons, probabilities);
+67:     }
+
+[21] org.apache.commons.math3.random.Well19937c#Well19937c  (lines 56-58)
+56:     public Well19937c() {
+57:         super(K, M1, M2, M3);
+58:     }
+
+[22] org.apache.commons.math3.distribution.DiscreteRealDistribution#DiscreteRealDistribution  (lines 84-99)
+84:     public DiscreteRealDistribution(final RandomGenerator rng,
+85:                                     final double[] singletons, final double[] probabilities)
+86:         throws DimensionMismatchException, NotPositiveException, MathArithmeticException, MathIllegalArgumentException {
+87:         super(rng);
+88:         if (singletons.length != probabilities.length) {
+89:             throw new DimensionMismatchException(probabilities.length, singletons.length);
+90:         }
+91: 
+92:         List<Pair<Double, Double>> samples = new ArrayList<Pair<Double, Double>>(singletons.length);
+93: 
+94:         for (int i = 0; i < singletons.length; i++) {
+95:             samples.add(new Pair<Double, Double>(singletons[i], probabilities[i]));
+96:         }
+97: 
+98:         innerDistribution = new DiscreteDistribution<Double>(rng, samples);
+99:     }

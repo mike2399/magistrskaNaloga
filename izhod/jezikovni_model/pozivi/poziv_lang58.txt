@@ -1,0 +1,216 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.lang.math.NumberUtilsTest::testLang300
+java.lang.NumberFormatException: 1l is not a valid number.
+	at org.apache.commons.lang.math.NumberUtils.createNumber(NumberUtils.java:464)
+	at org.apache.commons.lang.math.NumberUtilsTest.testLang300(NumberUtilsTest.java:1371)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.lang.math.NumberUtils#createNumber  (lines 397-545)
+397:     public static Number createNumber(String str) throws NumberFormatException {
+398:         if (str == null) {
+399:             return null;
+400:         }
+401:         if (StringUtils.isBlank(str)) {
+402:             throw new NumberFormatException("A blank string is not a valid number");
+403:         }  
+404:         if (str.startsWith("--")) {
+405:             // this is protection for poorness in java.lang.BigDecimal.
+406:             // it accepts this as a legal value, but it does not appear 
+407:             // to be in specification of class. OS X Java parses it to 
+408:             // a wrong value.
+409:             return null;
+410:         }
+411:         if (str.startsWith("0x") || str.startsWith("-0x")) {
+412:             return createInteger(str);
+413:         }   
+414:         char lastChar = str.charAt(str.length() - 1);
+415:         String mant;
+416:         String dec;
+417:         String exp;
+418:         int decPos = str.indexOf('.');
+419:         int expPos = str.indexOf('e') + str.indexOf('E') + 1;
+420: 
+421:         if (decPos > -1) {
+422: 
+423:             if (expPos > -1) {
+424:                 if (expPos < decPos) {
+425:                     throw new NumberFormatException(str + " is not a valid number.");
+426:                 }
+427:                 dec = str.substring(decPos + 1, expPos);
+428:             } else {
+429:                 dec = str.substring(decPos + 1);
+430:             }
+431:             mant = str.substring(0, decPos);
+432:         } else {
+433:             if (expPos > -1) {
+434:                 mant = str.substring(0, expPos);
+435:             } else {
+436:                 mant = str;
+437:             }
+438:             dec = null;
+439:         }
+440:         if (!Character.isDigit(lastChar)) {
+441:             if (expPos > -1 && expPos < str.length() - 1) {
+442:                 exp = str.substring(expPos + 1, str.length() - 1);
+443:             } else {
+444:                 exp = null;
+445:             }
+446:             //Requesting a specific type..
+447:             String numeric = str.substring(0, str.length() - 1);
+448:             boolean allZeros = isAllZeros(mant) && isAllZeros(exp);
+449:             switch (lastChar) {
+450:                 case 'l' :
+451:                 case 'L' :
+452:                     if (dec == null
+453:                         && exp == null
+454:                         && isDigits(numeric.substring(1))
+455:                         && (numeric.charAt(0) == '-' || Character.isDigit(numeric.charAt(0)))) {
+456:                         try {
+457:                             return createLong(numeric);
+458:                         } catch (NumberFormatException nfe) {
+459:                             //Too big for a long
+460:                         }
+461:                         return createBigInteger(numeric);
+462: 
+463:                     }
+464:                     throw new NumberFormatException(str + " is not a valid number.");
+465:                 case 'f' :
+466:                 case 'F' :
+467:                     try {
+468:                         Float f = NumberUtils.createFloat(numeric);
+469:                         if (!(f.isInfinite() || (f.floatValue() == 0.0F && !allZeros))) {
+470:                             //If it's too big for a float or the float value = 0 and the string
+471:                             //has non-zeros in it, then float does not have the precision we want
+472:                             return f;
+473:                         }
+474: 
+475:                     } catch (NumberFormatException nfe) {
+476:                         // ignore the bad number
+477:                     }
+478:                     //Fall through
+479:                 case 'd' :
+480:                 case 'D' :
+481:                     try {
+482:                         Double d = NumberUtils.createDouble(numeric);
+483:                         if (!(d.isInfinite() || (d.floatValue() == 0.0D && !allZeros))) {
+484:                             return d;
+485:                         }
+486:                     } catch (NumberFormatException nfe) {
+487:                         // ignore the bad number
+488:                     }
+489:                     try {
+490:                         return createBigDecimal(numeric);
+491:                     } catch (NumberFormatException e) {
+492:                         // ignore the bad number
+493:                     }
+494:                     //Fall through
+495:                 default :
+496:                     throw new NumberFormatException(str + " is not a valid number.");
+497: 
+498:             }
+499:         } else {
+500:             //User doesn't have a preference on the return type, so let's start
+501:             //small and go from there...
+502:             if (expPos > -1 && expPos < str.length() - 1) {
+503:                 exp = str.substring(expPos + 1, str.length());
+504:             } else {
+505:                 exp = null;
+506:             }
+507:             if (dec == null && exp == null) {
+508:                 //Must be an int,long,bigint
+509:                 try {
+510:                     return createInteger(str);
+511:                 } catch (NumberFormatException nfe) {
+512:                     // ignore the bad number
+513:                 }
+514:                 try {
+515:                     return createLong(str);
+516:                 } catch (NumberFormatException nfe) {
+517:                     // ignore the bad number
+518:                 }
+519:                 return createBigInteger(str);
+520: 
+521:             } else {
+522:                 //Must be a float,double,BigDec
+523:                 boolean allZeros = isAllZeros(mant) && isAllZeros(exp);
+524:                 try {
+525:                     Float f = createFloat(str);
+526:                     if (!(f.isInfinite() || (f.floatValue() == 0.0F && !allZeros))) {
+527:                         return f;
+528:                     }
+529:                 } catch (NumberFormatException nfe) {
+530:                     // ignore the bad number
+531:                 }
+532:                 try {
+533:                     Double d = createDouble(str);
+534:                     if (!(d.isInfinite() || (d.doubleValue() == 0.0D && !allZeros))) {
+535:                         return d;
+536:                     }
+537:                 } catch (NumberFormatException nfe) {
+538:                     // ignore the bad number
+539:                 }
+540: 
+541:                 return createBigDecimal(str);
+542: 
+543:             }
+544:         }
+545:     }
+
+[2] org.apache.commons.lang.math.NumberUtils#createLong  (lines 627-632)
+627:     public static Long createLong(String str) {
+628:         if (str == null) {
+629:             return null;
+630:         }
+631:         return Long.valueOf(str);
+632:     }
+
+[3] org.apache.commons.lang.StringUtils#isBlank  (lines 221-232)
+221:     public static boolean isBlank(String str) {
+222:         int strLen;
+223:         if (str == null || (strLen = str.length()) == 0) {
+224:             return true;
+225:         }
+226:         for (int i = 0; i < strLen; i++) {
+227:             if ((Character.isWhitespace(str.charAt(i)) == false)) {
+228:                 return false;
+229:             }
+230:         }
+231:         return true;
+232:     }
+
+[4] org.apache.commons.lang.StringUtils#isEmpty  (lines 184-186)
+184:     public static boolean isEmpty(String str) {
+185:         return str == null || str.length() == 0;
+186:     }
+
+[5] org.apache.commons.lang.math.NumberUtils#isAllZeros  (lines 555-565)
+555:     private static boolean isAllZeros(String str) {
+556:         if (str == null) {
+557:             return true;
+558:         }
+559:         for (int i = str.length() - 1; i >= 0; i--) {
+560:             if (str.charAt(i) != '0') {
+561:                 return false;
+562:             }
+563:         }
+564:         return str.length() > 0;
+565:     }
+
+[6] org.apache.commons.lang.math.NumberUtils#isDigits  (lines 1506-1516)
+1506:     public static boolean isDigits(String str) {
+1507:         if (StringUtils.isEmpty(str)) {
+1508:             return false;
+1509:         }
+1510:         for (int i = 0; i < str.length(); i++) {
+1511:             if (!Character.isDigit(str.charAt(i))) {
+1512:                 return false;
+1513:             }
+1514:         }
+1515:         return true;
+1516:     }

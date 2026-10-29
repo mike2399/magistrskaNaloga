@@ -1,0 +1,948 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.rhino.jstype.RecordTypeTest::testRecursiveRecord
+junit.framework.ComparisonFailure: expected:<{loop: [?], number: number, st...> but was:<{loop: [{...}], number: number, st...>
+	at com.google.javascript.rhino.jstype.RecordTypeTest.testRecursiveRecord(RecordTypeTest.java:59)
+--- com.google.javascript.rhino.jstype.RecordTypeTest::testLongToString
+junit.framework.ComparisonFailure: expected:<...number, a4: number, [a5: number, a6: number]}> but was:<...number, a4: number, [...]}>
+	at com.google.javascript.rhino.jstype.RecordTypeTest.testLongToString(RecordTypeTest.java:76)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.rhino.jstype.PrototypeObjectType#setPrettyPrint  (lines 398-400)
+398:   void setPrettyPrint(boolean prettyPrint) {
+399:     this.prettyPrint = prettyPrint;
+400:   }
+
+[2] com.google.javascript.rhino.jstype.FunctionType#getSuperClassConstructor  (lines 755-762)
+755:   public FunctionType getSuperClassConstructor() {
+756:     Preconditions.checkArgument(isConstructor() || isInterface());
+757:     ObjectType maybeSuperInstanceType = getPrototype().getImplicitPrototype();
+758:     if (maybeSuperInstanceType == null) {
+759:       return null;
+760:     }
+761:     return maybeSuperInstanceType.getConstructor();
+762:   }
+
+[3] com.google.javascript.rhino.jstype.FunctionParamBuilder#newParameter  (lines 122-127)
+122:   private Node newParameter(JSType type) {
+123:     Node paramNode = Node.newString(Token.NAME, "");
+124:     paramNode.setJSType(type);
+125:     root.addChildToBack(paramNode);
+126:     return paramNode;
+127:   }
+
+[4] com.google.javascript.rhino.jstype.FunctionType#FunctionType  (lines 130-153)
+130:   FunctionType(JSTypeRegistry registry, String name, Node source,
+131:       ArrowType arrowType, ObjectType typeOfThis,
+132:       String templateTypeName,  boolean isConstructor, boolean nativeType) {
+133:     super(registry, name,
+134:         registry.getNativeObjectType(JSTypeNative.FUNCTION_INSTANCE_TYPE),
+135:         nativeType);
+136:     setPrettyPrint(true);
+137: 
+138:     Preconditions.checkArgument(source == null ||
+139:         Token.FUNCTION == source.getType());
+140:     Preconditions.checkNotNull(arrowType);
+141:     this.source = source;
+142:     this.kind = isConstructor ? Kind.CONSTRUCTOR : Kind.ORDINARY;
+143:     if (isConstructor) {
+144:       this.typeOfThis = typeOfThis != null ?
+145:           typeOfThis : new InstanceObjectType(registry, this, nativeType);
+146:     } else {
+147:       this.typeOfThis = typeOfThis != null ?
+148:           typeOfThis :
+149:           registry.getNativeObjectType(JSTypeNative.UNKNOWN_TYPE);
+150:     }
+151:     this.call = arrowType;
+152:     this.templateTypeName = templateTypeName;
+153:   }
+
+[5] com.google.javascript.rhino.jstype.FunctionType#hasInstanceType  (lines 1003-1005)
+1003:   public boolean hasInstanceType() {
+1004:     return isConstructor() || isInterface();
+1005:   }
+
+[6] com.google.javascript.rhino.jstype.JSTypeRegistry#getNativeObjectType  (lines 878-880)
+878:   public ObjectType getNativeObjectType(JSTypeNative typeId) {
+879:     return (ObjectType) getNativeType(typeId);
+880:   }
+
+[7] com.google.javascript.rhino.jstype.JSTypeRegistry#addReferenceTypeIndexedByProperty  (lines 631-650)
+631:   private void addReferenceTypeIndexedByProperty(
+632:       String propertyName, JSType type) {
+633:     if (type instanceof ObjectType && ((ObjectType) type).hasReferenceName()) {
+634:       Map<String, ObjectType> typeSet =
+635:           eachRefTypeIndexedByProperty.get(propertyName);
+636:       if (typeSet == null) {
+637:         typeSet = Maps.newHashMap();
+638:         eachRefTypeIndexedByProperty.put(propertyName, typeSet);
+639:       }
+640:       ObjectType objType = (ObjectType) type;
+641:       typeSet.put(objType.getReferenceName(), objType);
+642:     } else if (type instanceof NamedType) {
+643:       addReferenceTypeIndexedByProperty(
+644:           propertyName, ((NamedType) type).getReferencedType());
+645:     } else if (type.isUnionType()) {
+646:       for (JSType alternate : type.toMaybeUnionType().getAlternates()) {
+647:         addReferenceTypeIndexedByProperty(propertyName, alternate);
+648:       }
+649:     }
+650:   }
+
+[8] com.google.javascript.rhino.jstype.BooleanType#toStringHelper  (lines 101-104)
+101:   @Override
+102:   String toStringHelper(boolean forAnnotations) {
+103:     return getDisplayName();
+104:   }
+
+[9] com.google.javascript.rhino.jstype.FunctionBuilder#withParamsNode  (lines 89-92)
+89:   public FunctionBuilder withParamsNode(Node parametersNode) {
+90:     this.parametersNode = parametersNode;
+91:     return this;
+92:   }
+
+[10] com.google.javascript.rhino.jstype.RecordTypeBuilder#build  (lines 83-90)
+83:   public JSType build() {
+84:      // If we have an empty record, simply return the object type.
+85:     if (isEmpty) {
+86:        return registry.getNativeObjectType(JSTypeNative.OBJECT_TYPE);
+87:     }
+88: 
+89:     return registry.createRecordType(Collections.unmodifiableMap(properties));
+90:   }
+
+[11] com.google.javascript.rhino.jstype.ObjectType#isImplicitPrototype  (lines 469-478)
+469:   final boolean isImplicitPrototype(ObjectType prototype) {
+470:     for (ObjectType current = this;
+471:          current != null;
+472:          current = current.getImplicitPrototype()) {
+473:       if (current.isEquivalentTo(prototype)) {
+474:         return true;
+475:       }
+476:     }
+477:     return false;
+478:   }
+
+[12] com.google.javascript.rhino.jstype.JSTypeRegistry#createRecordType  (lines 1313-1315)
+1313:   public RecordType createRecordType(Map<String, RecordProperty> properties) {
+1314:     return new RecordType(this, properties);
+1315:   }
+
+[13] com.google.javascript.rhino.jstype.FunctionParamBuilder#hasVarArgs  (lines 139-142)
+139:   public boolean hasVarArgs() {
+140:     Node lastChild = root.getLastChild();
+141:     return lastChild != null && lastChild.isVarArgs();
+142:   }
+
+[14] com.google.javascript.rhino.jstype.RecordType#getImplicitPrototype  (lines 120-123)
+120:   @Override
+121:   public ObjectType getImplicitPrototype() {
+122:     return registry.getNativeObjectType(JSTypeNative.OBJECT_TYPE);
+123:   }
+
+[15] com.google.javascript.rhino.jstype.JSTypeRegistry#JSTypeRegistry  (lines 198-200)
+198:   public JSTypeRegistry(ErrorReporter reporter) {
+199:     this(reporter, false);
+200:   }
+
+[16] com.google.javascript.rhino.jstype.RecordType#defineProperty  (lines 125-138)
+125:   @Override
+126:   boolean defineProperty(String propertyName, JSType type,
+127:       boolean inferred, Node propertyNode) {
+128:     if (isFrozen) {
+129:       return false;
+130:     }
+131: 
+132:     if (!inferred) {
+133:       properties.put(propertyName, type);
+134:     }
+135: 
+136:     return super.defineProperty(propertyName, type, inferred,
+137:         propertyNode);
+138:   }
+
+[17] com.google.javascript.rhino.jstype.RecordTypeBuilder#getType  (lines 101-103)
+101:     public JSType getType() {
+102:       return type;
+103:     }
+
+[18] com.google.javascript.rhino.jstype.JSTypeRegistry#JSTypeRegistry  (lines 205-212)
+205:   public JSTypeRegistry(
+206:       ErrorReporter reporter, boolean tolerateUndefinedValues) {
+207:     this.reporter = reporter;
+208:     nativeTypes = new JSType[JSTypeNative.values().length];
+209:     namesToTypes = new HashMap<String, JSType>();
+210:     resetForTypeCheck();
+211:     this.tolerateUndefinedValues = tolerateUndefinedValues;
+212:   }
+
+[19] com.google.javascript.rhino.jstype.PrototypeObjectType#getPropertyType  (lines 211-218)
+211:   @Override
+212:   public JSType getPropertyType(String property) {
+213:     StaticSlot<JSType> slot = getSlot(property);
+214:     if (slot == null) {
+215:       return getNativeType(JSTypeNative.UNKNOWN_TYPE);
+216:     }
+217:     return slot.getType();
+218:   }
+
+[20] com.google.javascript.rhino.jstype.InstanceObjectType#isNominalType  (lines 151-154)
+151:   @Override
+152:   public boolean isNominalType() {
+153:     return hasReferenceName();
+154:   }
+
+[21] com.google.javascript.rhino.jstype.PrototypeObjectType#toStringHelper  (lines 352-396)
+352:   @Override
+353:   String toStringHelper(boolean forAnnotations) {
+354:     if (hasReferenceName()) {
+355:       return getReferenceName();
+356:     } else if (prettyPrint) {
+357:       // Don't pretty print recursively.
+358:       prettyPrint = false;
+359: 
+360:       // Use a tree set so that the properties are sorted.
+361:       Set<String> propertyNames = Sets.newTreeSet();
+362:       for (ObjectType current = this;
+363:            current != null && !current.isNativeObjectType() &&
+364:                propertyNames.size() <= MAX_PRETTY_PRINTED_PROPERTIES;
+365:            current = current.getImplicitPrototype()) {
+366:         propertyNames.addAll(current.getOwnPropertyNames());
+367:       }
+368: 
+369:       StringBuilder sb = new StringBuilder();
+370:       sb.append("{");
+371: 
+372:       int i = 0;
+373:       for (String property : propertyNames) {
+374:         if (i > 0) {
+375:           sb.append(", ");
+376:         }
+377: 
+378:         sb.append(property);
+379:         sb.append(": ");
+380:         sb.append(getPropertyType(property).toString());
+381: 
+382:         ++i;
+383:         if (i == MAX_PRETTY_PRINTED_PROPERTIES) {
+384:           sb.append(", ...");
+385:           break;
+386:         }
+387:       }
+388: 
+389:       sb.append("}");
+390: 
+391:       prettyPrint = true;
+392:       return sb.toString();
+393:     } else {
+394:       return "{...}";
+395:     }
+396:   }
+
+[22] com.google.javascript.rhino.jstype.PrototypeObjectType#getReferenceName  (lines 427-436)
+427:   @Override
+428:   public String getReferenceName() {
+429:     if (className != null) {
+430:       return className;
+431:     } else if (ownerFunction != null) {
+432:       return ownerFunction.getReferenceName() + ".prototype";
+433:     } else {
+434:       return null;
+435:     }
+436:   }
+
+[23] com.google.javascript.rhino.jstype.PrototypeObjectType#getOwnPropertyNames  (lines 177-180)
+177:   @Override
+178:   public Set<String> getOwnPropertyNames() {
+179:     return properties.keySet();
+180:   }
+
+[24] com.google.javascript.rhino.jstype.RecordTypeBuilder#addProperty  (lines 69-77)
+69:   public RecordTypeBuilder addProperty(String name, JSType type, Node
+70:       propertyNode) {
+71:     isEmpty = false;
+72:     if (properties.containsKey(name)) {
+73:       return null;
+74:     }
+75:     properties.put(name, new RecordProperty(type, propertyNode));
+76:     return this;
+77:   }
+
+[25] com.google.javascript.rhino.jstype.InstanceObjectType#isEquivalentTo  (lines 156-167)
+156:   @Override
+157:   public boolean isEquivalentTo(JSType that) {
+158:     if (this == that) {
+159:       return true;
+160:     } else if (this.isNominalType()) {
+161:       ObjectType thatObj = ObjectType.cast(that);
+162:       if (thatObj != null && thatObj.isNominalType()) {
+163:         return getReferenceName().equals(thatObj.getReferenceName());
+164:       }
+165:     }
+166:     return false;
+167:   }
+
+[26] com.google.javascript.rhino.jstype.FunctionBuilder#FunctionBuilder  (lines 64-66)
+64:   public FunctionBuilder(JSTypeRegistry registry) {
+65:     this.registry = registry;
+66:   }
+
+[27] com.google.javascript.rhino.jstype.JSTypeRegistry#initializeBuiltInTypes  (lines 246-559)
+246:   private void initializeBuiltInTypes() {
+247:     // These locals shouldn't be all caps.
+248:     BooleanType BOOLEAN_TYPE = new BooleanType(this);
+249:     registerNativeType(JSTypeNative.BOOLEAN_TYPE, BOOLEAN_TYPE);
+250: 
+251:     NullType NULL_TYPE = new NullType(this);
+252:     registerNativeType(JSTypeNative.NULL_TYPE, NULL_TYPE);
+253: 
+254:     NumberType NUMBER_TYPE = new NumberType(this);
+255:     registerNativeType(JSTypeNative.NUMBER_TYPE, NUMBER_TYPE);
+256: 
+257:     StringType STRING_TYPE = new StringType(this);
+258:     registerNativeType(JSTypeNative.STRING_TYPE, STRING_TYPE);
+259: 
+260:     UnknownType UNKNOWN_TYPE = new UnknownType(this, false);
+261:     registerNativeType(JSTypeNative.UNKNOWN_TYPE, UNKNOWN_TYPE);
+262:     registerNativeType(
+263:         JSTypeNative.CHECKED_UNKNOWN_TYPE, new UnknownType(this, true));
+264: 
+265:     VoidType VOID_TYPE = new VoidType(this);
+266:     registerNativeType(JSTypeNative.VOID_TYPE, VOID_TYPE);
+267: 
+268:     AllType ALL_TYPE = new AllType(this);
+269:     registerNativeType(JSTypeNative.ALL_TYPE, ALL_TYPE);
+270: 
+271:     // Top Level Prototype (the One)
+272:     // The initializations of TOP_LEVEL_PROTOTYPE and OBJECT_FUNCTION_TYPE
+273:     // use each other's results, so at least one of them will get null
+274:     // instead of an actual type; however, this seems to be benign.
+275:     PrototypeObjectType TOP_LEVEL_PROTOTYPE =
+276:         new PrototypeObjectType(this, null, null, true);
+277:     registerNativeType(JSTypeNative.TOP_LEVEL_PROTOTYPE, TOP_LEVEL_PROTOTYPE);
+278: 
+279:     // Object
+280:     FunctionType OBJECT_FUNCTION_TYPE =
+281:         new FunctionType(this, "Object", null,
+282:             createArrowType(createOptionalParameters(ALL_TYPE), UNKNOWN_TYPE),
+283:             null, null, true, true);
+284: 
+285:     OBJECT_FUNCTION_TYPE.setPrototype(TOP_LEVEL_PROTOTYPE, null);
+286:     registerNativeType(JSTypeNative.OBJECT_FUNCTION_TYPE, OBJECT_FUNCTION_TYPE);
+287: 
+288:     ObjectType OBJECT_TYPE = OBJECT_FUNCTION_TYPE.getInstanceType();
+289:     registerNativeType(JSTypeNative.OBJECT_TYPE, OBJECT_TYPE);
+290: 
+291:     ObjectType OBJECT_PROTOTYPE = OBJECT_FUNCTION_TYPE.getPrototype();
+292:     registerNativeType(JSTypeNative.OBJECT_PROTOTYPE, OBJECT_PROTOTYPE);
+293: 
+294:     // Function
+295:     FunctionType FUNCTION_FUNCTION_TYPE =
+296:         new FunctionType(this, "Function", null,
+297:             createArrowType(
+298:                 createParametersWithVarArgs(ALL_TYPE), UNKNOWN_TYPE),
+299:             null, null, true, true);
+300:     FUNCTION_FUNCTION_TYPE.setPrototypeBasedOn(OBJECT_TYPE);
+301:     registerNativeType(
+302:         JSTypeNative.FUNCTION_FUNCTION_TYPE, FUNCTION_FUNCTION_TYPE);
+303: 
+304:     ObjectType FUNCTION_PROTOTYPE = FUNCTION_FUNCTION_TYPE.getPrototype();
+305:     registerNativeType(JSTypeNative.FUNCTION_PROTOTYPE, FUNCTION_PROTOTYPE);
+306: 
+307:     NoType NO_TYPE = new NoType(this);
+308:     registerNativeType(JSTypeNative.NO_TYPE, NO_TYPE);
+309: 
+310:     NoObjectType NO_OBJECT_TYPE = new NoObjectType(this);
+311:     registerNativeType(JSTypeNative.NO_OBJECT_TYPE, NO_OBJECT_TYPE);
+312: 
+313:     NoObjectType NO_RESOLVED_TYPE = new NoResolvedType(this);
+314:     registerNativeType(JSTypeNative.NO_RESOLVED_TYPE, NO_RESOLVED_TYPE);
+315: 
+316:     // Array
+317:     FunctionType ARRAY_FUNCTION_TYPE =
+318:       new FunctionType(this, "Array", null,
+319:           createArrowType(createParametersWithVarArgs(ALL_TYPE), null),
+320:           null, null, true, true);
+321:     ARRAY_FUNCTION_TYPE.getInternalArrowType().returnType =
+322:         ARRAY_FUNCTION_TYPE.getInstanceType();
+323: 
+324:     ObjectType arrayPrototype = ARRAY_FUNCTION_TYPE.getPrototype();
+325:     registerNativeType(JSTypeNative.ARRAY_FUNCTION_TYPE, ARRAY_FUNCTION_TYPE);
+326: 
+327:     ObjectType ARRAY_TYPE = ARRAY_FUNCTION_TYPE.getInstanceType();
+328:     registerNativeType(JSTypeNative.ARRAY_TYPE, ARRAY_TYPE);
+329: 
+330:     // Boolean
+331:     FunctionType BOOLEAN_OBJECT_FUNCTION_TYPE =
+332:         new FunctionType(this, "Boolean", null,
+333:             createArrowType(createParameters(false, ALL_TYPE), BOOLEAN_TYPE),
+334:             null, null, true, true);
+335:     ObjectType booleanPrototype = BOOLEAN_OBJECT_FUNCTION_TYPE.getPrototype();
+336:     registerNativeType(
+337:         JSTypeNative.BOOLEAN_OBJECT_FUNCTION_TYPE,
+338:         BOOLEAN_OBJECT_FUNCTION_TYPE);
+339: 
+340:     ObjectType BOOLEAN_OBJECT_TYPE =
+341:         BOOLEAN_OBJECT_FUNCTION_TYPE.getInstanceType();
+342:     registerNativeType(JSTypeNative.BOOLEAN_OBJECT_TYPE, BOOLEAN_OBJECT_TYPE);
+343: 
+344:     // Date
+345:     FunctionType DATE_FUNCTION_TYPE =
+346:       new FunctionType(this, "Date", null,
+347:           createArrowType(
+348:               createOptionalParameters(UNKNOWN_TYPE, UNKNOWN_TYPE, UNKNOWN_TYPE,
+349:                   UNKNOWN_TYPE, UNKNOWN_TYPE, UNKNOWN_TYPE, UNKNOWN_TYPE),
+350:               STRING_TYPE),
+351:           null, null, true, true);
+352:     ObjectType datePrototype = DATE_FUNCTION_TYPE.getPrototype();
+353:     registerNativeType(JSTypeNative.DATE_FUNCTION_TYPE, DATE_FUNCTION_TYPE);
+354: 
+355:     ObjectType DATE_TYPE = DATE_FUNCTION_TYPE.getInstanceType();
+356:     registerNativeType(JSTypeNative.DATE_TYPE, DATE_TYPE);
+357: 
+358:     // Error
+359:     FunctionType ERROR_FUNCTION_TYPE = new ErrorFunctionType(this, "Error");
+360:     registerNativeType(JSTypeNative.ERROR_FUNCTION_TYPE, ERROR_FUNCTION_TYPE);
+361: 
+362:     ObjectType ERROR_TYPE = ERROR_FUNCTION_TYPE.getInstanceType();
+363:     registerNativeType(JSTypeNative.ERROR_TYPE, ERROR_TYPE);
+364: 
+365:     // EvalError
+366:     FunctionType EVAL_ERROR_FUNCTION_TYPE =
+367:         new ErrorFunctionType(this, "EvalError");
+368:     EVAL_ERROR_FUNCTION_TYPE.setPrototypeBasedOn(ERROR_TYPE);
+369:     registerNativeType(
+370:         JSTypeNative.EVAL_ERROR_FUNCTION_TYPE, EVAL_ERROR_FUNCTION_TYPE);
+371: 
+372:     ObjectType EVAL_ERROR_TYPE = EVAL_ERROR_FUNCTION_TYPE.getInstanceType();
+373:     registerNativeType(JSTypeNative.EVAL_ERROR_TYPE, EVAL_ERROR_TYPE);
+374: 
+375:     // RangeError
+376:     FunctionType RANGE_ERROR_FUNCTION_TYPE =
+377:         new ErrorFunctionType(this, "RangeError");
+378:     RANGE_ERROR_FUNCTION_TYPE.setPrototypeBasedOn(ERROR_TYPE);
+379:     registerNativeType(
+380:         JSTypeNative.RANGE_ERROR_FUNCTION_TYPE, RANGE_ERROR_FUNCTION_TYPE);
+381: 
+382:     ObjectType RANGE_ERROR_TYPE = RANGE_ERROR_FUNCTION_TYPE.getInstanceType();
+383:     registerNativeType(JSTypeNative.RANGE_ERROR_TYPE, RANGE_ERROR_TYPE);
+384: 
+385:     // ReferenceError
+386:     FunctionType REFERENCE_ERROR_FUNCTION_TYPE =
+387:         new ErrorFunctionType(this, "ReferenceError");
+388:     REFERENCE_ERROR_FUNCTION_TYPE.setPrototypeBasedOn(ERROR_TYPE);
+389:     registerNativeType(
+390:         JSTypeNative.REFERENCE_ERROR_FUNCTION_TYPE,
+391:         REFERENCE_ERROR_FUNCTION_TYPE);
+392: 
+393:     ObjectType REFERENCE_ERROR_TYPE =
+394:         REFERENCE_ERROR_FUNCTION_TYPE.getInstanceType();
+395:     registerNativeType(JSTypeNative.REFERENCE_ERROR_TYPE, REFERENCE_ERROR_TYPE);
+396: 
+397:     // SyntaxError
+398:     FunctionType SYNTAX_ERROR_FUNCTION_TYPE =
+399:         new ErrorFunctionType(this, "SyntaxError");
+400:     SYNTAX_ERROR_FUNCTION_TYPE.setPrototypeBasedOn(ERROR_TYPE);
+401:     registerNativeType(
+402:         JSTypeNative.SYNTAX_ERROR_FUNCTION_TYPE, SYNTAX_ERROR_FUNCTION_TYPE);
+403: 
+404:     ObjectType SYNTAX_ERROR_TYPE = SYNTAX_ERROR_FUNCTION_TYPE.getInstanceType();
+405:     registerNativeType(JSTypeNative.SYNTAX_ERROR_TYPE, SYNTAX_ERROR_TYPE);
+406: 
+407:     // TypeError
+408:     FunctionType TYPE_ERROR_FUNCTION_TYPE =
+409:         new ErrorFunctionType(this, "TypeError");
+410:     TYPE_ERROR_FUNCTION_TYPE.setPrototypeBasedOn(ERROR_TYPE);
+411:     registerNativeType(
+412:         JSTypeNative.TYPE_ERROR_FUNCTION_TYPE, TYPE_ERROR_FUNCTION_TYPE);
+413: 
+414:     ObjectType TYPE_ERROR_TYPE = TYPE_ERROR_FUNCTION_TYPE.getInstanceType();
+415:     registerNativeType(JSTypeNative.TYPE_ERROR_TYPE, TYPE_ERROR_TYPE);
+416: 
+417:     // URIError
+418:     FunctionType URI_ERROR_FUNCTION_TYPE =
+419:         new ErrorFunctionType(this, "URIError");
+420:     URI_ERROR_FUNCTION_TYPE.setPrototypeBasedOn(ERROR_TYPE);
+421:     registerNativeType(
+422:         JSTypeNative.URI_ERROR_FUNCTION_TYPE, URI_ERROR_FUNCTION_TYPE);
+423: 
+424:     ObjectType URI_ERROR_TYPE = URI_ERROR_FUNCTION_TYPE.getInstanceType();
+425:     registerNativeType(JSTypeNative.URI_ERROR_TYPE, URI_ERROR_TYPE);
+426: 
+427:     // Number
+428:     FunctionType NUMBER_OBJECT_FUNCTION_TYPE =
+429:         new FunctionType(this, "Number", null,
+430:             createArrowType(createParameters(false, ALL_TYPE), NUMBER_TYPE),
+431:             null, null, true, true);
+432:     ObjectType numberPrototype = NUMBER_OBJECT_FUNCTION_TYPE.getPrototype();
+433:     registerNativeType(
+434:         JSTypeNative.NUMBER_OBJECT_FUNCTION_TYPE, NUMBER_OBJECT_FUNCTION_TYPE);
+435: 
+436:     ObjectType NUMBER_OBJECT_TYPE =
+437:         NUMBER_OBJECT_FUNCTION_TYPE.getInstanceType();
+438:     registerNativeType(JSTypeNative.NUMBER_OBJECT_TYPE, NUMBER_OBJECT_TYPE);
+439: 
+440:     // RegExp
+441:     FunctionType REGEXP_FUNCTION_TYPE =
+442:       new FunctionType(this, "RegExp", null,
+443:           createArrowType(createOptionalParameters(ALL_TYPE, ALL_TYPE)),
+444:           null, null, true, true);
+445:     REGEXP_FUNCTION_TYPE.getInternalArrowType().returnType =
+446:         REGEXP_FUNCTION_TYPE.getInstanceType();
+447: 
+448:     ObjectType regexpPrototype = REGEXP_FUNCTION_TYPE.getPrototype();
+449:     registerNativeType(JSTypeNative.REGEXP_FUNCTION_TYPE, REGEXP_FUNCTION_TYPE);
+450: 
+451:     ObjectType REGEXP_TYPE = REGEXP_FUNCTION_TYPE.getInstanceType();
+452:     registerNativeType(JSTypeNative.REGEXP_TYPE, REGEXP_TYPE);
+453: 
+454:     // String
+455:     FunctionType STRING_OBJECT_FUNCTION_TYPE =
+456:         new FunctionType(this, "String", null,
+457:             createArrowType(createParameters(false, ALL_TYPE), STRING_TYPE),
+458:             null, null, true, true);
+459:     ObjectType stringPrototype = STRING_OBJECT_FUNCTION_TYPE.getPrototype();
+460:     registerNativeType(
+461:         JSTypeNative.STRING_OBJECT_FUNCTION_TYPE, STRING_OBJECT_FUNCTION_TYPE);
+462: 
+463:     ObjectType STRING_OBJECT_TYPE =
+464:         STRING_OBJECT_FUNCTION_TYPE.getInstanceType();
+465:     registerNativeType(
+466:         JSTypeNative.STRING_OBJECT_TYPE, STRING_OBJECT_TYPE);
+467: 
+468:     // (Object,string,number)
+469:     JSType OBJECT_NUMBER_STRING =
+470:         createUnionType(OBJECT_TYPE, NUMBER_TYPE, STRING_TYPE);
+471:     registerNativeType(JSTypeNative.OBJECT_NUMBER_STRING, OBJECT_NUMBER_STRING);
+472: 
+473:     // (Object,string,number,boolean)
+474:     JSType OBJECT_NUMBER_STRING_BOOLEAN =
+475:         createUnionType(OBJECT_TYPE, NUMBER_TYPE, STRING_TYPE, BOOLEAN_TYPE);
+476:     registerNativeType(JSTypeNative.OBJECT_NUMBER_STRING_BOOLEAN,
+477:         OBJECT_NUMBER_STRING_BOOLEAN);
+478: 
+479:     // (string,number,boolean)
+480:     JSType NUMBER_STRING_BOOLEAN =
+481:         createUnionType(NUMBER_TYPE, STRING_TYPE, BOOLEAN_TYPE);
+482:     registerNativeType(JSTypeNative.NUMBER_STRING_BOOLEAN,
+483:         NUMBER_STRING_BOOLEAN);
+484: 
+485:     // (string,number)
+486:     JSType NUMBER_STRING = createUnionType(NUMBER_TYPE, STRING_TYPE);
+487:     registerNativeType(JSTypeNative.NUMBER_STRING, NUMBER_STRING);
+488: 
+489:     // Native object properties are filled in by externs...
+490: 
+491:     // (String, string)
+492:     JSType STRING_VALUE_OR_OBJECT_TYPE =
+493:         createUnionType(STRING_OBJECT_TYPE, STRING_TYPE);
+494:     registerNativeType(
+495:         JSTypeNative.STRING_VALUE_OR_OBJECT_TYPE, STRING_VALUE_OR_OBJECT_TYPE);
+496: 
+497:     // (Number, number)
+498:     JSType NUMBER_VALUE_OR_OBJECT_TYPE =
+499:         createUnionType(NUMBER_OBJECT_TYPE, NUMBER_TYPE);
+500:     registerNativeType(
+501:         JSTypeNative.NUMBER_VALUE_OR_OBJECT_TYPE, NUMBER_VALUE_OR_OBJECT_TYPE);
+502: 
+503:     // unknown function type, i.e. (?...) -> ?
+504:     FunctionType U2U_FUNCTION_TYPE =
+505:         createFunctionType(UNKNOWN_TYPE, true, UNKNOWN_TYPE);
+506:     registerNativeType(JSTypeNative.U2U_FUNCTION_TYPE, U2U_FUNCTION_TYPE);
+507: 
+508:     // unknown constructor type, i.e. (?...) -> ? with the NoObject type
+509:     // as instance type
+510:     FunctionType U2U_CONSTRUCTOR_TYPE =
+511:         // This is equivalent to
+512:         // createConstructorType(UNKNOWN_TYPE, true, UNKNOWN_TYPE), but,
+513:         // in addition, overrides getInstanceType() to return the NoObject type
+514:         // instead of a new anonymous object.
+515:         new FunctionType(this, "Function", null,
+516:             createArrowType(
+517:                 createParametersWithVarArgs(UNKNOWN_TYPE),
+518:                 UNKNOWN_TYPE),
+519:             NO_OBJECT_TYPE, null, true, true) {
+520:           private static final long serialVersionUID = 1L;
+521: 
+522:           @Override public FunctionType getConstructor() {
+523:             return registry.getNativeFunctionType(
+524:                 JSTypeNative.FUNCTION_FUNCTION_TYPE);
+525:           }
+526:         };
+527: 
+528:     // The U2U_CONSTRUCTOR is weird, because it's the supertype of its
+529:     // own constructor.
+530:     registerNativeType(JSTypeNative.U2U_CONSTRUCTOR_TYPE, U2U_CONSTRUCTOR_TYPE);
+531:     registerNativeType(
+532:         JSTypeNative.FUNCTION_INSTANCE_TYPE, U2U_CONSTRUCTOR_TYPE);
+533: 
+534:     FUNCTION_FUNCTION_TYPE.setInstanceType(U2U_CONSTRUCTOR_TYPE);
+535:     U2U_CONSTRUCTOR_TYPE.setImplicitPrototype(FUNCTION_PROTOTYPE);
+536: 
+537:     // least function type, i.e. (All...) -> NoType
+538:     FunctionType LEAST_FUNCTION_TYPE =
+539:         createFunctionType(NO_TYPE, true, ALL_TYPE);
+540:     registerNativeType(JSTypeNative.LEAST_FUNCTION_TYPE, LEAST_FUNCTION_TYPE);
+541: 
+542:     // the 'this' object in the global scope
+543:     FunctionType GLOBAL_THIS_CTOR =
+544:         new FunctionType(this, "global this", null,
+545:             createArrowType(createParameters(false, ALL_TYPE), NUMBER_TYPE),
+546:             null, null, true, true);
+547:     ObjectType GLOBAL_THIS = GLOBAL_THIS_CTOR.getInstanceType();
+548:     registerNativeType(JSTypeNative.GLOBAL_THIS, GLOBAL_THIS);
+549: 
+550:     // greatest function type, i.e. (NoType...) -> All
+551:     FunctionType GREATEST_FUNCTION_TYPE =
+552:       createFunctionType(ALL_TYPE, true, NO_TYPE);
+553:     registerNativeType(JSTypeNative.GREATEST_FUNCTION_TYPE,
+554:         GREATEST_FUNCTION_TYPE);
+555: 
+556:     // Register the prototype property. See the comments below in
+557:     // registerPropertyOnType about the bootstrapping process.
+558:     registerPropertyOnType("prototype", OBJECT_FUNCTION_TYPE);
+559:   }
+
+[28] com.google.javascript.rhino.jstype.PrototypeObjectType#isNativeObjectType  (lines 510-513)
+510:   @Override
+511:   public boolean isNativeObjectType() {
+512:     return nativeType;
+513:   }
+
+[29] com.google.javascript.rhino.jstype.UnionTypeBuilder#addAlternate  (lines 121-212)
+121:   UnionTypeBuilder addAlternate(JSType alternate) {
+122:     // build() returns the bottom type by default, so we can
+123:     // just bail out early here.
+124:     if (alternate.isNoType()) {
+125:       return this;
+126:     }
+127: 
+128:     isAllType = isAllType || alternate.isAllType();
+129: 
+130:     boolean isAlternateUnknown = alternate instanceof UnknownType;
+131:     isNativeUnknownType = isNativeUnknownType || isAlternateUnknown;
+132:     if (isAlternateUnknown) {
+133:       areAllUnknownsChecked = areAllUnknownsChecked &&
+134:           alternate.isCheckedUnknownType();
+135:     }
+136:     if (!isAllType && !isNativeUnknownType) {
+137:       if (alternate.isUnionType()) {
+138:         UnionType union = alternate.toMaybeUnionType();
+139:         for (JSType unionAlt : union.getAlternates()) {
+140:           addAlternate(unionAlt);
+141:         }
+142:       } else {
+143:         if (alternates.size() > maxUnionSize) {
+144:           return this;
+145:         }
+146: 
+147:         // Function types are special, because they have their
+148:         // own bizarro sub-lattice. See the commants on
+149:         // FunctionType#supAndInf helper and above at functionTypePosition.
+150:         if (alternate.isFunctionType() && functionTypePosition != -1) {
+151:           // See the comments on functionTypePosition above.
+152:           FunctionType other =
+153:               alternates.get(functionTypePosition).toMaybeFunctionType();
+154:           FunctionType supremum =
+155:               alternate.toMaybeFunctionType().supAndInfHelper(other, true);
+156:           alternates.set(functionTypePosition, supremum);
+157:           result = null;
+158:           return this;
+159:         }
+160: 
+161:         // Look through the alternates we've got so far,
+162:         // and check if any of them are duplicates of
+163:         // one another.
+164:         int currentIndex = 0;
+165:         Iterator<JSType> it = alternates.iterator();
+166:         while (it.hasNext()) {
+167:           JSType current = it.next();
+168: 
+169:           // Unknown and NoResolved types may just be names that haven't
+170:           // been resolved yet. So keep these in the union, and just use
+171:           // equality checking for simple de-duping.
+172:           if (alternate.isUnknownType() ||
+173:               current.isUnknownType() ||
+174:               alternate.isNoResolvedType() ||
+175:               current.isNoResolvedType()) {
+176:             if (alternate.isEquivalentTo(current)) {
+177:               // Alternate is unnecessary.
+178:               return this;
+179:             }
+180:           } else {
+181:             if (alternate.isSubtype(current)) {
+182:               // Alternate is unnecessary.
+183:               return this;
+184:             } else if (current.isSubtype(alternate)) {
+185:               // Alternate makes current obsolete
+186:               it.remove();
+187: 
+188:               if (currentIndex == functionTypePosition) {
+189:                 functionTypePosition = -1;
+190:               } else if (currentIndex < functionTypePosition) {
+191:                 functionTypePosition--;
+192:                 currentIndex--;
+193:               }
+194:             }
+195:           }
+196:           currentIndex++;
+197:         }
+198: 
+199:         if (alternate.isFunctionType()) {
+200:           // See the comments on functionTypePosition above.
+201:           Preconditions.checkState(functionTypePosition == -1);
+202:           functionTypePosition = alternates.size();
+203:         }
+204: 
+205:         alternates.add(alternate);
+206:         result = null; // invalidate the memoized result
+207:       }
+208:     } else {
+209:       result = null;
+210:     }
+211:     return this;
+212:   }
+
+[30] com.google.javascript.rhino.jstype.ProxyObjectType#toStringHelper  (lines 256-259)
+256:   @Override
+257:   String toStringHelper(boolean forAnnotations) {
+258:     return referencedType.toStringHelper(forAnnotations);
+259:   }
+
+[31] com.google.javascript.rhino.jstype.PrototypeObjectType#isSubtype  (lines 443-491)
+443:   @Override
+444:   public boolean isSubtype(JSType that) {
+445:     if (JSType.isSubtypeHelper(this, that)) {
+446:       return true;
+447:     }
+448: 
+449:     // Union types
+450:     if (that.isUnionType()) {
+451:       // The static {@code JSType.isSubtype} check already decomposed
+452:       // union types, so we don't need to check those again.
+453:       return false;
+454:     }
+455: 
+456:     // record types
+457:     if (that.isRecordType()) {
+458:       return RecordType.isSubtype(this, that.toMaybeRecordType());
+459:     }
+460: 
+461:     // Interfaces
+462:     // Find all the interfaces implemented by this class and compare each one
+463:     // to the interface instance.
+464:     ObjectType thatObj = that.toObjectType();
+465:     ObjectType thatCtor = thatObj == null ? null : thatObj.getConstructor();
+466:     if (thatCtor != null && thatCtor.isInterface()) {
+467:       Iterable<ObjectType> thisInterfaces = getCtorImplementedInterfaces();
+468:       for (ObjectType thisInterface : thisInterfaces) {
+469:         if (thisInterface.isSubtype(that)) {
+470:           return true;
+471:         }
+472:       }
+473:     }
+474: 
+475:     if (getConstructor() != null && getConstructor().isInterface()) {
+476:       for (ObjectType thisInterface : getCtorExtendedInterfaces()) {
+477:         if (thisInterface.isSubtype(that)) {
+478:           return true;
+479:         }
+480:       }
+481:     }
+482: 
+483:     // other prototype based objects
+484:     if (isUnknownType() || implicitPrototypeChainIsUnknown()) {
+485:       // If unsure, say 'yes', to avoid spurious warnings.
+486:       // TODO(user): resolve the prototype chain completely in all cases,
+487:       // to avoid guessing.
+488:       return true;
+489:     }
+490:     return this.isImplicitPrototype(thatObj);
+491:   }
+
+[32] com.google.javascript.rhino.jstype.RecordType#RecordType  (lines 78-93)
+78:   RecordType(JSTypeRegistry registry, Map<String, RecordProperty> properties) {
+79:     super(registry, null, null);
+80:     setPrettyPrint(true);
+81: 
+82:     for (String property : properties.keySet()) {
+83:       RecordProperty prop = properties.get(property);
+84:       if (prop == null) {
+85:         throw new IllegalStateException(
+86:             "RecordProperty associated with a property should not be null!");
+87:       }
+88:       defineDeclaredProperty(property, prop.getType(), prop.getPropertyNode());
+89:     }
+90: 
+91:     // Freeze the record type.
+92:     isFrozen = true;
+93:   }
+
+[33] com.google.javascript.rhino.jstype.ProxyObjectType#setReferencedType  (lines 84-91)
+84:   void setReferencedType(JSType referencedType) {
+85:     this.referencedType = referencedType;
+86:     if (referencedType instanceof ObjectType) {
+87:       this.referencedObjType = (ObjectType) referencedType;
+88:     } else {
+89:       this.referencedObjType = null;
+90:     }
+91:   }
+
+[34] com.google.javascript.rhino.jstype.PrototypeObjectType#getSlot  (lines 127-146)
+127:   @Override
+128:   public Property getSlot(String name) {
+129:     if (properties.containsKey(name)) {
+130:       return properties.get(name);
+131:     }
+132:     ObjectType implicitPrototype = getImplicitPrototype();
+133:     if (implicitPrototype != null) {
+134:       Property prop = implicitPrototype.getSlot(name);
+135:       if (prop != null) {
+136:         return prop;
+137:       }
+138:     }
+139:     for (ObjectType interfaceType : getCtorExtendedInterfaces()) {
+140:       Property prop = interfaceType.getSlot(name);
+141:       if (prop != null) {
+142:         return prop;
+143:       }
+144:     }
+145:     return null;
+146:   }
+
+[35] com.google.javascript.rhino.jstype.FunctionParamBuilder#hasOptionalOrVarArgs  (lines 133-137)
+133:   private boolean hasOptionalOrVarArgs() {
+134:     Node lastChild = root.getLastChild();
+135:     return lastChild != null &&
+136:         (lastChild.isOptionalArg() || lastChild.isVarArgs());
+137:   }
+
+[36] com.google.javascript.rhino.jstype.RecordTypeBuilder#getPropertyNode  (lines 105-107)
+105:     public Node getPropertyNode() {
+106:       return propertyNode;
+107:     }
+
+[37] com.google.javascript.rhino.jstype.JSTypeRegistry#getNativeFunctionType  (lines 882-884)
+882:   public FunctionType getNativeFunctionType(JSTypeNative typeId) {
+883:     return (FunctionType) getNativeType(typeId);
+884:   }
+
+[38] com.google.javascript.rhino.jstype.FunctionType#getInternalArrowType  (lines 274-276)
+274:   ArrowType getInternalArrowType() {
+275:     return call;
+276:   }
+
+[39] com.google.javascript.rhino.jstype.PrototypeObjectType#getPropertiesCount  (lines 151-164)
+151:   @Override
+152:   public int getPropertiesCount() {
+153:     ObjectType implicitPrototype = getImplicitPrototype();
+154:     if (implicitPrototype == null) {
+155:       return this.properties.size();
+156:     }
+157:     int localCount = 0;
+158:     for (String property : properties.keySet()) {
+159:       if (!implicitPrototype.hasProperty(property)) {
+160:         localCount++;
+161:       }
+162:     }
+163:     return implicitPrototype.getPropertiesCount() + localCount;
+164:   }
+
+[40] com.google.javascript.rhino.jstype.FunctionType#hasCachedValues  (lines 1079-1082)
+1079:   @Override
+1080:   public boolean hasCachedValues() {
+1081:     return prototypeSlot != null || super.hasCachedValues();
+1082:   }
+
+[41] com.google.javascript.rhino.jstype.RecordTypeBuilder#RecordTypeBuilder  (lines 57-59)
+57:   public RecordTypeBuilder(JSTypeRegistry registry) {
+58:     this.registry = registry;
+59:   }
+
+[42] com.google.javascript.rhino.jstype.FunctionType#getPrototype  (lines 308-320)
+308:   public ObjectType getPrototype() {
+309:     // lazy initialization of the prototype field
+310:     if (prototypeSlot == null) {
+311:       setPrototype(
+312:           new PrototypeObjectType(
+313:               registry,
+314:               this.getReferenceName() + ".prototype",
+315:               registry.getNativeObjectType(OBJECT_TYPE),
+316:               isNativeObjectType()),
+317:           null);
+318:     }
+319:     return (ObjectType) prototypeSlot.getType();
+320:   }
+
+[43] com.google.javascript.rhino.jstype.RecordTypeBuilder#RecordProperty  (lines 96-99)
+96:     RecordProperty(JSType type, Node propertyNode) {
+97:       this.type = type;
+98:       this.propertyNode = propertyNode;
+99:     }
+
+[44] com.google.javascript.rhino.jstype.PrototypeObjectType#PrototypeObjectType  (lines 113-125)
+113:   PrototypeObjectType(JSTypeRegistry registry, String className,
+114:       ObjectType implicitPrototype, boolean nativeType) {
+115:     super(registry);
+116:     this.properties = Maps.newTreeMap();
+117:     this.className = className;
+118:     this.nativeType = nativeType;
+119:     if (nativeType || implicitPrototype != null) {
+120:       setImplicitPrototype(implicitPrototype);
+121:     } else {
+122:       setImplicitPrototype(
+123:           registry.getNativeObjectType(JSTypeNative.OBJECT_TYPE));
+124:     }
+125:   }
+
+[45] com.google.javascript.rhino.jstype.ProxyObjectType#ProxyObjectType  (lines 63-66)
+63:   ProxyObjectType(JSTypeRegistry registry, JSType referencedType) {
+64:     super(registry);
+65:     setReferencedType(referencedType);
+66:   }
+
+[46] com.google.javascript.rhino.jstype.PrototypeObjectType#PrototypeObjectType  (lines 104-107)
+104:   PrototypeObjectType(JSTypeRegistry registry, String className,
+105:       ObjectType implicitPrototype) {
+106:     this(registry, className, implicitPrototype, false);
+107:   }
+
+[47] com.google.javascript.rhino.jstype.JSType#toAnnotationString  (lines 1164-1166)
+1164:   public final String toAnnotationString() {
+1165:     return toStringHelper(true);
+1166:   }
+
+[48] com.google.javascript.rhino.jstype.ObjectType#hasOwnDeclaredProperty  (lines 425-427)
+425:   boolean hasOwnDeclaredProperty(String name) {
+426:     return hasOwnProperty(name) && isPropertyTypeDeclared(name);
+427:   }
+
+[49] com.google.javascript.rhino.jstype.PrototypeObjectType#defineProperty  (lines 233-249)
+233:   @Override
+234:   boolean defineProperty(String name, JSType type, boolean inferred,
+235:       Node propertyNode) {
+236:     if (hasOwnDeclaredProperty(name)) {
+237:       return false;
+238:     }
+239:     Property newProp = new Property(
+240:         name, type, inferred, propertyNode);
+241:     Property oldProp = properties.get(name);
+242:     if (oldProp != null) {
+243:       // This is to keep previously inferred jsdoc info, e.g., in a
+244:       // replaceScript scenario.
+245:       newProp.setJSDocInfo(oldProp.getJSDocInfo());
+246:     }
+247:     properties.put(name, newProp);
+248:     return true;
+249:   }
+
+[50] com.google.javascript.rhino.jstype.PrototypeObjectType#hasReferenceName  (lines 438-441)
+438:   @Override
+439:   public boolean hasReferenceName() {
+440:     return className != null || ownerFunction != null;
+441:   }

@@ -1,0 +1,135 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.lang.text.ExtendedMessageFormatTest::testEscapedQuote_LANG_477
+java.lang.OutOfMemoryError: Java heap space
+	at java.util.Arrays.copyOf(Arrays.java:3332)
+	at java.lang.AbstractStringBuilder.ensureCapacityInternal(AbstractStringBuilder.java:124)
+	at java.lang.AbstractStringBuilder.append(AbstractStringBuilder.java:649)
+	at java.lang.StringBuffer.append(StringBuffer.java:381)
+	at org.apache.commons.lang.text.ExtendedMessageFormat.appendQuotedString(ExtendedMessageFormat.java:422)
+	at org.apache.commons.lang.text.ExtendedMessageFormat.applyPattern(ExtendedMessageFormat.java:158)
+	at org.apache.commons.lang.text.ExtendedMessageFormat.<init>(ExtendedMessageFormat.java:127)
+	at org.apache.commons.lang.text.ExtendedMessageFormat.<init>(ExtendedMessageFormat.java:112)
+	at org.apache.commons.lang.text.ExtendedMessageFormatTest.testEscapedQuote_LANG_477(ExtendedMessageFormatTest.java:100)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.lang.text.ExtendedMessageFormat#ExtendedMessageFormat  (lines 111-113)
+111:     public ExtendedMessageFormat(String pattern, Map registry) {
+112:         this(pattern, Locale.getDefault(), registry);
+113:     }
+
+[2] org.apache.commons.lang.text.ExtendedMessageFormat#ExtendedMessageFormat  (lines 123-128)
+123:     public ExtendedMessageFormat(String pattern, Locale locale, Map registry) {
+124:         super(DUMMY_PATTERN);
+125:         setLocale(locale);
+126:         this.registry = registry;
+127:         applyPattern(pattern);
+128:     }
+
+[3] org.apache.commons.lang.text.ExtendedMessageFormat#next  (lines 402-405)
+402:     private ParsePosition next(ParsePosition pos) {
+403:         pos.setIndex(pos.getIndex() + 1);
+404:         return pos;
+405:     }
+
+[4] org.apache.commons.lang.text.ExtendedMessageFormat#applyPattern  (lines 142-206)
+142:     public final void applyPattern(String pattern) {
+143:         if (registry == null) {
+144:             super.applyPattern(pattern);
+145:             toPattern = super.toPattern();
+146:             return;
+147:         }
+148:         ArrayList foundFormats = new ArrayList();
+149:         ArrayList foundDescriptions = new ArrayList();
+150:         StringBuffer stripCustom = new StringBuffer(pattern.length());
+151: 
+152:         ParsePosition pos = new ParsePosition(0);
+153:         char[] c = pattern.toCharArray();
+154:         int fmtCount = 0;
+155:         while (pos.getIndex() < pattern.length()) {
+156:             switch (c[pos.getIndex()]) {
+157:             case QUOTE:
+158:                 appendQuotedString(pattern, pos, stripCustom, true);
+159:                 break;
+160:             case START_FE:
+161:                 fmtCount++;
+162:                 seekNonWs(pattern, pos);
+163:                 int start = pos.getIndex();
+164:                 int index = readArgumentIndex(pattern, next(pos));
+165:                 stripCustom.append(START_FE).append(index);
+166:                 seekNonWs(pattern, pos);
+167:                 Format format = null;
+168:                 String formatDescription = null;
+169:                 if (c[pos.getIndex()] == START_FMT) {
+170:                     formatDescription = parseFormatDescription(pattern,
+171:                             next(pos));
+172:                     format = getFormat(formatDescription);
+173:                     if (format == null) {
+174:                         stripCustom.append(START_FMT).append(formatDescription);
+175:                     }
+176:                 }
+177:                 foundFormats.add(format);
+178:                 foundDescriptions.add(format == null ? null : formatDescription);
+179:                 Validate.isTrue(foundFormats.size() == fmtCount);
+180:                 Validate.isTrue(foundDescriptions.size() == fmtCount);
+181:                 if (c[pos.getIndex()] != END_FE) {
+182:                     throw new IllegalArgumentException(
+183:                             "Unreadable format element at position " + start);
+184:                 }
+185:                 // fall through
+186:             default:
+187:                 stripCustom.append(c[pos.getIndex()]);
+188:                 next(pos);
+189:             }
+190:         }
+191:         super.applyPattern(stripCustom.toString());
+192:         toPattern = insertFormats(super.toPattern(), foundDescriptions);
+193:         if (containsElements(foundFormats)) {
+194:             Format[] origFormats = getFormats();
+195:             // only loop over what we know we have, as MessageFormat on Java 1.3 
+196:             // seems to provide an extra format element:
+197:             int i = 0;
+198:             for (Iterator it = foundFormats.iterator(); it.hasNext(); i++) {
+199:                 Format f = (Format) it.next();
+200:                 if (f != null) {
+201:                     origFormats[i] = f;
+202:                 }
+203:             }
+204:             super.setFormats(origFormats);
+205:         }
+206:     }
+
+[5] org.apache.commons.lang.text.ExtendedMessageFormat#appendQuotedString  (lines 417-444)
+417:     private StringBuffer appendQuotedString(String pattern, ParsePosition pos,
+418:             StringBuffer appendTo, boolean escapingOn) {
+419:         int start = pos.getIndex();
+420:         char[] c = pattern.toCharArray();
+421:         if (escapingOn && c[start] == QUOTE) {
+422:             return appendTo == null ? null : appendTo.append(QUOTE);
+423:         }
+424:         int lastHold = start;
+425:         for (int i = pos.getIndex(); i < pattern.length(); i++) {
+426:             if (escapingOn && pattern.substring(i).startsWith(ESCAPED_QUOTE)) {
+427:                 appendTo.append(c, lastHold, pos.getIndex() - lastHold).append(
+428:                         QUOTE);
+429:                 pos.setIndex(i + ESCAPED_QUOTE.length());
+430:                 lastHold = pos.getIndex();
+431:                 continue;
+432:             }
+433:             switch (c[pos.getIndex()]) {
+434:             case QUOTE:
+435:                 next(pos);
+436:                 return appendTo == null ? null : appendTo.append(c, lastHold,
+437:                         pos.getIndex() - lastHold);
+438:             default:
+439:                 next(pos);
+440:             }
+441:         }
+442:         throw new IllegalArgumentException(
+443:                 "Unterminated quoted string at position " + start);
+444:     }

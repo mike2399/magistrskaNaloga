@@ -1,0 +1,120 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.lang3.text.translate.NumericEntityUnescaperTest::testUnfinishedEntity
+java.lang.StringIndexOutOfBoundsException: String index out of range: 19
+	at java.lang.String.charAt(String.java:658)
+	at org.apache.commons.lang3.text.translate.NumericEntityUnescaper.translate(NumericEntityUnescaper.java:54)
+	at org.apache.commons.lang3.text.translate.CharSequenceTranslator.translate(CharSequenceTranslator.java:86)
+	at org.apache.commons.lang3.text.translate.CharSequenceTranslator.translate(CharSequenceTranslator.java:59)
+	at org.apache.commons.lang3.text.translate.NumericEntityUnescaperTest.testUnfinishedEntity(NumericEntityUnescaperTest.java:51)
+--- org.apache.commons.lang3.text.translate.NumericEntityUnescaperTest::testOutOfBounds
+java.lang.StringIndexOutOfBoundsException: String index out of range: 7
+	at java.lang.String.charAt(String.java:658)
+	at org.apache.commons.lang3.text.translate.NumericEntityUnescaper.translate(NumericEntityUnescaper.java:44)
+	at org.apache.commons.lang3.text.translate.CharSequenceTranslator.translate(CharSequenceTranslator.java:86)
+	at org.apache.commons.lang3.text.translate.CharSequenceTranslator.translate(CharSequenceTranslator.java:59)
+	at org.apache.commons.lang3.text.translate.NumericEntityUnescaperTest.testOutOfBounds(NumericEntityUnescaperTest.java:41)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.lang3.text.translate.CharSequenceTranslator#translate  (lines 53-65)
+53:     public final String translate(CharSequence input) {
+54:         if (input == null) {
+55:             return null;
+56:         }
+57:         try {
+58:             StringWriter writer = new StringWriter(input.length() * 2);
+59:             translate(input, writer);
+60:             return writer.toString();
+61:         } catch (IOException ioe) {
+62:             // this should never ever happen while writing to a StringWriter
+63:             throw new RuntimeException(ioe);
+64:         }
+65:     }
+
+[2] org.apache.commons.lang3.text.translate.CharSequenceTranslator#translate  (lines 75-105)
+75:     public final void translate(CharSequence input, Writer out) throws IOException {
+76:         if (out == null) {
+77:             throw new IllegalArgumentException("The Writer must not be null");
+78:         }
+79:         if (input == null) {
+80:             return;
+81:         }
+82:         int sz = Character.codePointCount(input, 0, input.length());
+83:         for (int i = 0; i < sz; i++) {
+84: 
+85:             // consumed is the number of codepoints consumed
+86:             int consumed = translate(input, i, out);
+87: 
+88:             if (consumed == 0) {
+89:                 out.write(Character.toChars(Character.codePointAt(input, i)));
+90:             } else {
+91:                 // contract with translators is that they have to understand codepoints 
+92:                 // and they just took care of a surrogate pair
+93:                 for (int j = 0; j < consumed; j++) {
+94:                     if (i < sz - 2) {
+95:                         i += Character.charCount(Character.codePointAt(input, i));
+96:                     } else {
+97:                         // If the String ends with a high surrogate, just add the 1 and don't worry about such things
+98:                         i++;
+99:                     }
+100:                 }
+101:                 // for loop will increment 1 anyway, so remove 1 to account for that
+102:                 i--;
+103:             }
+104:         }
+105:     }
+
+[3] org.apache.commons.lang3.text.translate.NumericEntityUnescaper#translate  (lines 36-83)
+36:     @Override
+37:     public int translate(CharSequence input, int index, Writer out) throws IOException {
+38:         int seqEnd = input.length();
+39:         // Uses -2 to ensure there is something after the &#
+40:         if(input.charAt(index) == '&' && index < seqEnd - 1 && input.charAt(index + 1) == '#') {
+41:             int start = index + 2;
+42:             boolean isHex = false;
+43: 
+44:             char firstChar = input.charAt(start);
+45:             if(firstChar == 'x' || firstChar == 'X') {
+46:                 start++;
+47:                 isHex = true;
+48: 
+49:                 // Check there's more than just an x after the &#
+50:             }
+51: 
+52:             int end = start;
+53:             // Note that this supports character codes without a ; on the end
+54:             while(input.charAt(end) != ';') 
+55:             {
+56:                 end++;
+57:             }
+58: 
+59:             int entityValue;
+60:             try {
+61:                 if(isHex) {
+62:                     entityValue = Integer.parseInt(input.subSequence(start, end).toString(), 16);
+63:                 } else {
+64:                     entityValue = Integer.parseInt(input.subSequence(start, end).toString(), 10);
+65:                 }
+66:             } catch(NumberFormatException nfe) {
+67:             System.err.println("FAIL: " + input.subSequence(start, end) + "[" + start +"]["+ end +"]");
+68:                 return 0;
+69:             }
+70: 
+71:             if(entityValue > 0xFFFF) {
+72:                 char[] chrs = Character.toChars(entityValue);
+73:                 out.write(chrs[0]);
+74:                 out.write(chrs[1]);
+75:             } else {
+76:                 out.write(entityValue);
+77:             }
+78: 
+79: 
+80:             return 2 + (end - start) + (isHex ? 1 : 0) + 1;
+81:         }
+82:         return 0;
+83:     }

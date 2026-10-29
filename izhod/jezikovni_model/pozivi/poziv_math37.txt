@@ -1,0 +1,734 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math.complex.ComplexTest::testTanhInf
+junit.framework.AssertionFailedError: expected:<1.0> but was:<NaN>
+	at org.apache.commons.math.TestUtils.assertSame(TestUtils.java:77)
+	at org.apache.commons.math.TestUtils.assertSame(TestUtils.java:85)
+	at org.apache.commons.math.complex.ComplexTest.testTanhInf(ComplexTest.java:1054)
+--- org.apache.commons.math.complex.ComplexTest::testTan
+junit.framework.AssertionFailedError: expected:<1.0> but was:<NaN>
+	at org.apache.commons.math.TestUtils.assertEquals(TestUtils.java:95)
+	at org.apache.commons.math.complex.ComplexTest.testTan(ComplexTest.java:1002)
+--- org.apache.commons.math.complex.ComplexTest::testTanh
+junit.framework.AssertionFailedError: expected:<1.0> but was:<NaN>
+	at org.apache.commons.math.TestUtils.assertEquals(TestUtils.java:94)
+	at org.apache.commons.math.complex.ComplexTest.testTanh(ComplexTest.java:1039)
+--- org.apache.commons.math.complex.ComplexTest::testTanInf
+junit.framework.AssertionFailedError: expected:<1.0> but was:<NaN>
+	at org.apache.commons.math.TestUtils.assertSame(TestUtils.java:77)
+	at org.apache.commons.math.TestUtils.assertSame(TestUtils.java:86)
+	at org.apache.commons.math.complex.ComplexTest.testTanInf(ComplexTest.java:1015)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math.util.FastMath#exp  (lines 806-808)
+806:     public static double exp(double x) {
+807:         return exp(x, 0.0, null);
+808:     }
+
+[2] org.apache.commons.math.complex.Complex#valueOf  (lines 1176-1183)
+1176:     public static Complex valueOf(double realPart,
+1177:                                   double imaginaryPart) {
+1178:         if (Double.isNaN(realPart) ||
+1179:             Double.isNaN(imaginaryPart)) {
+1180:             return NaN;
+1181:         }
+1182:         return new Complex(realPart, imaginaryPart);
+1183:     }
+
+[3] org.apache.commons.math.complex.Complex#getReal  (lines 384-386)
+384:     public double getReal() {
+385:         return real;
+386:     }
+
+[4] org.apache.commons.math.util.FastMathLiteralArrays#loadExpIntA  (lines 6141-6143)
+6141:     static double[] loadExpIntA() {
+6142:         return EXP_INT_A.clone();
+6143:     }
+
+[5] org.apache.commons.math.complex.Complex#tanh  (lines 1062-1072)
+1062:     public Complex tanh() {
+1063:         if (isNaN) {
+1064:             return NaN;
+1065:         }
+1066:         double real2 = 2.0 * real;
+1067:         double imaginary2 = 2.0 * imaginary;
+1068:         double d = FastMath.cosh(real2) + FastMath.cos(imaginary2);
+1069: 
+1070:         return createComplex(FastMath.sinh(real2) / d,
+1071:                              FastMath.sin(imaginary2) / d);
+1072:     }
+
+[6] org.apache.commons.math.util.FastMath#cos  (lines 2232-2310)
+2232:     public static double cos(double x) {
+2233:         int quadrant = 0;
+2234: 
+2235:         /* Take absolute value of the input */
+2236:         double xa = x;
+2237:         if (x < 0) {
+2238:             xa = -xa;
+2239:         }
+2240: 
+2241:         if (xa != xa || xa == Double.POSITIVE_INFINITY) {
+2242:             return Double.NaN;
+2243:         }
+2244: 
+2245:         /* Perform any argument reduction */
+2246:         double xb = 0;
+2247:         if (xa > 3294198.0) {
+2248:             // PI * (2**20)
+2249:             // Argument too big for CodyWaite reduction.  Must use
+2250:             // PayneHanek.
+2251:             double reduceResults[] = new double[3];
+2252:             reducePayneHanek(xa, reduceResults);
+2253:             quadrant = ((int) reduceResults[0]) & 3;
+2254:             xa = reduceResults[1];
+2255:             xb = reduceResults[2];
+2256:         } else if (xa > 1.5707963267948966) {
+2257:             /* Inline the Cody/Waite reduction for performance */
+2258: 
+2259:             // Estimate k
+2260:             //k = (int)(xa / 1.5707963267948966);
+2261:             int k = (int)(xa * 0.6366197723675814);
+2262: 
+2263:             // Compute remainder
+2264:             double remA;
+2265:             double remB;
+2266:             while (true) {
+2267:                 double a = -k * 1.570796251296997;
+2268:                 remA = xa + a;
+2269:                 remB = -(remA - xa - a);
+2270: 
+2271:                 a = -k * 7.549789948768648E-8;
+2272:                 double b = remA;
+2273:                 remA = a + b;
+2274:                 remB += -(remA - b - a);
+2275: 
+2276:                 a = -k * 6.123233995736766E-17;
+2277:                 b = remA;
+2278:                 remA = a + b;
+2279:                 remB += -(remA - b - a);
+2280: 
+2281:                 if (remA > 0.0) {
+2282:                     break;
+2283:                 }
+2284: 
+2285:                 // Remainder is negative, so decrement k and try again.
+2286:                 // This should only happen if the input is very close
+2287:                 // to an even multiple of pi/2
+2288:                 k--;
+2289:             }
+2290:             quadrant = k & 3;
+2291:             xa = remA;
+2292:             xb = remB;
+2293:         }
+2294: 
+2295:         //if (negative)
+2296:         //  quadrant = (quadrant + 2) % 4;
+2297: 
+2298:         switch (quadrant) {
+2299:             case 0:
+2300:                 return cosQ(xa, xb);
+2301:             case 1:
+2302:                 return -sinQ(xa, xb);
+2303:             case 2:
+2304:                 return -cosQ(xa, xb);
+2305:             case 3:
+2306:                 return sinQ(xa, xb);
+2307:             default:
+2308:                 return Double.NaN;
+2309:         }
+2310:     }
+
+[7] org.apache.commons.math.complex.Complex#tan  (lines 1017-1028)
+1017:     public Complex tan() {
+1018:         if (isNaN) {
+1019:             return NaN;
+1020:         }
+1021: 
+1022:         double real2 = 2.0 * real;
+1023:         double imaginary2 = 2.0 * imaginary;
+1024:         double d = FastMath.cos(real2) + FastMath.cosh(imaginary2);
+1025: 
+1026:         return createComplex(FastMath.sin(real2) / d,
+1027:                              FastMath.sinh(imaginary2) / d);
+1028:     }
+
+[8] org.apache.commons.math.complex.Complex#getImaginary  (lines 375-377)
+375:     public double getImaginary() {
+376:         return imaginary;
+377:     }
+
+[9] org.apache.commons.math.complex.Complex#Complex  (lines 98-105)
+98:     public Complex(double real, double imaginary) {
+99:         this.real = real;
+100:         this.imaginary = imaginary;
+101: 
+102:         isNaN = Double.isNaN(real) || Double.isNaN(imaginary);
+103:         isInfinite = !isNaN &&
+104:             (Double.isInfinite(real) || Double.isInfinite(imaginary));
+105:     }
+
+[10] org.apache.commons.math.util.FastMathLiteralArrays#loadExpFracB  (lines 6165-6167)
+6165:     static double[] loadExpFracB() {
+6166:         return EXP_FRAC_B.clone();
+6167:     }
+
+[11] org.apache.commons.math.util.FastMath#sinQ  (lines 1626-1741)
+1626:     private static double sinQ(double xa, double xb) {
+1627:         int idx = (int) ((xa * 8.0) + 0.5);
+1628:         final double epsilon = xa - EIGHTHS[idx]; //idx*0.125;
+1629: 
+1630:         // Table lookups
+1631:         final double sintA = SINE_TABLE_A[idx];
+1632:         final double sintB = SINE_TABLE_B[idx];
+1633:         final double costA = COSINE_TABLE_A[idx];
+1634:         final double costB = COSINE_TABLE_B[idx];
+1635: 
+1636:         // Polynomial eval of sin(epsilon), cos(epsilon)
+1637:         double sinEpsA = epsilon;
+1638:         double sinEpsB = polySine(epsilon);
+1639:         final double cosEpsA = 1.0;
+1640:         final double cosEpsB = polyCosine(epsilon);
+1641: 
+1642:         // Split epsilon   xa + xb = x
+1643:         final double temp = sinEpsA * HEX_40000000;
+1644:         double temp2 = (sinEpsA + temp) - temp;
+1645:         sinEpsB +=  sinEpsA - temp2;
+1646:         sinEpsA = temp2;
+1647: 
+1648:         /* Compute sin(x) by angle addition formula */
+1649:         double result;
+1650: 
+1651:         /* Compute the following sum:
+1652:          *
+1653:          * result = sintA + costA*sinEpsA + sintA*cosEpsB + costA*sinEpsB +
+1654:          *          sintB + costB*sinEpsA + sintB*cosEpsB + costB*sinEpsB;
+1655:          *
+1656:          * Ranges of elements
+1657:          *
+1658:          * xxxtA   0            PI/2
+1659:          * xxxtB   -1.5e-9      1.5e-9
+1660:          * sinEpsA -0.0625      0.0625
+1661:          * sinEpsB -6e-11       6e-11
+1662:          * cosEpsA  1.0
+1663:          * cosEpsB  0           -0.0625
+1664:          *
+1665:          */
+1666: 
+1667:         //result = sintA + costA*sinEpsA + sintA*cosEpsB + costA*sinEpsB +
+1668:         //          sintB + costB*sinEpsA + sintB*cosEpsB + costB*sinEpsB;
+1669: 
+1670:         //result = sintA + sintA*cosEpsB + sintB + sintB * cosEpsB;
+1671:         //result += costA*sinEpsA + costA*sinEpsB + costB*sinEpsA + costB * sinEpsB;
+1672:         double a = 0;
+1673:         double b = 0;
+1674: 
+1675:         double t = sintA;
+1676:         double c = a + t;
+1677:         double d = -(c - a - t);
+1678:         a = c;
+1679:         b = b + d;
+1680: 
+1681:         t = costA * sinEpsA;
+1682:         c = a + t;
+1683:         d = -(c - a - t);
+1684:         a = c;
+1685:         b = b + d;
+1686: 
+1687:         b = b + sintA * cosEpsB + costA * sinEpsB;
+1688:         /*
+1689:     t = sintA*cosEpsB;
+1690:     c = a + t;
+1691:     d = -(c - a - t);
+1692:     a = c;
+1693:     b = b + d;
+1694: 
+1695:     t = costA*sinEpsB;
+1696:     c = a + t;
+1697:     d = -(c - a - t);
+1698:     a = c;
+1699:     b = b + d;
+1700:          */
+1701: 
+1702:         b = b + sintB + costB * sinEpsA + sintB * cosEpsB + costB * sinEpsB;
+1703:         /*
+1704:     t = sintB;
+1705:     c = a + t;
+1706:     d = -(c - a - t);
+1707:     a = c;
+1708:     b = b + d;
+1709: 
+1710:     t = costB*sinEpsA;
+1711:     c = a + t;
+1712:     d = -(c - a - t);
+1713:     a = c;
+1714:     b = b + d;
+1715: 
+1716:     t = sintB*cosEpsB;
+1717:     c = a + t;
+1718:     d = -(c - a - t);
+1719:     a = c;
+1720:     b = b + d;
+1721: 
+1722:     t = costB*sinEpsB;
+1723:     c = a + t;
+1724:     d = -(c - a - t);
+1725:     a = c;
+1726:     b = b + d;
+1727:          */
+1728: 
+1729:         if (xb != 0.0) {
+1730:             t = ((costA + costB) * (cosEpsA + cosEpsB) -
+1731:                  (sintA + sintB) * (sinEpsA + sinEpsB)) * xb;  // approximate cosine*xb
+1732:             c = a + t;
+1733:             d = -(c - a - t);
+1734:             a = c;
+1735:             b = b + d;
+1736:         }
+1737: 
+1738:         result = a + b;
+1739: 
+1740:         return result;
+1741:     }
+
+[12] org.apache.commons.math.util.FastMathLiteralArrays#loadExpFracA  (lines 6157-6159)
+6157:     static double[] loadExpFracA() {
+6158:         return EXP_FRAC_A.clone();
+6159:     }
+
+[13] org.apache.commons.math.util.FastMath#cosQ  (lines 1750-1759)
+1750:     private static double cosQ(double xa, double xb) {
+1751:         final double pi2a = 1.5707963267948966;
+1752:         final double pi2b = 6.123233995736766E-17;
+1753: 
+1754:         final double a = pi2a - xa;
+1755:         double b = -(a - pi2a + xa);
+1756:         b += pi2b - xb;
+1757: 
+1758:         return sinQ(a, b);
+1759:     }
+
+[14] org.apache.commons.math.util.FastMathLiteralArrays#loadExpIntB  (lines 6149-6151)
+6149:     static double[] loadExpIntB() {
+6150:         return EXP_INT_B.clone();
+6151:     }
+
+[15] org.apache.commons.math.util.FastMath#exp  (lines 817-932)
+817:     private static double exp(double x, double extra, double[] hiPrec) {
+818:         double intPartA;
+819:         double intPartB;
+820:         int intVal;
+821: 
+822:         /* Lookup exp(floor(x)).
+823:          * intPartA will have the upper 22 bits, intPartB will have the lower
+824:          * 52 bits.
+825:          */
+826:         if (x < 0.0) {
+827:             intVal = (int) -x;
+828: 
+829:             if (intVal > 746) {
+830:                 if (hiPrec != null) {
+831:                     hiPrec[0] = 0.0;
+832:                     hiPrec[1] = 0.0;
+833:                 }
+834:                 return 0.0;
+835:             }
+836: 
+837:             if (intVal > 709) {
+838:                 /* This will produce a subnormal output */
+839:                 final double result = exp(x+40.19140625, extra, hiPrec) / 285040095144011776.0;
+840:                 if (hiPrec != null) {
+841:                     hiPrec[0] /= 285040095144011776.0;
+842:                     hiPrec[1] /= 285040095144011776.0;
+843:                 }
+844:                 return result;
+845:             }
+846: 
+847:             if (intVal == 709) {
+848:                 /* exp(1.494140625) is nearly a machine number... */
+849:                 final double result = exp(x+1.494140625, extra, hiPrec) / 4.455505956692756620;
+850:                 if (hiPrec != null) {
+851:                     hiPrec[0] /= 4.455505956692756620;
+852:                     hiPrec[1] /= 4.455505956692756620;
+853:                 }
+854:                 return result;
+855:             }
+856: 
+857:             intVal++;
+858: 
+859:             intPartA = ExpIntTable.EXP_INT_TABLE_A[EXP_INT_TABLE_MAX_INDEX-intVal];
+860:             intPartB = ExpIntTable.EXP_INT_TABLE_B[EXP_INT_TABLE_MAX_INDEX-intVal];
+861: 
+862:             intVal = -intVal;
+863:         } else {
+864:             intVal = (int) x;
+865: 
+866:             if (intVal > 709) {
+867:                 if (hiPrec != null) {
+868:                     hiPrec[0] = Double.POSITIVE_INFINITY;
+869:                     hiPrec[1] = 0.0;
+870:                 }
+871:                 return Double.POSITIVE_INFINITY;
+872:             }
+873: 
+874:             intPartA = ExpIntTable.EXP_INT_TABLE_A[EXP_INT_TABLE_MAX_INDEX+intVal];
+875:             intPartB = ExpIntTable.EXP_INT_TABLE_B[EXP_INT_TABLE_MAX_INDEX+intVal];
+876:         }
+877: 
+878:         /* Get the fractional part of x, find the greatest multiple of 2^-10 less than
+879:          * x and look up the exp function of it.
+880:          * fracPartA will have the upper 22 bits, fracPartB the lower 52 bits.
+881:          */
+882:         final int intFrac = (int) ((x - intVal) * 1024.0);
+883:         final double fracPartA = ExpFracTable.EXP_FRAC_TABLE_A[intFrac];
+884:         final double fracPartB = ExpFracTable.EXP_FRAC_TABLE_B[intFrac];
+885: 
+886:         /* epsilon is the difference in x from the nearest multiple of 2^-10.  It
+887:          * has a value in the range 0 <= epsilon < 2^-10.
+888:          * Do the subtraction from x as the last step to avoid possible loss of percison.
+889:          */
+890:         final double epsilon = x - (intVal + intFrac / 1024.0);
+891: 
+892:         /* Compute z = exp(epsilon) - 1.0 via a minimax polynomial.  z has
+893:        full double precision (52 bits).  Since z < 2^-10, we will have
+894:        62 bits of precision when combined with the contant 1.  This will be
+895:        used in the last addition below to get proper rounding. */
+896: 
+897:         /* Remez generated polynomial.  Converges on the interval [0, 2^-10], error
+898:        is less than 0.5 ULP */
+899:         double z = 0.04168701738764507;
+900:         z = z * epsilon + 0.1666666505023083;
+901:         z = z * epsilon + 0.5000000000042687;
+902:         z = z * epsilon + 1.0;
+903:         z = z * epsilon + -3.940510424527919E-20;
+904: 
+905:         /* Compute (intPartA+intPartB) * (fracPartA+fracPartB) by binomial
+906:        expansion.
+907:        tempA is exact since intPartA and intPartB only have 22 bits each.
+908:        tempB will have 52 bits of precision.
+909:          */
+910:         double tempA = intPartA * fracPartA;
+911:         double tempB = intPartA * fracPartB + intPartB * fracPartA + intPartB * fracPartB;
+912: 
+913:         /* Compute the result.  (1+z)(tempA+tempB).  Order of operations is
+914:        important.  For accuracy add by increasing size.  tempA is exact and
+915:        much larger than the others.  If there are extra bits specified from the
+916:        pow() function, use them. */
+917:         final double tempC = tempB + tempA;
+918:         final double result;
+919:         if (extra != 0.0) {
+920:             result = tempC*extra*z + tempC*extra + tempC*z + tempB + tempA;
+921:         } else {
+922:             result = tempC*z + tempB + tempA;
+923:         }
+924: 
+925:         if (hiPrec != null) {
+926:             // If requesting high precision
+927:             hiPrec[0] = tempA;
+928:             hiPrec[1] = tempC*extra*z + tempC*extra + tempC*z + tempB;
+929:         }
+930: 
+931:         return result;
+932:     }
+
+[16] org.apache.commons.math.complex.Complex#createComplex  (lines 1164-1167)
+1164:     protected Complex createComplex(double realPart,
+1165:                                     double imaginaryPart) {
+1166:         return new Complex(realPart, imaginaryPart);
+1167:     }
+
+[17] org.apache.commons.math.util.FastMath#cosh  (lines 382-435)
+382:     public static double cosh(double x) {
+383:       if (x != x) {
+384:           return x;
+385:       }
+386: 
+387:       // cosh[z] = (exp(z) + exp(-z))/2
+388: 
+389:       // for numbers with magnitude 20 or so,
+390:       // exp(-z) can be ignored in comparison with exp(z)
+391: 
+392:       if (x > 20.0) {
+393:           return exp(x)/2.0;
+394:       }
+395: 
+396:       if (x < -20) {
+397:           return exp(-x)/2.0;
+398:       }
+399: 
+400:       double hiPrec[] = new double[2];
+401:       if (x < 0.0) {
+402:           x = -x;
+403:       }
+404:       exp(x, 0.0, hiPrec);
+405: 
+406:       double ya = hiPrec[0] + hiPrec[1];
+407:       double yb = -(ya - hiPrec[0] - hiPrec[1]);
+408: 
+409:       double temp = ya * HEX_40000000;
+410:       double yaa = ya + temp - temp;
+411:       double yab = ya - yaa;
+412: 
+413:       // recip = 1/y
+414:       double recip = 1.0/ya;
+415:       temp = recip * HEX_40000000;
+416:       double recipa = recip + temp - temp;
+417:       double recipb = recip - recipa;
+418: 
+419:       // Correct for rounding in division
+420:       recipb += (1.0 - yaa*recipa - yaa*recipb - yab*recipa - yab*recipb) * recip;
+421:       // Account for yb
+422:       recipb += -yb * recip * recip;
+423: 
+424:       // y = y + 1/y
+425:       temp = ya + recipa;
+426:       yb += -(temp - ya - recipa);
+427:       ya = temp;
+428:       temp = ya + recipb;
+429:       yb += -(temp - ya - recipb);
+430:       ya = temp;
+431: 
+432:       double result = ya + yb;
+433:       result *= 0.5;
+434:       return result;
+435:     }
+
+[18] org.apache.commons.math.util.FastMath#polySine  (lines 1586-1599)
+1586:     private static double polySine(final double x)
+1587:     {
+1588:         double x2 = x*x;
+1589: 
+1590:         double p = 2.7553817452272217E-6;
+1591:         p = p * x2 + -1.9841269659586505E-4;
+1592:         p = p * x2 + 0.008333333333329196;
+1593:         p = p * x2 + -0.16666666666666666;
+1594:         //p *= x2;
+1595:         //p *= x;
+1596:         p = p * x2 * x;
+1597: 
+1598:         return p;
+1599:     }
+
+[19] org.apache.commons.math.util.FastMath#sinh  (lines 441-550)
+441:     public static double sinh(double x) {
+442:       boolean negate = false;
+443:       if (x != x) {
+444:           return x;
+445:       }
+446: 
+447:       // sinh[z] = (exp(z) - exp(-z) / 2
+448: 
+449:       // for values of z larger than about 20,
+450:       // exp(-z) can be ignored in comparison with exp(z)
+451: 
+452:       if (x > 20.0) {
+453:           return exp(x)/2.0;
+454:       }
+455: 
+456:       if (x < -20) {
+457:           return -exp(-x)/2.0;
+458:       }
+459: 
+460:       if (x == 0) {
+461:           return x;
+462:       }
+463: 
+464:       if (x < 0.0) {
+465:           x = -x;
+466:           negate = true;
+467:       }
+468: 
+469:       double result;
+470: 
+471:       if (x > 0.25) {
+472:           double hiPrec[] = new double[2];
+473:           exp(x, 0.0, hiPrec);
+474: 
+475:           double ya = hiPrec[0] + hiPrec[1];
+476:           double yb = -(ya - hiPrec[0] - hiPrec[1]);
+477: 
+478:           double temp = ya * HEX_40000000;
+479:           double yaa = ya + temp - temp;
+480:           double yab = ya - yaa;
+481: 
+482:           // recip = 1/y
+483:           double recip = 1.0/ya;
+484:           temp = recip * HEX_40000000;
+485:           double recipa = recip + temp - temp;
+486:           double recipb = recip - recipa;
+487: 
+488:           // Correct for rounding in division
+489:           recipb += (1.0 - yaa*recipa - yaa*recipb - yab*recipa - yab*recipb) * recip;
+490:           // Account for yb
+491:           recipb += -yb * recip * recip;
+492: 
+493:           recipa = -recipa;
+494:           recipb = -recipb;
+495: 
+496:           // y = y + 1/y
+497:           temp = ya + recipa;
+498:           yb += -(temp - ya - recipa);
+499:           ya = temp;
+500:           temp = ya + recipb;
+501:           yb += -(temp - ya - recipb);
+502:           ya = temp;
+503: 
+504:           result = ya + yb;
+505:           result *= 0.5;
+506:       }
+507:       else {
+508:           double hiPrec[] = new double[2];
+509:           expm1(x, hiPrec);
+510: 
+511:           double ya = hiPrec[0] + hiPrec[1];
+512:           double yb = -(ya - hiPrec[0] - hiPrec[1]);
+513: 
+514:           /* Compute expm1(-x) = -expm1(x) / (expm1(x) + 1) */
+515:           double denom = 1.0 + ya;
+516:           double denomr = 1.0 / denom;
+517:           double denomb = -(denom - 1.0 - ya) + yb;
+518:           double ratio = ya * denomr;
+519:           double temp = ratio * HEX_40000000;
+520:           double ra = ratio + temp - temp;
+521:           double rb = ratio - ra;
+522: 
+523:           temp = denom * HEX_40000000;
+524:           double za = denom + temp - temp;
+525:           double zb = denom - za;
+526: 
+527:           rb += (ya - za*ra - za*rb - zb*ra - zb*rb) * denomr;
+528: 
+529:           // Adjust for yb
+530:           rb += yb*denomr;                        // numerator
+531:           rb += -ya * denomb * denomr * denomr;   // denominator
+532: 
+533:           // y = y - 1/y
+534:           temp = ya + ra;
+535:           yb += -(temp - ya - ra);
+536:           ya = temp;
+537:           temp = ya + rb;
+538:           yb += -(temp - ya - rb);
+539:           ya = temp;
+540: 
+541:           result = ya + yb;
+542:           result *= 0.5;
+543:       }
+544: 
+545:       if (negate) {
+546:           result = -result;
+547:       }
+548: 
+549:       return result;
+550:     }
+
+[20] org.apache.commons.math.util.FastMath#polyCosine  (lines 1607-1617)
+1607:     private static double polyCosine(double x) {
+1608:         double x2 = x*x;
+1609: 
+1610:         double p = 2.479773539153719E-5;
+1611:         p = p * x2 + -0.0013888888689039883;
+1612:         p = p * x2 + 0.041666666666621166;
+1613:         p = p * x2 + -0.49999999999999994;
+1614:         p *= x2;
+1615: 
+1616:         return p;
+1617:     }
+
+[21] org.apache.commons.math.util.FastMath#sin  (lines 2134-2225)
+2134:     public static double sin(double x) {
+2135:         boolean negative = false;
+2136:         int quadrant = 0;
+2137:         double xa;
+2138:         double xb = 0.0;
+2139: 
+2140:         /* Take absolute value of the input */
+2141:         xa = x;
+2142:         if (x < 0) {
+2143:             negative = true;
+2144:             xa = -xa;
+2145:         }
+2146: 
+2147:         /* Check for zero and negative zero */
+2148:         if (xa == 0.0) {
+2149:             long bits = Double.doubleToLongBits(x);
+2150:             if (bits < 0) {
+2151:                 return -0.0;
+2152:             }
+2153:             return 0.0;
+2154:         }
+2155: 
+2156:         if (xa != xa || xa == Double.POSITIVE_INFINITY) {
+2157:             return Double.NaN;
+2158:         }
+2159: 
+2160:         /* Perform any argument reduction */
+2161:         if (xa > 3294198.0) {
+2162:             // PI * (2**20)
+2163:             // Argument too big for CodyWaite reduction.  Must use
+2164:             // PayneHanek.
+2165:             double reduceResults[] = new double[3];
+2166:             reducePayneHanek(xa, reduceResults);
+2167:             quadrant = ((int) reduceResults[0]) & 3;
+2168:             xa = reduceResults[1];
+2169:             xb = reduceResults[2];
+2170:         } else if (xa > 1.5707963267948966) {
+2171:             /* Inline the Cody/Waite reduction for performance */
+2172: 
+2173:             // Estimate k
+2174:             //k = (int)(xa / 1.5707963267948966);
+2175:             int k = (int)(xa * 0.6366197723675814);
+2176: 
+2177:             // Compute remainder
+2178:             double remA;
+2179:             double remB;
+2180:             while (true) {
+2181:                 double a = -k * 1.570796251296997;
+2182:                 remA = xa + a;
+2183:                 remB = -(remA - xa - a);
+2184: 
+2185:                 a = -k * 7.549789948768648E-8;
+2186:                 double b = remA;
+2187:                 remA = a + b;
+2188:                 remB += -(remA - b - a);
+2189: 
+2190:                 a = -k * 6.123233995736766E-17;
+2191:                 b = remA;
+2192:                 remA = a + b;
+2193:                 remB += -(remA - b - a);
+2194: 
+2195:                 if (remA > 0.0) {
+2196:                     break;
+2197:                 }
+2198: 
+2199:                 // Remainder is negative, so decrement k and try again.
+2200:                 // This should only happen if the input is very close
+2201:                 // to an even multiple of pi/2
+2202:                 k--;
+2203:             }
+2204:             quadrant = k & 3;
+2205:             xa = remA;
+2206:             xb = remB;
+2207:         }
+2208: 
+2209:         if (negative) {
+2210:             quadrant ^= 2;  // Flip bit 1
+2211:         }
+2212: 
+2213:         switch (quadrant) {
+2214:             case 0:
+2215:                 return sinQ(xa, xb);
+2216:             case 1:
+2217:                 return cosQ(xa, xb);
+2218:             case 2:
+2219:                 return -sinQ(xa, xb);
+2220:             case 3:
+2221:                 return -cosQ(xa, xb);
+2222:             default:
+2223:                 return Double.NaN;
+2224:         }
+2225:     }

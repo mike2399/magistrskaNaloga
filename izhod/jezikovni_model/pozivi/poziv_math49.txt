@@ -1,0 +1,856 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math.linear.SparseRealVectorTest::testConcurrentModification
+org.apache.commons.math.MathRuntimeException$6: map has been modified while iterating
+	at org.apache.commons.math.MathRuntimeException.createConcurrentModificationException(MathRuntimeException.java:373)
+	at org.apache.commons.math.util.OpenIntToDoubleHashMap$Iterator.advance(OpenIntToDoubleHashMap.java:564)
+	at org.apache.commons.math.linear.OpenMapRealVector.ebeMultiply(OpenMapRealVector.java:372)
+	at org.apache.commons.math.linear.OpenMapRealVector.ebeMultiply(OpenMapRealVector.java:33)
+	at org.apache.commons.math.linear.SparseRealVectorTest.testConcurrentModification(SparseRealVectorTest.java:1021)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math.util.OpenIntToDoubleHashMap#findInsertionIndex  (lines 270-317)
+270:     private static int findInsertionIndex(final int[] keys, final byte[] states,
+271:                                           final int key, final int mask) {
+272:         final int hash = hashOf(key);
+273:         int index = hash & mask;
+274:         if (states[index] == FREE) {
+275:             return index;
+276:         } else if (states[index] == FULL && keys[index] == key) {
+277:             return changeIndexSign(index);
+278:         }
+279: 
+280:         int perturb = perturb(hash);
+281:         int j = index;
+282:         if (states[index] == FULL) {
+283:             while (true) {
+284:                 j = probe(perturb, j);
+285:                 index = j & mask;
+286:                 perturb >>= PERTURB_SHIFT;
+287: 
+288:                 if (states[index] != FULL || keys[index] == key) {
+289:                     break;
+290:                 }
+291:             }
+292:         }
+293: 
+294:         if (states[index] == FREE) {
+295:             return index;
+296:         } else if (states[index] == FULL) {
+297:             // due to the loop exit condition,
+298:             // if (states[index] == FULL) then keys[index] == key
+299:             return changeIndexSign(index);
+300:         }
+301: 
+302:         final int firstRemoved = index;
+303:         while (true) {
+304:             j = probe(perturb, j);
+305:             index = j & mask;
+306: 
+307:             if (states[index] == FREE) {
+308:                 return firstRemoved;
+309:             } else if (states[index] == FULL && keys[index] == key) {
+310:                 return changeIndexSign(index);
+311:             }
+312: 
+313:             perturb >>= PERTURB_SHIFT;
+314: 
+315:         }
+316: 
+317:     }
+
+[2] org.apache.commons.math.util.OpenIntToDoubleHashMap#Iterator  (lines 498-511)
+498:         private Iterator() {
+499: 
+500:             // preserve the modification count of the map to detect concurrent modifications later
+501:             referenceCount = count;
+502: 
+503:             // initialize current index
+504:             next = -1;
+505:             try {
+506:                 advance();
+507:             } catch (NoSuchElementException nsee) {
+508:                 // ignored
+509:             }
+510: 
+511:         }
+
+[3] org.apache.commons.math.linear.OpenMapRealVector#setEntry  (lines 662-669)
+662:     public void setEntry(int index, double value) {
+663:         checkIndex(index);
+664:         if (!isDefaultValue(value)) {
+665:             entries.put(index, value);
+666:         } else if (entries.containsKey(index)) {
+667:             entries.remove(index);
+668:         }
+669:     }
+
+[4] org.apache.commons.math.util.OpenIntToDoubleHashMap#OpenIntToDoubleHashMap  (lines 102-104)
+102:     public OpenIntToDoubleHashMap(final double missingEntries) {
+103:         this(DEFAULT_EXPECTED_SIZE, missingEntries);
+104:     }
+
+[5] org.apache.commons.math.util.OpenIntToDoubleHashMap#computeCapacity  (lines 152-162)
+152:     private static int computeCapacity(final int expectedSize) {
+153:         if (expectedSize == 0) {
+154:             return 1;
+155:         }
+156:         final int capacity   = (int) FastMath.ceil(expectedSize / LOAD_FACTOR);
+157:         final int powerOfTwo = Integer.highestOneBit(capacity);
+158:         if (powerOfTwo == capacity) {
+159:             return capacity;
+160:         }
+161:         return nextPowerOfTwo(capacity);
+162:     }
+
+[6] org.apache.commons.math.util.OpenIntToDoubleHashMap#OpenIntToDoubleHashMap  (lines 119-127)
+119:     public OpenIntToDoubleHashMap(final int expectedSize,
+120:                                   final double missingEntries) {
+121:         final int capacity = computeCapacity(expectedSize);
+122:         keys   = new int[capacity];
+123:         values = new double[capacity];
+124:         states = new byte[capacity];
+125:         this.missingEntries = missingEntries;
+126:         mask   = capacity - 1;
+127:     }
+
+[7] org.apache.commons.math.util.OpenIntToDoubleHashMap#remove  (lines 352-375)
+352:     public double remove(final int key) {
+353: 
+354:         final int hash  = hashOf(key);
+355:         int index = hash & mask;
+356:         if (containsKey(key, index)) {
+357:             return doRemove(index);
+358:         }
+359: 
+360:         if (states[index] == FREE) {
+361:             return missingEntries;
+362:         }
+363: 
+364:         int j = index;
+365:         for (int perturb = perturb(hash); states[index] != FREE; perturb >>= PERTURB_SHIFT) {
+366:             j = probe(perturb, j);
+367:             index = j & mask;
+368:             if (containsKey(key, index)) {
+369:                 return doRemove(index);
+370:             }
+371:         }
+372: 
+373:         return missingEntries;
+374: 
+375:     }
+
+[8] org.apache.commons.math.util.OpenIntToDoubleHashMap#put  (lines 409-430)
+409:     public double put(final int key, final double value) {
+410:         int index = findInsertionIndex(key);
+411:         double previous = missingEntries;
+412:         boolean newMapping = true;
+413:         if (index < 0) {
+414:             index = changeIndexSign(index);
+415:             previous = values[index];
+416:             newMapping = false;
+417:         }
+418:         keys[index]   = key;
+419:         states[index] = FULL;
+420:         values[index] = value;
+421:         if (newMapping) {
+422:             ++size;
+423:             if (shouldGrowTable()) {
+424:                 growTable();
+425:             }
+426:             ++count;
+427:         }
+428:         return previous;
+429: 
+430:     }
+
+[9] org.apache.commons.math.util.FastMath#floor  (lines 3721-3742)
+3721:     public static double floor(double x) {
+3722:         long y;
+3723: 
+3724:         if (x != x) { // NaN
+3725:             return x;
+3726:         }
+3727: 
+3728:         if (x >= TWO_POWER_52 || x <= -TWO_POWER_52) {
+3729:             return x;
+3730:         }
+3731: 
+3732:         y = (long) x;
+3733:         if (x < 0 && y != x) {
+3734:             y--;
+3735:         }
+3736: 
+3737:         if (y == 0) {
+3738:             return x*y;
+3739:         }
+3740: 
+3741:         return y;
+3742:     }
+
+[10] org.apache.commons.math.util.OpenIntToDoubleHashMap#OpenIntToDoubleHashMap  (lines 133-145)
+133:     public OpenIntToDoubleHashMap(final OpenIntToDoubleHashMap source) {
+134:         final int length = source.keys.length;
+135:         keys = new int[length];
+136:         System.arraycopy(source.keys, 0, keys, 0, length);
+137:         values = new double[length];
+138:         System.arraycopy(source.values, 0, values, 0, length);
+139:         states = new byte[length];
+140:         System.arraycopy(source.states, 0, states, 0, length);
+141:         missingEntries = source.missingEntries;
+142:         size  = source.size;
+143:         mask  = source.mask;
+144:         count = source.count;
+145:     }
+
+[11] org.apache.commons.math.util.FastMath#abs  (lines 3409-3411)
+3409:     public static double abs(double x) {
+3410:         return (x < 0.0) ? -x : (x == 0.0) ? 0.0 : x; // -0.0 => +0.0
+3411:     }
+
+[12] org.apache.commons.math.util.FastMath#resplit  (lines 1061-1074)
+1061:     private static void resplit(final double a[]) {
+1062:         final double c = a[0] + a[1];
+1063:         final double d = -(c - a[0] - a[1]);
+1064: 
+1065:         if (c < 8e298 && c > -8e298) {
+1066:             double z = c * HEX_40000000;
+1067:             a[0] = (c + z) - z;
+1068:             a[1] = c - a[0] + d;
+1069:         } else {
+1070:             double z = c * 9.31322574615478515625E-10;
+1071:             a[0] = (c + z - c) * HEX_40000000;
+1072:             a[1] = c - a[0] + d;
+1073:         }
+1074:     }
+
+[13] org.apache.commons.math.util.OpenIntToDoubleHashMap#shouldGrowTable  (lines 468-470)
+468:     private boolean shouldGrowTable() {
+469:         return size > (mask + 1) * LOAD_FACTOR;
+470:     }
+
+[14] org.apache.commons.math.util.FastMath#splitMult  (lines 1081-1087)
+1081:     private static void splitMult(double a[], double b[], double ans[]) {
+1082:         ans[0] = a[0] * b[0];
+1083:         ans[1] = a[0] * b[1] + a[1] * b[0] + a[1] * b[1];
+1084: 
+1085:         /* Resplit */
+1086:         resplit(ans);
+1087:     }
+
+[15] org.apache.commons.math.util.OpenIntToDoubleHashMap#hashOf  (lines 477-480)
+477:     private static int hashOf(final int key) {
+478:         final int h = key ^ ((key >>> 20) ^ (key >>> 12));
+479:         return h ^ (h >>> 7) ^ (h >>> 4);
+480:     }
+
+[16] org.apache.commons.math.linear.OpenMapRealVector#OpenMapRealVector  (lines 74-78)
+74:     public OpenMapRealVector(int dimension, double epsilon) {
+75:         virtualSize = dimension;
+76:         entries = new OpenIntToDoubleHashMap(0.0);
+77:         this.epsilon = epsilon;
+78:     }
+
+[17] org.apache.commons.math.linear.OpenMapRealVector#ebeMultiply  (lines 367-376)
+367:     public OpenMapRealVector ebeMultiply(RealVector v) {
+368:         checkVectorDimensions(v.getDimension());
+369:         OpenMapRealVector res = new OpenMapRealVector(this);
+370:         Iterator iter = res.entries.iterator();
+371:         while (iter.hasNext()) {
+372:             iter.advance();
+373:             res.setEntry(iter.key(), iter.value() * v.getEntry(iter.key()));
+374:         }
+375:         return res;
+376:     }
+
+[18] org.apache.commons.math.linear.AbstractRealVector#checkIndex  (lines 75-81)
+75:     protected void checkIndex(final int index) {
+76:         if (index < 0 ||
+77:             index >= getDimension()) {
+78:             throw new OutOfRangeException(LocalizedFormats.INDEX,
+79:                                           index, 0, getDimension() - 1);
+80:         }
+81:     }
+
+[19] org.apache.commons.math.util.FastMath#slowLog  (lines 1742-1784)
+1742:     private static double[] slowLog(double xi) {
+1743:         double x[] = new double[2];
+1744:         double x2[] = new double[2];
+1745:         double y[] = new double[2];
+1746:         double a[] = new double[2];
+1747: 
+1748:         split(xi, x);
+1749: 
+1750:         /* Set X = (x-1)/(x+1) */
+1751:         x[0] += 1.0;
+1752:         resplit(x);
+1753:         splitReciprocal(x, a);
+1754:         x[0] -= 2.0;
+1755:         resplit(x);
+1756:         splitMult(x, a, y);
+1757:         x[0] = y[0];
+1758:         x[1] = y[1];
+1759: 
+1760:         /* Square X -> X2*/
+1761:         splitMult(x, x, x2);
+1762: 
+1763: 
+1764:         //x[0] -= 1.0;
+1765:         //resplit(x);
+1766: 
+1767:         y[0] = LN_SPLIT_COEF[LN_SPLIT_COEF.length-1][0];
+1768:         y[1] = LN_SPLIT_COEF[LN_SPLIT_COEF.length-1][1];
+1769: 
+1770:         for (int i = LN_SPLIT_COEF.length-2; i >= 0; i--) {
+1771:             splitMult(y, x2, a);
+1772:             y[0] = a[0];
+1773:             y[1] = a[1];
+1774:             splitAdd(y, LN_SPLIT_COEF[i], a);
+1775:             y[0] = a[0];
+1776:             y[1] = a[1];
+1777:         }
+1778: 
+1779:         splitMult(y, x, a);
+1780:         y[0] = a[0];
+1781:         y[1] = a[1];
+1782: 
+1783:         return y;
+1784:     }
+
+[20] org.apache.commons.math.util.OpenIntToDoubleHashMap#key  (lines 527-536)
+527:         public int key()
+528:             throws ConcurrentModificationException, NoSuchElementException {
+529:             if (referenceCount != count) {
+530:                 throw MathRuntimeException.createConcurrentModificationException(LocalizedFormats.MAP_MODIFIED_WHILE_ITERATING);
+531:             }
+532:             if (current < 0) {
+533:                 throw MathRuntimeException.createNoSuchElementException(LocalizedFormats.ITERATOR_EXHAUSTED);
+534:             }
+535:             return keys[current];
+536:         }
+
+[21] org.apache.commons.math.util.OpenIntToDoubleHashMap#containsKey  (lines 384-386)
+384:     private boolean containsKey(final int key, final int index) {
+385:         return (key != 0 || states[index] == FULL) && keys[index] == key;
+386:     }
+
+[22] org.apache.commons.math.linear.OpenMapRealVector#OpenMapRealVector  (lines 179-183)
+179:     public OpenMapRealVector(OpenMapRealVector v) {
+180:         virtualSize = v.getDimension();
+181:         entries = new OpenIntToDoubleHashMap(v.getEntries());
+182:         epsilon = v.epsilon;
+183:     }
+
+[23] org.apache.commons.math.util.OpenIntToDoubleHashMap#iterator  (lines 240-242)
+240:     public Iterator iterator() {
+241:         return new Iterator();
+242:     }
+
+[24] org.apache.commons.math.util.OpenIntToDoubleHashMap#findInsertionIndex  (lines 258-260)
+258:     private int findInsertionIndex(final int key) {
+259:         return findInsertionIndex(keys, states, key, mask);
+260:     }
+
+[25] org.apache.commons.math.util.FastMath#slowSin  (lines 1792-1826)
+1792:     private static double slowSin(final double x, final double result[]) {
+1793:         final double xs[] = new double[2];
+1794:         final double ys[] = new double[2];
+1795:         final double facts[] = new double[2];
+1796:         final double as[] = new double[2];
+1797:         split(x, xs);
+1798:         ys[0] = ys[1] = 0.0;
+1799: 
+1800:         for (int i = 19; i >= 0; i--) {
+1801:             splitMult(xs, ys, as);
+1802:             ys[0] = as[0]; ys[1] = as[1];
+1803: 
+1804:             if ( (i & 1) == 0) {
+1805:                 continue;
+1806:             }
+1807: 
+1808:             split(FACT[i], as);
+1809:             splitReciprocal(as, facts);
+1810: 
+1811:             if ( (i & 2) != 0 ) {
+1812:                 facts[0] = -facts[0];
+1813:                 facts[1] = -facts[1];
+1814:             }
+1815: 
+1816:             splitAdd(ys, facts, as);
+1817:             ys[0] = as[0]; ys[1] = as[1];
+1818:         }
+1819: 
+1820:         if (result != null) {
+1821:             result[0] = ys[0];
+1822:             result[1] = ys[1];
+1823:         }
+1824: 
+1825:         return ys[0] + ys[1];
+1826:     }
+
+[26] org.apache.commons.math.util.FastMath#slowCos  (lines 1834-1869)
+1834:     private static double slowCos(final double x, final double result[]) {
+1835: 
+1836:         final double xs[] = new double[2];
+1837:         final double ys[] = new double[2];
+1838:         final double facts[] = new double[2];
+1839:         final double as[] = new double[2];
+1840:         split(x, xs);
+1841:         ys[0] = ys[1] = 0.0;
+1842: 
+1843:         for (int i = 19; i >= 0; i--) {
+1844:             splitMult(xs, ys, as);
+1845:             ys[0] = as[0]; ys[1] = as[1];
+1846: 
+1847:             if ( (i & 1) != 0) {
+1848:                 continue;
+1849:             }
+1850: 
+1851:             split(FACT[i], as);
+1852:             splitReciprocal(as, facts);
+1853: 
+1854:             if ( (i & 2) != 0 ) {
+1855:                 facts[0] = -facts[0];
+1856:                 facts[1] = -facts[1];
+1857:             }
+1858: 
+1859:             splitAdd(ys, facts, as);
+1860:             ys[0] = as[0]; ys[1] = as[1];
+1861:         }
+1862: 
+1863:         if (result != null) {
+1864:             result[0] = ys[0];
+1865:             result[1] = ys[1];
+1866:         }
+1867: 
+1868:         return ys[0] + ys[1];
+1869:     }
+
+[27] org.apache.commons.math.linear.OpenMapRealVector#isDefaultValue  (lines 219-221)
+219:     protected boolean isDefaultValue(double value) {
+220:         return FastMath.abs(value) < epsilon;
+221:     }
+
+[28] org.apache.commons.math.linear.OpenMapRealVector#getDimension  (lines 421-423)
+421:     public int getDimension() {
+422:         return virtualSize;
+423:     }
+
+[29] org.apache.commons.math.util.FastMath#slowexp  (lines 1011-1038)
+1011:     private static double slowexp(final double x, final double result[]) {
+1012:         final double xs[] = new double[2];
+1013:         final double ys[] = new double[2];
+1014:         final double facts[] = new double[2];
+1015:         final double as[] = new double[2];
+1016:         split(x, xs);
+1017:         ys[0] = ys[1] = 0.0;
+1018: 
+1019:         for (int i = 19; i >= 0; i--) {
+1020:             splitMult(xs, ys, as);
+1021:             ys[0] = as[0];
+1022:             ys[1] = as[1];
+1023: 
+1024:             split(FACT[i], as);
+1025:             splitReciprocal(as, facts);
+1026: 
+1027:             splitAdd(ys, facts, as);
+1028:             ys[0] = as[0];
+1029:             ys[1] = as[1];
+1030:         }
+1031: 
+1032:         if (result != null) {
+1033:             result[0] = ys[0];
+1034:             result[1] = ys[1];
+1035:         }
+1036: 
+1037:         return ys[0] + ys[1];
+1038:     }
+
+[30] org.apache.commons.math.util.FastMath#ceil  (lines 3748-3767)
+3748:     public static double ceil(double x) {
+3749:         double y;
+3750: 
+3751:         if (x != x) { // NaN
+3752:             return x;
+3753:         }
+3754: 
+3755:         y = floor(x);
+3756:         if (y == x) {
+3757:             return y;
+3758:         }
+3759: 
+3760:         y += 1.0;
+3761: 
+3762:         if (y == 0) {
+3763:             return x*y;
+3764:         }
+3765: 
+3766:         return y;
+3767:     }
+
+[31] org.apache.commons.math.util.OpenIntToDoubleHashMap#value  (lines 544-553)
+544:         public double value()
+545:             throws ConcurrentModificationException, NoSuchElementException {
+546:             if (referenceCount != count) {
+547:                 throw MathRuntimeException.createConcurrentModificationException(LocalizedFormats.MAP_MODIFIED_WHILE_ITERATING);
+548:             }
+549:             if (current < 0) {
+550:                 throw MathRuntimeException.createNoSuchElementException(LocalizedFormats.ITERATOR_EXHAUSTED);
+551:             }
+552:             return values[current];
+553:         }
+
+[32] org.apache.commons.math.util.OpenIntToDoubleHashMap#doRemove  (lines 393-401)
+393:     private double doRemove(int index) {
+394:         keys[index]   = 0;
+395:         states[index] = REMOVED;
+396:         final double previous = values[index];
+397:         values[index] = missingEntries;
+398:         --size;
+399:         ++count;
+400:         return previous;
+401:     }
+
+[33] org.apache.commons.math.util.FastMath#splitReciprocal  (lines 1119-1147)
+1119:     private static void splitReciprocal(final double in[], final double result[]) {
+1120:         final double b = 1.0/4194304.0;
+1121:         final double a = 1.0 - b;
+1122: 
+1123:         if (in[0] == 0.0) {
+1124:             in[0] = in[1];
+1125:             in[1] = 0.0;
+1126:         }
+1127: 
+1128:         result[0] = a / in[0];
+1129:         result[1] = (b*in[0]-a*in[1]) / (in[0]*in[0] + in[0]*in[1]);
+1130: 
+1131:         if (result[1] != result[1]) { // can happen if result[1] is NAN
+1132:             result[1] = 0.0;
+1133:         }
+1134: 
+1135:         /* Resplit */
+1136:         resplit(result);
+1137: 
+1138:         for (int i = 0; i < 2; i++) {
+1139:             /* this may be overkill, probably once is enough */
+1140:             double err = 1.0 - result[0] * in[0] - result[0] * in[1] -
+1141:             result[1] * in[0] - result[1] * in[1];
+1142:             /*err = 1.0 - err; */
+1143:             err = err * (result[0] + result[1]);
+1144:             /*printf("err = %16e\n", err); */
+1145:             result[1] += err;
+1146:         }
+1147:     }
+
+[34] org.apache.commons.math.linear.OpenMapRealVector#getEntries  (lines 207-209)
+207:     private OpenIntToDoubleHashMap getEntries() {
+208:         return entries;
+209:     }
+
+[35] org.apache.commons.math.linear.OpenMapRealVector#getEntry  (lines 478-481)
+478:     public double getEntry(int index) {
+479:         checkIndex(index);
+480:         return entries.get(index);
+481:     }
+
+[36] org.apache.commons.math.util.OpenIntToDoubleHashMap#containsKey  (lines 208-231)
+208:     public boolean containsKey(final int key) {
+209: 
+210:         final int hash  = hashOf(key);
+211:         int index = hash & mask;
+212:         if (containsKey(key, index)) {
+213:             return true;
+214:         }
+215: 
+216:         if (states[index] == FREE) {
+217:             return false;
+218:         }
+219: 
+220:         int j = index;
+221:         for (int perturb = perturb(hash); states[index] != FREE; perturb >>= PERTURB_SHIFT) {
+222:             j = probe(perturb, j);
+223:             index = j & mask;
+224:             if (containsKey(key, index)) {
+225:                 return true;
+226:             }
+227:         }
+228: 
+229:         return false;
+230: 
+231:     }
+
+[37] org.apache.commons.math.util.FastMath#expint  (lines 1208-1246)
+1208:     private static double expint(int p, final double result[]) {
+1209:         //double x = M_E;
+1210:         final double xs[] = new double[2];
+1211:         final double as[] = new double[2];
+1212:         final double ys[] = new double[2];
+1213:         //split(x, xs);
+1214:         //xs[1] = (double)(2.7182818284590452353602874713526625L - xs[0]);
+1215:         //xs[0] = 2.71827697753906250000;
+1216:         //xs[1] = 4.85091998273542816811e-06;
+1217:         //xs[0] = Double.longBitsToDouble(0x4005bf0800000000L);
+1218:         //xs[1] = Double.longBitsToDouble(0x3ed458a2bb4a9b00L);
+1219: 
+1220:         /* E */
+1221:         xs[0] = 2.718281828459045;
+1222:         xs[1] = 1.4456468917292502E-16;
+1223: 
+1224:         split(1.0, ys);
+1225: 
+1226:         while (p > 0) {
+1227:             if ((p & 1) != 0) {
+1228:                 quadMult(ys, xs, as);
+1229:                 ys[0] = as[0]; ys[1] = as[1];
+1230:             }
+1231: 
+1232:             quadMult(xs, xs, as);
+1233:             xs[0] = as[0]; xs[1] = as[1];
+1234: 
+1235:             p >>= 1;
+1236:         }
+1237: 
+1238:         if (result != null) {
+1239:             result[0] = ys[0];
+1240:             result[1] = ys[1];
+1241: 
+1242:             resplit(result);
+1243:         }
+1244: 
+1245:         return ys[0] + ys[1];
+1246:     }
+
+[38] org.apache.commons.math.util.FastMath#splitAdd  (lines 1094-1099)
+1094:     private static void splitAdd(final double a[], final double b[], final double ans[]) {
+1095:         ans[0] = a[0] + b[0];
+1096:         ans[1] = a[1] + b[1];
+1097: 
+1098:         resplit(ans);
+1099:     }
+
+[39] org.apache.commons.math.util.OpenIntToDoubleHashMap#advance  (lines 560-582)
+560:         public void advance()
+561:             throws ConcurrentModificationException, NoSuchElementException {
+562: 
+563:             if (referenceCount != count) {
+564:                 throw MathRuntimeException.createConcurrentModificationException(LocalizedFormats.MAP_MODIFIED_WHILE_ITERATING);
+565:             }
+566: 
+567:             // advance on step
+568:             current = next;
+569: 
+570:             // prepare next step
+571:             try {
+572:                 while (states[++next] != FULL) {
+573:                     // nothing to do
+574:                 }
+575:             } catch (ArrayIndexOutOfBoundsException e) {
+576:                 next = -2;
+577:                 if (current < 0) {
+578:                     throw MathRuntimeException.createNoSuchElementException(LocalizedFormats.ITERATOR_EXHAUSTED);
+579:                 }
+580:             }
+581: 
+582:         }
+
+[40] org.apache.commons.math.util.FastMath#split  (lines 1045-1055)
+1045:     private static void split(final double d, final double split[]) {
+1046:         if (d < 8e298 && d > -8e298) {
+1047:             final double a = d * HEX_40000000;
+1048:             split[0] = (d + a) - a;
+1049:             split[1] = d - split[0];
+1050:         } else {
+1051:             final double a = d * 9.31322574615478515625E-10;
+1052:             split[0] = (d + a - d) * HEX_40000000;
+1053:             split[1] = d - split[0];
+1054:         }
+1055:     }
+
+[41] org.apache.commons.math.util.FastMath#buildSinCosTables  (lines 1873-1965)
+1873:     private static void buildSinCosTables() {
+1874:         final double result[] = new double[2];
+1875: 
+1876:         /* Use taylor series for 0 <= x <= 6/8 */
+1877:         for (int i = 0; i < 7; i++) {
+1878:             double x = i / 8.0;
+1879: 
+1880:             slowSin(x, result);
+1881:             SINE_TABLE_A[i] = result[0];
+1882:             SINE_TABLE_B[i] = result[1];
+1883: 
+1884:             slowCos(x, result);
+1885:             COSINE_TABLE_A[i] = result[0];
+1886:             COSINE_TABLE_B[i] = result[1];
+1887:         }
+1888: 
+1889:         /* Use angle addition formula to complete table to 13/8, just beyond pi/2 */
+1890:         for (int i = 7; i < 14; i++) {
+1891:             double xs[] = new double[2];
+1892:             double ys[] = new double[2];
+1893:             double as[] = new double[2];
+1894:             double bs[] = new double[2];
+1895:             double temps[] = new double[2];
+1896: 
+1897:             if ( (i & 1) == 0) {
+1898:                 // Even, use double angle
+1899:                 xs[0] = SINE_TABLE_A[i/2];
+1900:                 xs[1] = SINE_TABLE_B[i/2];
+1901:                 ys[0] = COSINE_TABLE_A[i/2];
+1902:                 ys[1] = COSINE_TABLE_B[i/2];
+1903: 
+1904:                 /* compute sine */
+1905:                 splitMult(xs, ys, result);
+1906:                 SINE_TABLE_A[i] = result[0] * 2.0;
+1907:                 SINE_TABLE_B[i] = result[1] * 2.0;
+1908: 
+1909:                 /* Compute cosine */
+1910:                 splitMult(ys, ys, as);
+1911:                 splitMult(xs, xs, temps);
+1912:                 temps[0] = -temps[0];
+1913:                 temps[1] = -temps[1];
+1914:                 splitAdd(as, temps, result);
+1915:                 COSINE_TABLE_A[i] = result[0];
+1916:                 COSINE_TABLE_B[i] = result[1];
+1917:             } else {
+1918:                 xs[0] = SINE_TABLE_A[i/2];
+1919:                 xs[1] = SINE_TABLE_B[i/2];
+1920:                 ys[0] = COSINE_TABLE_A[i/2];
+1921:                 ys[1] = COSINE_TABLE_B[i/2];
+1922:                 as[0] = SINE_TABLE_A[i/2+1];
+1923:                 as[1] = SINE_TABLE_B[i/2+1];
+1924:                 bs[0] = COSINE_TABLE_A[i/2+1];
+1925:                 bs[1] = COSINE_TABLE_B[i/2+1];
+1926: 
+1927:                 /* compute sine */
+1928:                 splitMult(xs, bs, temps);
+1929:                 splitMult(ys, as, result);
+1930:                 splitAdd(result, temps, result);
+1931:                 SINE_TABLE_A[i] = result[0];
+1932:                 SINE_TABLE_B[i] = result[1];
+1933: 
+1934:                 /* Compute cosine */
+1935:                 splitMult(ys, bs, result);
+1936:                 splitMult(xs, as, temps);
+1937:                 temps[0] = -temps[0];
+1938:                 temps[1] = -temps[1];
+1939:                 splitAdd(result, temps, result);
+1940:                 COSINE_TABLE_A[i] = result[0];
+1941:                 COSINE_TABLE_B[i] = result[1];
+1942:             }
+1943:         }
+1944: 
+1945:         /* Compute tangent = sine/cosine */
+1946:         for (int i = 0; i < 14; i++) {
+1947:             double xs[] = new double[2];
+1948:             double ys[] = new double[2];
+1949:             double as[] = new double[2];
+1950: 
+1951:             as[0] = COSINE_TABLE_A[i];
+1952:             as[1] = COSINE_TABLE_B[i];
+1953: 
+1954:             splitReciprocal(as, ys);
+1955: 
+1956:             xs[0] = SINE_TABLE_A[i];
+1957:             xs[1] = SINE_TABLE_B[i];
+1958: 
+1959:             splitMult(xs, ys, as);
+1960: 
+1961:             TANGENT_TABLE_A[i] = as[0];
+1962:             TANGENT_TABLE_B[i] = as[1];
+1963:         }
+1964: 
+1965:     }
+
+[42] org.apache.commons.math.util.OpenIntToDoubleHashMap#get  (lines 178-201)
+178:     public double get(final int key) {
+179: 
+180:         final int hash  = hashOf(key);
+181:         int index = hash & mask;
+182:         if (containsKey(key, index)) {
+183:             return values[index];
+184:         }
+185: 
+186:         if (states[index] == FREE) {
+187:             return missingEntries;
+188:         }
+189: 
+190:         int j = index;
+191:         for (int perturb = perturb(hash); states[index] != FREE; perturb >>= PERTURB_SHIFT) {
+192:             j = probe(perturb, j);
+193:             index = j & mask;
+194:             if (containsKey(key, index)) {
+195:                 return values[index];
+196:             }
+197:         }
+198: 
+199:         return missingEntries;
+200: 
+201:     }
+
+[43] org.apache.commons.math.util.FastMath#quadMult  (lines 1154-1201)
+1154:     private static void quadMult(final double a[], final double b[], final double result[]) {
+1155:         final double xs[] = new double[2];
+1156:         final double ys[] = new double[2];
+1157:         final double zs[] = new double[2];
+1158: 
+1159:         /* a[0] * b[0] */
+1160:         split(a[0], xs);
+1161:         split(b[0], ys);
+1162:         splitMult(xs, ys, zs);
+1163: 
+1164:         result[0] = zs[0];
+1165:         result[1] = zs[1];
+1166: 
+1167:         /* a[0] * b[1] */
+1168:         split(b[1], ys);
+1169:         splitMult(xs, ys, zs);
+1170: 
+1171:         double tmp = result[0] + zs[0];
+1172:         result[1] = result[1] - (tmp - result[0] - zs[0]);
+1173:         result[0] = tmp;
+1174:         tmp = result[0] + zs[1];
+1175:         result[1] = result[1] - (tmp - result[0] - zs[1]);
+1176:         result[0] = tmp;
+1177: 
+1178:         /* a[1] * b[0] */
+1179:         split(a[1], xs);
+1180:         split(b[0], ys);
+1181:         splitMult(xs, ys, zs);
+1182: 
+1183:         tmp = result[0] + zs[0];
+1184:         result[1] = result[1] - (tmp - result[0] - zs[0]);
+1185:         result[0] = tmp;
+1186:         tmp = result[0] + zs[1];
+1187:         result[1] = result[1] - (tmp - result[0] - zs[1]);
+1188:         result[0] = tmp;
+1189: 
+1190:         /* a[1] * b[0] */
+1191:         split(a[1], xs);
+1192:         split(b[1], ys);
+1193:         splitMult(xs, ys, zs);
+1194: 
+1195:         tmp = result[0] + zs[0];
+1196:         result[1] = result[1] - (tmp - result[0] - zs[0]);
+1197:         result[0] = tmp;
+1198:         tmp = result[0] + zs[1];
+1199:         result[1] = result[1] - (tmp - result[0] - zs[1]);
+1200:         result[0] = tmp;
+1201:     }
+
+[44] org.apache.commons.math.linear.AbstractRealVector#checkVectorDimensions  (lines 62-67)
+62:     protected void checkVectorDimensions(int n) {
+63:         int d = getDimension();
+64:         if (d != n) {
+65:             throw new DimensionMismatchException(d, n);
+66:         }
+67:     }
+
+[45] org.apache.commons.math.util.OpenIntToDoubleHashMap#hasNext  (lines 517-519)
+517:         public boolean hasNext() {
+518:             return next >= 0;
+519:         }

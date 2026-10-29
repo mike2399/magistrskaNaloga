@@ -1,0 +1,1291 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math3.distribution.MultivariateNormalDistributionTest::testUnivariateDistribution
+junit.framework.AssertionFailedError: expected:<0.23644016090654427> but was:<0.5926675925866471>
+	at org.apache.commons.math3.distribution.MultivariateNormalDistributionTest.testUnivariateDistribution(MultivariateNormalDistributionTest.java:151)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math3.linear.Array2DRowRealMatrix#getRowDimension  (lines 337-340)
+337:     @Override
+338:     public int getRowDimension() {
+339:         return (data == null) ? 0 : data.length;
+340:     }
+
+[2] org.apache.commons.math3.linear.TriDiagonalTransformer#TriDiagonalTransformer  (lines 62-78)
+62:     public TriDiagonalTransformer(RealMatrix matrix) {
+63:         if (!matrix.isSquare()) {
+64:             throw new NonSquareMatrixException(matrix.getRowDimension(),
+65:                                                matrix.getColumnDimension());
+66:         }
+67: 
+68:         final int m = matrix.getRowDimension();
+69:         householderVectors = matrix.getData();
+70:         main      = new double[m];
+71:         secondary = new double[m - 1];
+72:         cachedQ   = null;
+73:         cachedQt  = null;
+74:         cachedT   = null;
+75: 
+76:         // transform matrix
+77:         transform();
+78:     }
+
+[3] org.apache.commons.math3.linear.AbstractRealMatrix#setColumn  (lines 570-580)
+570:     public void setColumn(final int column, final double[] array)
+571:         throws OutOfRangeException, MatrixDimensionMismatchException {
+572:         MatrixUtils.checkColumnIndex(this, column);
+573:         final int nRows = getRowDimension();
+574:         if (array.length != nRows) {
+575:             throw new MatrixDimensionMismatchException(array.length, 1, nRows, 1);
+576:         }
+577:         for (int i = 0; i < nRows; ++i) {
+578:             setEntry(i, column, array[i]);
+579:         }
+580:     }
+
+[4] org.apache.commons.math3.distribution.MultivariateNormalDistribution#getExponentTerm  (lines 228-239)
+228:     private double getExponentTerm(final double[] values) {
+229:         final double[] centered = new double[values.length];
+230:         for (int i = 0; i < centered.length; i++) {
+231:             centered[i] = values[i] - getMeans()[i];
+232:         }
+233:         final double[] preMultiplied = covarianceMatrixInverse.preMultiply(centered);
+234:         double sum = 0;
+235:         for (int i = 0; i < preMultiplied.length; i++) {
+236:             sum += preMultiplied[i] * centered[i];
+237:         }
+238:         return FastMath.exp(-0.5 * sum);
+239:     }
+
+[5] org.apache.commons.math3.distribution.AbstractMultivariateRealDistribution#AbstractMultivariateRealDistribution  (lines 40-44)
+40:     protected AbstractMultivariateRealDistribution(RandomGenerator rng,
+41:                                                    int n) {
+42:         random = rng;
+43:         dimension = n;
+44:     }
+
+[6] org.apache.commons.math3.util.FastMath#log  (lines 1129-1353)
+1129:     private static double log(final double x, final double[] hiPrec) {
+1130:         if (x==0) { // Handle special case of +0/-0
+1131:             return Double.NEGATIVE_INFINITY;
+1132:         }
+1133:         long bits = Double.doubleToLongBits(x);
+1134: 
+1135:         /* Handle special cases of negative input, and NaN */
+1136:         if ((bits & 0x8000000000000000L) != 0 || x != x) {
+1137:             if (x != 0.0) {
+1138:                 if (hiPrec != null) {
+1139:                     hiPrec[0] = Double.NaN;
+1140:                 }
+1141: 
+1142:                 return Double.NaN;
+1143:             }
+1144:         }
+1145: 
+1146:         /* Handle special cases of Positive infinity. */
+1147:         if (x == Double.POSITIVE_INFINITY) {
+1148:             if (hiPrec != null) {
+1149:                 hiPrec[0] = Double.POSITIVE_INFINITY;
+1150:             }
+1151: 
+1152:             return Double.POSITIVE_INFINITY;
+1153:         }
+1154: 
+1155:         /* Extract the exponent */
+1156:         int exp = (int)(bits >> 52)-1023;
+1157: 
+1158:         if ((bits & 0x7ff0000000000000L) == 0) {
+1159:             // Subnormal!
+1160:             if (x == 0) {
+1161:                 // Zero
+1162:                 if (hiPrec != null) {
+1163:                     hiPrec[0] = Double.NEGATIVE_INFINITY;
+1164:                 }
+1165: 
+1166:                 return Double.NEGATIVE_INFINITY;
+1167:             }
+1168: 
+1169:             /* Normalize the subnormal number. */
+1170:             bits <<= 1;
+1171:             while ( (bits & 0x0010000000000000L) == 0) {
+1172:                 --exp;
+1173:                 bits <<= 1;
+1174:             }
+1175:         }
+1176: 
+1177: 
+1178:         if (exp == -1 || exp == 0) {
+1179:             if (x < 1.01 && x > 0.99 && hiPrec == null) {
+1180:                 /* The normal method doesn't work well in the range [0.99, 1.01], so call do a straight
+1181:            polynomial expansion in higer precision. */
+1182: 
+1183:                /* Compute x - 1.0 and split it */
+1184:                 double xa = x - 1.0;
+1185:                 double xb = xa - x + 1.0;
+1186:                 double tmp = xa * HEX_40000000;
+1187:                 double aa = xa + tmp - tmp;
+1188:                 double ab = xa - aa;
+1189:                 xa = aa;
+1190:                 xb = ab;
+1191: 
+1192:                 final double[] lnCoef_last = LN_QUICK_COEF[LN_QUICK_COEF.length - 1];
+1193:                 double ya = lnCoef_last[0];
+1194:                 double yb = lnCoef_last[1];
+1195: 
+1196:                 for (int i = LN_QUICK_COEF.length - 2; i >= 0; i--) {
+1197:                     /* Multiply a = y * x */
+1198:                     aa = ya * xa;
+1199:                     ab = ya * xb + yb * xa + yb * xb;
+1200:                     /* split, so now y = a */
+1201:                     tmp = aa * HEX_40000000;
+1202:                     ya = aa + tmp - tmp;
+1203:                     yb = aa - ya + ab;
+1204: 
+1205:                     /* Add  a = y + lnQuickCoef */
+1206:                     final double[] lnCoef_i = LN_QUICK_COEF[i];
+1207:                     aa = ya + lnCoef_i[0];
+1208:                     ab = yb + lnCoef_i[1];
+1209:                     /* Split y = a */
+1210:                     tmp = aa * HEX_40000000;
+1211:                     ya = aa + tmp - tmp;
+1212:                     yb = aa - ya + ab;
+1213:                 }
+1214: 
+1215:                 /* Multiply a = y * x */
+1216:                 aa = ya * xa;
+1217:                 ab = ya * xb + yb * xa + yb * xb;
+1218:                 /* split, so now y = a */
+1219:                 tmp = aa * HEX_40000000;
+1220:                 ya = aa + tmp - tmp;
+1221:                 yb = aa - ya + ab;
+1222: 
+1223:                 return ya + yb;
+1224:             }
+1225:         }
+1226: 
+1227:         // lnm is a log of a number in the range of 1.0 - 2.0, so 0 <= lnm < ln(2)
+1228:         final double[] lnm = lnMant.LN_MANT[(int)((bits & 0x000ffc0000000000L) >> 42)];
+1229: 
+1230:         /*
+1231:     double epsilon = x / Double.longBitsToDouble(bits & 0xfffffc0000000000L);
+1232: 
+1233:     epsilon -= 1.0;
+1234:          */
+1235: 
+1236:         // y is the most significant 10 bits of the mantissa
+1237:         //double y = Double.longBitsToDouble(bits & 0xfffffc0000000000L);
+1238:         //double epsilon = (x - y) / y;
+1239:         final double epsilon = (bits & 0x3ffffffffffL) / (TWO_POWER_52 + (bits & 0x000ffc0000000000L));
+1240: 
+1241:         double lnza = 0.0;
+1242:         double lnzb = 0.0;
+1243: 
+1244:         if (hiPrec != null) {
+1245:             /* split epsilon -> x */
+1246:             double tmp = epsilon * HEX_40000000;
+1247:             double aa = epsilon + tmp - tmp;
+1248:             double ab = epsilon - aa;
+1249:             double xa = aa;
+1250:             double xb = ab;
+1251: 
+1252:             /* Need a more accurate epsilon, so adjust the division. */
+1253:             final double numer = bits & 0x3ffffffffffL;
+1254:             final double denom = TWO_POWER_52 + (bits & 0x000ffc0000000000L);
+1255:             aa = numer - xa*denom - xb * denom;
+1256:             xb += aa / denom;
+1257: 
+1258:             /* Remez polynomial evaluation */
+1259:             final double[] lnCoef_last = LN_HI_PREC_COEF[LN_HI_PREC_COEF.length-1];
+1260:             double ya = lnCoef_last[0];
+1261:             double yb = lnCoef_last[1];
+1262: 
+1263:             for (int i = LN_HI_PREC_COEF.length - 2; i >= 0; i--) {
+1264:                 /* Multiply a = y * x */
+1265:                 aa = ya * xa;
+1266:                 ab = ya * xb + yb * xa + yb * xb;
+1267:                 /* split, so now y = a */
+1268:                 tmp = aa * HEX_40000000;
+1269:                 ya = aa + tmp - tmp;
+1270:                 yb = aa - ya + ab;
+1271: 
+1272:                 /* Add  a = y + lnHiPrecCoef */
+1273:                 final double[] lnCoef_i = LN_HI_PREC_COEF[i];
+1274:                 aa = ya + lnCoef_i[0];
+1275:                 ab = yb + lnCoef_i[1];
+1276:                 /* Split y = a */
+1277:                 tmp = aa * HEX_40000000;
+1278:                 ya = aa + tmp - tmp;
+1279:                 yb = aa - ya + ab;
+1280:             }
+1281: 
+1282:             /* Multiply a = y * x */
+1283:             aa = ya * xa;
+1284:             ab = ya * xb + yb * xa + yb * xb;
+1285: 
+1286:             /* split, so now lnz = a */
+1287:             /*
+1288:       tmp = aa * 1073741824.0;
+1289:       lnza = aa + tmp - tmp;
+1290:       lnzb = aa - lnza + ab;
+1291:              */
+1292:             lnza = aa + ab;
+1293:             lnzb = -(lnza - aa - ab);
+1294:         } else {
+1295:             /* High precision not required.  Eval Remez polynomial
+1296:          using standard double precision */
+1297:             lnza = -0.16624882440418567;
+1298:             lnza = lnza * epsilon + 0.19999954120254515;
+1299:             lnza = lnza * epsilon + -0.2499999997677497;
+1300:             lnza = lnza * epsilon + 0.3333333333332802;
+1301:             lnza = lnza * epsilon + -0.5;
+1302:             lnza = lnza * epsilon + 1.0;
+1303:             lnza = lnza * epsilon;
+1304:         }
+1305: 
+1306:         /* Relative sizes:
+1307:          * lnzb     [0, 2.33E-10]
+1308:          * lnm[1]   [0, 1.17E-7]
+1309:          * ln2B*exp [0, 1.12E-4]
+1310:          * lnza      [0, 9.7E-4]
+1311:          * lnm[0]   [0, 0.692]
+1312:          * ln2A*exp [0, 709]
+1313:          */
+1314: 
+1315:         /* Compute the following sum:
+1316:          * lnzb + lnm[1] + ln2B*exp + lnza + lnm[0] + ln2A*exp;
+1317:          */
+1318: 
+1319:         //return lnzb + lnm[1] + ln2B*exp + lnza + lnm[0] + ln2A*exp;
+1320:         double a = LN_2_A*exp;
+1321:         double b = 0.0;
+1322:         double c = a+lnm[0];
+1323:         double d = -(c-a-lnm[0]);
+1324:         a = c;
+1325:         b = b + d;
+1326: 
+1327:         c = a + lnza;
+1328:         d = -(c - a - lnza);
+1329:         a = c;
+1330:         b = b + d;
+1331: 
+1332:         c = a + LN_2_B*exp;
+1333:         d = -(c - a - LN_2_B*exp);
+1334:         a = c;
+1335:         b = b + d;
+1336: 
+1337:         c = a + lnm[1];
+1338:         d = -(c - a - lnm[1]);
+1339:         a = c;
+1340:         b = b + d;
+1341: 
+1342:         c = a + lnzb;
+1343:         d = -(c - a - lnzb);
+1344:         a = c;
+1345:         b = b + d;
+1346: 
+1347:         if (hiPrec != null) {
+1348:             hiPrec[0] = a;
+1349:             hiPrec[1] = b;
+1350:         }
+1351: 
+1352:         return a + b;
+1353:     }
+
+[7] org.apache.commons.math3.linear.EigenDecomposition#getInverse  (lines 531-551)
+531:         public RealMatrix getInverse() {
+532:             if (!isNonSingular()) {
+533:                 throw new SingularMatrixException();
+534:             }
+535: 
+536:             final int m = realEigenvalues.length;
+537:             final double[][] invData = new double[m][m];
+538: 
+539:             for (int i = 0; i < m; ++i) {
+540:                 final double[] invI = invData[i];
+541:                 for (int j = 0; j < m; ++j) {
+542:                     double invIJ = 0;
+543:                     for (int k = 0; k < m; ++k) {
+544:                         final double[] vK = eigenvectors[k].getDataRef();
+545:                         invIJ += vK[i] * vK[j] / realEigenvalues[k];
+546:                     }
+547:                     invI[j] = invIJ;
+548:                 }
+549:             }
+550:             return MatrixUtils.createRealMatrix(invData);
+551:         }
+
+[8] org.apache.commons.math3.linear.AbstractRealMatrix#multiply  (lines 139-158)
+139:     public RealMatrix multiply(final RealMatrix m)
+140:         throws DimensionMismatchException {
+141:         MatrixUtils.checkMultiplicationCompatible(this, m);
+142: 
+143:         final int nRows = getRowDimension();
+144:         final int nCols = m.getColumnDimension();
+145:         final int nSum  = getColumnDimension();
+146:         final RealMatrix out = createMatrix(nRows, nCols);
+147:         for (int row = 0; row < nRows; ++row) {
+148:             for (int col = 0; col < nCols; ++col) {
+149:                 double sum = 0;
+150:                 for (int i = 0; i < nSum; ++i) {
+151:                     sum += getEntry(row, i) * m.getEntry(i, col);
+152:                 }
+153:                 out.setEntry(row, col, sum);
+154:             }
+155:         }
+156: 
+157:         return out;
+158:     }
+
+[9] org.apache.commons.math3.linear.TriDiagonalTransformer#transform  (lines 192-253)
+192:     private void transform() {
+193:         final int m = householderVectors.length;
+194:         final double[] z = new double[m];
+195:         for (int k = 0; k < m - 1; k++) {
+196: 
+197:             //zero-out a row and a column simultaneously
+198:             final double[] hK = householderVectors[k];
+199:             main[k] = hK[k];
+200:             double xNormSqr = 0;
+201:             for (int j = k + 1; j < m; ++j) {
+202:                 final double c = hK[j];
+203:                 xNormSqr += c * c;
+204:             }
+205:             final double a = (hK[k + 1] > 0) ? -FastMath.sqrt(xNormSqr) : FastMath.sqrt(xNormSqr);
+206:             secondary[k] = a;
+207:             if (a != 0.0) {
+208:                 // apply Householder transform from left and right simultaneously
+209: 
+210:                 hK[k + 1] -= a;
+211:                 final double beta = -1 / (a * hK[k + 1]);
+212: 
+213:                 // compute a = beta A v, where v is the Householder vector
+214:                 // this loop is written in such a way
+215:                 //   1) only the upper triangular part of the matrix is accessed
+216:                 //   2) access is cache-friendly for a matrix stored in rows
+217:                 Arrays.fill(z, k + 1, m, 0);
+218:                 for (int i = k + 1; i < m; ++i) {
+219:                     final double[] hI = householderVectors[i];
+220:                     final double hKI = hK[i];
+221:                     double zI = hI[i] * hKI;
+222:                     for (int j = i + 1; j < m; ++j) {
+223:                         final double hIJ = hI[j];
+224:                         zI   += hIJ * hK[j];
+225:                         z[j] += hIJ * hKI;
+226:                     }
+227:                     z[i] = beta * (z[i] + zI);
+228:                 }
+229: 
+230:                 // compute gamma = beta vT z / 2
+231:                 double gamma = 0;
+232:                 for (int i = k + 1; i < m; ++i) {
+233:                     gamma += z[i] * hK[i];
+234:                 }
+235:                 gamma *= beta / 2;
+236: 
+237:                 // compute z = z - gamma v
+238:                 for (int i = k + 1; i < m; ++i) {
+239:                     z[i] -= gamma * hK[i];
+240:                 }
+241: 
+242:                 // update matrix: A = A - v zT - z vT
+243:                 // only the upper triangular part of the matrix is updated
+244:                 for (int i = k + 1; i < m; ++i) {
+245:                     final double[] hI = householderVectors[i];
+246:                     for (int j = i; j < m; ++j) {
+247:                         hI[j] -= hK[i] * z[j] + z[i] * hK[j];
+248:                     }
+249:                 }
+250:             }
+251:         }
+252:         main[m - 1] = householderVectors[m - 1][m - 1];
+253:     }
+
+[10] org.apache.commons.math3.random.RandomDataGenerator#RandomDataGenerator  (lines 131-132)
+131:     public RandomDataGenerator() {
+132:     }
+
+[11] org.apache.commons.math3.distribution.AbstractRealDistribution#AbstractRealDistribution  (lines 76-78)
+76:     protected AbstractRealDistribution(RandomGenerator rng) {
+77:         random = rng;
+78:     }
+
+[12] org.apache.commons.math3.util.MathArrays#copyOf  (lines 718-720)
+718:      public static double[] copyOf(double[] source) {
+719:          return copyOf(source, source.length);
+720:      }
+
+[13] org.apache.commons.math3.linear.MatrixUtils#isSymmetric  (lines 438-441)
+438:     public static boolean isSymmetric(RealMatrix matrix,
+439:                                       double eps) {
+440:         return isSymmetricInternal(matrix, eps, false);
+441:     }
+
+[14] org.apache.commons.math3.linear.Array2DRowRealMatrix#getEntry  (lines 303-308)
+303:     @Override
+304:     public double getEntry(final int row, final int column)
+305:         throws OutOfRangeException {
+306:         MatrixUtils.checkMatrixIndex(this, row, column);
+307:         return data[row][column];
+308:     }
+
+[15] org.apache.commons.math3.distribution.MultivariateNormalDistribution#MultivariateNormalDistribution  (lines 71-77)
+71:     public MultivariateNormalDistribution(final double[] means,
+72:                                           final double[][] covariances)
+73:         throws SingularMatrixException,
+74:                DimensionMismatchException,
+75:                NonPositiveDefiniteMatrixException {
+76:         this(new Well19937c(), means, covariances);
+77:     }
+
+[16] org.apache.commons.math3.linear.Array2DRowRealMatrix#getColumnDimension  (lines 343-346)
+343:     @Override
+344:     public int getColumnDimension() {
+345:         return ((data == null) || (data[0] == null)) ? 0 : data[0].length;
+346:     }
+
+[17] org.apache.commons.math3.util.FastMathLiteralArrays#loadExpFracB  (lines 6165-6167)
+6165:     static double[] loadExpFracB() {
+6166:         return EXP_FRAC_B.clone();
+6167:     }
+
+[18] org.apache.commons.math3.util.FastMathLiteralArrays#loadExpFracA  (lines 6157-6159)
+6157:     static double[] loadExpFracA() {
+6158:         return EXP_FRAC_A.clone();
+6159:     }
+
+[19] org.apache.commons.math3.linear.MatrixUtils#isSymmetricInternal  (lines 388-414)
+388:     private static boolean isSymmetricInternal(RealMatrix matrix,
+389:                                                double relativeTolerance,
+390:                                                boolean raiseException) {
+391:         final int rows = matrix.getRowDimension();
+392:         if (rows != matrix.getColumnDimension()) {
+393:             if (raiseException) {
+394:                 throw new NonSquareMatrixException(rows, matrix.getColumnDimension());
+395:             } else {
+396:                 return false;
+397:             }
+398:         }
+399:         for (int i = 0; i < rows; i++) {
+400:             for (int j = i + 1; j < rows; j++) {
+401:                 final double mij = matrix.getEntry(i, j);
+402:                 final double mji = matrix.getEntry(j, i);
+403:                 if (FastMath.abs(mij - mji) >
+404:                     FastMath.max(FastMath.abs(mij), FastMath.abs(mji)) * relativeTolerance) {
+405:                     if (raiseException) {
+406:                         throw new NonSymmetricMatrixException(i, j, relativeTolerance);
+407:                     } else {
+408:                         return false;
+409:                     }
+410:                 }
+411:             }
+412:         }
+413:         return true;
+414:     }
+
+[20] org.apache.commons.math3.linear.EigenDecomposition#findEigenVectors  (lines 572-721)
+572:     private void findEigenVectors(final double[][] householderMatrix) {
+573:         final double[][]z = householderMatrix.clone();
+574:         final int n = main.length;
+575:         realEigenvalues = new double[n];
+576:         imagEigenvalues = new double[n];
+577:         final double[] e = new double[n];
+578:         for (int i = 0; i < n - 1; i++) {
+579:             realEigenvalues[i] = main[i];
+580:             e[i] = secondary[i];
+581:         }
+582:         realEigenvalues[n - 1] = main[n - 1];
+583:         e[n - 1] = 0;
+584: 
+585:         // Determine the largest main and secondary value in absolute term.
+586:         double maxAbsoluteValue = 0;
+587:         for (int i = 0; i < n; i++) {
+588:             if (FastMath.abs(realEigenvalues[i]) > maxAbsoluteValue) {
+589:                 maxAbsoluteValue = FastMath.abs(realEigenvalues[i]);
+590:             }
+591:             if (FastMath.abs(e[i]) > maxAbsoluteValue) {
+592:                 maxAbsoluteValue = FastMath.abs(e[i]);
+593:             }
+594:         }
+595:         // Make null any main and secondary value too small to be significant
+596:         if (maxAbsoluteValue != 0) {
+597:             for (int i=0; i < n; i++) {
+598:                 if (FastMath.abs(realEigenvalues[i]) <= Precision.EPSILON * maxAbsoluteValue) {
+599:                     realEigenvalues[i] = 0;
+600:                 }
+601:                 if (FastMath.abs(e[i]) <= Precision.EPSILON * maxAbsoluteValue) {
+602:                     e[i]=0;
+603:                 }
+604:             }
+605:         }
+606: 
+607:         for (int j = 0; j < n; j++) {
+608:             int its = 0;
+609:             int m;
+610:             do {
+611:                 for (m = j; m < n - 1; m++) {
+612:                     double delta = FastMath.abs(realEigenvalues[m]) +
+613:                         FastMath.abs(realEigenvalues[m + 1]);
+614:                     if (FastMath.abs(e[m]) + delta == delta) {
+615:                         break;
+616:                     }
+617:                 }
+618:                 if (m != j) {
+619:                     if (its == maxIter) {
+620:                         throw new MaxCountExceededException(LocalizedFormats.CONVERGENCE_FAILED,
+621:                                                             maxIter);
+622:                     }
+623:                     its++;
+624:                     double q = (realEigenvalues[j + 1] - realEigenvalues[j]) / (2 * e[j]);
+625:                     double t = FastMath.sqrt(1 + q * q);
+626:                     if (q < 0.0) {
+627:                         q = realEigenvalues[m] - realEigenvalues[j] + e[j] / (q - t);
+628:                     } else {
+629:                         q = realEigenvalues[m] - realEigenvalues[j] + e[j] / (q + t);
+630:                     }
+631:                     double u = 0.0;
+632:                     double s = 1.0;
+633:                     double c = 1.0;
+634:                     int i;
+635:                     for (i = m - 1; i >= j; i--) {
+636:                         double p = s * e[i];
+637:                         double h = c * e[i];
+638:                         if (FastMath.abs(p) >= FastMath.abs(q)) {
+639:                             c = q / p;
+640:                             t = FastMath.sqrt(c * c + 1.0);
+641:                             e[i + 1] = p * t;
+642:                             s = 1.0 / t;
+643:                             c = c * s;
+644:                         } else {
+645:                             s = p / q;
+646:                             t = FastMath.sqrt(s * s + 1.0);
+647:                             e[i + 1] = q * t;
+648:                             c = 1.0 / t;
+649:                             s = s * c;
+650:                         }
+651:                         if (e[i + 1] == 0.0) {
+652:                             realEigenvalues[i + 1] -= u;
+653:                             e[m] = 0.0;
+654:                             break;
+655:                         }
+656:                         q = realEigenvalues[i + 1] - u;
+657:                         t = (realEigenvalues[i] - q) * s + 2.0 * c * h;
+658:                         u = s * t;
+659:                         realEigenvalues[i + 1] = q + u;
+660:                         q = c * t - h;
+661:                         for (int ia = 0; ia < n; ia++) {
+662:                             p = z[ia][i + 1];
+663:                             z[ia][i + 1] = s * z[ia][i] + c * p;
+664:                             z[ia][i] = c * z[ia][i] - s * p;
+665:                         }
+666:                     }
+667:                     if (t == 0.0 && i >= j) {
+668:                         continue;
+669:                     }
+670:                     realEigenvalues[j] -= u;
+671:                     e[j] = q;
+672:                     e[m] = 0.0;
+673:                 }
+674:             } while (m != j);
+675:         }
+676: 
+677:         //Sort the eigen values (and vectors) in increase order
+678:         for (int i = 0; i < n; i++) {
+679:             int k = i;
+680:             double p = realEigenvalues[i];
+681:             for (int j = i + 1; j < n; j++) {
+682:                 if (realEigenvalues[j] > p) {
+683:                     k = j;
+684:                     p = realEigenvalues[j];
+685:                 }
+686:             }
+687:             if (k != i) {
+688:                 realEigenvalues[k] = realEigenvalues[i];
+689:                 realEigenvalues[i] = p;
+690:                 for (int j = 0; j < n; j++) {
+691:                     p = z[j][i];
+692:                     z[j][i] = z[j][k];
+693:                     z[j][k] = p;
+694:                 }
+695:             }
+696:         }
+697: 
+698:         // Determine the largest eigen value in absolute term.
+699:         maxAbsoluteValue = 0;
+700:         for (int i = 0; i < n; i++) {
+701:             if (FastMath.abs(realEigenvalues[i]) > maxAbsoluteValue) {
+702:                 maxAbsoluteValue=FastMath.abs(realEigenvalues[i]);
+703:             }
+704:         }
+705:         // Make null any eigen value too small to be significant
+706:         if (maxAbsoluteValue != 0.0) {
+707:             for (int i=0; i < n; i++) {
+708:                 if (FastMath.abs(realEigenvalues[i]) < Precision.EPSILON * maxAbsoluteValue) {
+709:                     realEigenvalues[i] = 0;
+710:                 }
+711:             }
+712:         }
+713:         eigenvectors = new ArrayRealVector[n];
+714:         final double[] tmp = new double[n];
+715:         for (int i = 0; i < n; i++) {
+716:             for (int j = 0; j < n; j++) {
+717:                 tmp[j] = z[j][i];
+718:             }
+719:             eigenvectors[i] = new ArrayRealVector(tmp);
+720:         }
+721:     }
+
+[21] org.apache.commons.math3.distribution.NormalDistribution#NormalDistribution  (lines 69-72)
+69:     public NormalDistribution(double mean, double sd)
+70:         throws NotStrictlyPositiveException {
+71:         this(mean, sd, DEFAULT_INVERSE_ABSOLUTE_ACCURACY);
+72:     }
+
+[22] org.apache.commons.math3.linear.Array2DRowRealMatrix#Array2DRowRealMatrix  (lines 78-81)
+78:     public Array2DRowRealMatrix(final double[][] d)
+79:         throws DimensionMismatchException, NoDataException, NullArgumentException {
+80:         copyIn(d);
+81:     }
+
+[23] org.apache.commons.math3.util.FastMath#exp  (lines 830-832)
+830:     public static double exp(double x) {
+831:         return exp(x, 0.0, null);
+832:     }
+
+[24] org.apache.commons.math3.linear.MatrixUtils#createRealMatrix  (lines 127-136)
+127:     public static RealMatrix createRealMatrix(double[][] data)
+128:         throws NullArgumentException, DimensionMismatchException,
+129:         NoDataException {
+130:         if (data == null ||
+131:             data[0] == null) {
+132:             throw new NullArgumentException();
+133:         }
+134:         return (data.length * data[0].length <= 4096) ?
+135:                 new Array2DRowRealMatrix(data) : new BlockRealMatrix(data);
+136:     }
+
+[25] org.apache.commons.math3.util.FastMath#exp  (lines 841-956)
+841:     private static double exp(double x, double extra, double[] hiPrec) {
+842:         double intPartA;
+843:         double intPartB;
+844:         int intVal;
+845: 
+846:         /* Lookup exp(floor(x)).
+847:          * intPartA will have the upper 22 bits, intPartB will have the lower
+848:          * 52 bits.
+849:          */
+850:         if (x < 0.0) {
+851:             intVal = (int) -x;
+852: 
+853:             if (intVal > 746) {
+854:                 if (hiPrec != null) {
+855:                     hiPrec[0] = 0.0;
+856:                     hiPrec[1] = 0.0;
+857:                 }
+858:                 return 0.0;
+859:             }
+860: 
+861:             if (intVal > 709) {
+862:                 /* This will produce a subnormal output */
+863:                 final double result = exp(x+40.19140625, extra, hiPrec) / 285040095144011776.0;
+864:                 if (hiPrec != null) {
+865:                     hiPrec[0] /= 285040095144011776.0;
+866:                     hiPrec[1] /= 285040095144011776.0;
+867:                 }
+868:                 return result;
+869:             }
+870: 
+871:             if (intVal == 709) {
+872:                 /* exp(1.494140625) is nearly a machine number... */
+873:                 final double result = exp(x+1.494140625, extra, hiPrec) / 4.455505956692756620;
+874:                 if (hiPrec != null) {
+875:                     hiPrec[0] /= 4.455505956692756620;
+876:                     hiPrec[1] /= 4.455505956692756620;
+877:                 }
+878:                 return result;
+879:             }
+880: 
+881:             intVal++;
+882: 
+883:             intPartA = ExpIntTable.EXP_INT_TABLE_A[EXP_INT_TABLE_MAX_INDEX-intVal];
+884:             intPartB = ExpIntTable.EXP_INT_TABLE_B[EXP_INT_TABLE_MAX_INDEX-intVal];
+885: 
+886:             intVal = -intVal;
+887:         } else {
+888:             intVal = (int) x;
+889: 
+890:             if (intVal > 709) {
+891:                 if (hiPrec != null) {
+892:                     hiPrec[0] = Double.POSITIVE_INFINITY;
+893:                     hiPrec[1] = 0.0;
+894:                 }
+895:                 return Double.POSITIVE_INFINITY;
+896:             }
+897: 
+898:             intPartA = ExpIntTable.EXP_INT_TABLE_A[EXP_INT_TABLE_MAX_INDEX+intVal];
+899:             intPartB = ExpIntTable.EXP_INT_TABLE_B[EXP_INT_TABLE_MAX_INDEX+intVal];
+900:         }
+901: 
+902:         /* Get the fractional part of x, find the greatest multiple of 2^-10 less than
+903:          * x and look up the exp function of it.
+904:          * fracPartA will have the upper 22 bits, fracPartB the lower 52 bits.
+905:          */
+906:         final int intFrac = (int) ((x - intVal) * 1024.0);
+907:         final double fracPartA = ExpFracTable.EXP_FRAC_TABLE_A[intFrac];
+908:         final double fracPartB = ExpFracTable.EXP_FRAC_TABLE_B[intFrac];
+909: 
+910:         /* epsilon is the difference in x from the nearest multiple of 2^-10.  It
+911:          * has a value in the range 0 <= epsilon < 2^-10.
+912:          * Do the subtraction from x as the last step to avoid possible loss of percison.
+913:          */
+914:         final double epsilon = x - (intVal + intFrac / 1024.0);
+915: 
+916:         /* Compute z = exp(epsilon) - 1.0 via a minimax polynomial.  z has
+917:        full double precision (52 bits).  Since z < 2^-10, we will have
+918:        62 bits of precision when combined with the contant 1.  This will be
+919:        used in the last addition below to get proper rounding. */
+920: 
+921:         /* Remez generated polynomial.  Converges on the interval [0, 2^-10], error
+922:        is less than 0.5 ULP */
+923:         double z = 0.04168701738764507;
+924:         z = z * epsilon + 0.1666666505023083;
+925:         z = z * epsilon + 0.5000000000042687;
+926:         z = z * epsilon + 1.0;
+927:         z = z * epsilon + -3.940510424527919E-20;
+928: 
+929:         /* Compute (intPartA+intPartB) * (fracPartA+fracPartB) by binomial
+930:        expansion.
+931:        tempA is exact since intPartA and intPartB only have 22 bits each.
+932:        tempB will have 52 bits of precision.
+933:          */
+934:         double tempA = intPartA * fracPartA;
+935:         double tempB = intPartA * fracPartB + intPartB * fracPartA + intPartB * fracPartB;
+936: 
+937:         /* Compute the result.  (1+z)(tempA+tempB).  Order of operations is
+938:        important.  For accuracy add by increasing size.  tempA is exact and
+939:        much larger than the others.  If there are extra bits specified from the
+940:        pow() function, use them. */
+941:         final double tempC = tempB + tempA;
+942:         final double result;
+943:         if (extra != 0.0) {
+944:             result = tempC*extra*z + tempC*extra + tempC*z + tempB + tempA;
+945:         } else {
+946:             result = tempC*z + tempB + tempA;
+947:         }
+948: 
+949:         if (hiPrec != null) {
+950:             // If requesting high precision
+951:             hiPrec[0] = tempA;
+952:             hiPrec[1] = tempC*extra*z + tempC*extra + tempC*z + tempB;
+953:         }
+954: 
+955:         return result;
+956:     }
+
+[26] org.apache.commons.math3.linear.Array2DRowRealMatrix#getData  (lines 252-255)
+252:     @Override
+253:     public double[][] getData() {
+254:         return copyOut();
+255:     }
+
+[27] org.apache.commons.math3.util.FastMath#pow  (lines 1611-1668)
+1611:     public static double pow(double d, int e) {
+1612: 
+1613:         if (e == 0) {
+1614:             return 1.0;
+1615:         } else if (e < 0) {
+1616:             e = -e;
+1617:             d = 1.0 / d;
+1618:         }
+1619: 
+1620:         // split d as two 26 bits numbers
+1621:         // beware the following expressions must NOT be simplified, they rely on floating point arithmetic properties
+1622:         final int splitFactor = 0x8000001;
+1623:         final double cd       = splitFactor * d;
+1624:         final double d1High   = cd - (cd - d);
+1625:         final double d1Low    = d - d1High;
+1626: 
+1627:         // prepare result
+1628:         double resultHigh = 1;
+1629:         double resultLow  = 0;
+1630: 
+1631:         // d^(2p)
+1632:         double d2p     = d;
+1633:         double d2pHigh = d1High;
+1634:         double d2pLow  = d1Low;
+1635: 
+1636:         while (e != 0) {
+1637: 
+1638:             if ((e & 0x1) != 0) {
+1639:                 // accurate multiplication result = result * d^(2p) using Veltkamp TwoProduct algorithm
+1640:                 // beware the following expressions must NOT be simplified, they rely on floating point arithmetic properties
+1641:                 final double tmpHigh = resultHigh * d2p;
+1642:                 final double cRH     = splitFactor * resultHigh;
+1643:                 final double rHH     = cRH - (cRH - resultHigh);
+1644:                 final double rHL     = resultHigh - rHH;
+1645:                 final double tmpLow  = rHL * d2pLow - (((tmpHigh - rHH * d2pHigh) - rHL * d2pHigh) - rHH * d2pLow);
+1646:                 resultHigh = tmpHigh;
+1647:                 resultLow  = resultLow * d2p + tmpLow;
+1648:             }
+1649: 
+1650:             // accurate squaring d^(2(p+1)) = d^(2p) * d^(2p) using Veltkamp TwoProduct algorithm
+1651:             // beware the following expressions must NOT be simplified, they rely on floating point arithmetic properties
+1652:             final double tmpHigh = d2pHigh * d2p;
+1653:             final double cD2pH   = splitFactor * d2pHigh;
+1654:             final double d2pHH   = cD2pH - (cD2pH - d2pHigh);
+1655:             final double d2pHL   = d2pHigh - d2pHH;
+1656:             final double tmpLow  = d2pHL * d2pLow - (((tmpHigh - d2pHH * d2pHigh) - d2pHL * d2pHigh) - d2pHH * d2pLow);
+1657:             final double cTmpH   = splitFactor * tmpHigh;
+1658:             d2pHigh = cTmpH - (cTmpH - tmpHigh);
+1659:             d2pLow  = d2pLow * d2p + tmpLow + (tmpHigh - d2pHigh);
+1660:             d2p     = d2pHigh + d2pLow;
+1661: 
+1662:             e = e >> 1;
+1663: 
+1664:         }
+1665: 
+1666:         return resultHigh + resultLow;
+1667: 
+1668:     }
+
+[28] org.apache.commons.math3.distribution.AbstractMultivariateRealDistribution#getDimension  (lines 52-54)
+52:     public int getDimension() {
+53:         return dimension;
+54:     }
+
+[29] org.apache.commons.math3.linear.EigenDecomposition#EigenDecomposition  (lines 117-128)
+117:     public EigenDecomposition(final RealMatrix matrix)
+118:         throws MathArithmeticException {
+119:         final double symTol = 10 * matrix.getRowDimension() * matrix.getColumnDimension() * Precision.EPSILON;
+120:         isSymmetric = MatrixUtils.isSymmetric(matrix, symTol);
+121:         if (isSymmetric) {
+122:             transformToTridiagonal(matrix);
+123:             findEigenVectors(transformer.getQ().getData());
+124:         } else {
+125:             final SchurTransformer t = transformToSchur(matrix);
+126:             findEigenVectorsFromSchur(t);
+127:         }
+128:     }
+
+[30] org.apache.commons.math3.util.MathArrays#copyOf  (lines 746-750)
+746:     public static double[] copyOf(double[] source, int len) {
+747:          final double[] output = new double[len];
+748:          System.arraycopy(source, 0, output, 0, FastMath.min(len, source.length));
+749:          return output;
+750:      }
+
+[31] org.apache.commons.math3.linear.EigenDecomposition#getSolver  (lines 405-410)
+405:     public DecompositionSolver getSolver() {
+406:         if (hasComplexEigenvalues()) {
+407:             throw new MathUnsupportedOperationException();
+408:         }
+409:         return new Solver(realEigenvalues, imagEigenvalues, eigenvectors);
+410:     }
+
+[32] org.apache.commons.math3.distribution.MultivariateNormalDistribution#MultivariateNormalDistribution  (lines 97-156)
+97:     public MultivariateNormalDistribution(RandomGenerator rng,
+98:                                           final double[] means,
+99:                                           final double[][] covariances)
+100:             throws SingularMatrixException,
+101:                    DimensionMismatchException,
+102:                    NonPositiveDefiniteMatrixException {
+103:         super(rng, means.length);
+104: 
+105:         final int dim = means.length;
+106: 
+107:         if (covariances.length != dim) {
+108:             throw new DimensionMismatchException(covariances.length, dim);
+109:         }
+110: 
+111:         for (int i = 0; i < dim; i++) {
+112:             if (dim != covariances[i].length) {
+113:                 throw new DimensionMismatchException(covariances[i].length, dim);
+114:             }
+115:         }
+116: 
+117:         this.means = MathArrays.copyOf(means);
+118: 
+119:         covarianceMatrix = new Array2DRowRealMatrix(covariances);
+120: 
+121:         // Covariance matrix eigen decomposition.
+122:         final EigenDecomposition covMatDec = new EigenDecomposition(covarianceMatrix);
+123: 
+124:         // Compute and store the inverse.
+125:         covarianceMatrixInverse = covMatDec.getSolver().getInverse();
+126:         // Compute and store the determinant.
+127:         covarianceMatrixDeterminant = covMatDec.getDeterminant();
+128: 
+129:         // Eigenvalues of the covariance matrix.
+130:         final double[] covMatEigenvalues = covMatDec.getRealEigenvalues();
+131: 
+132:         for (int i = 0; i < covMatEigenvalues.length; i++) {
+133:             if (covMatEigenvalues[i] < 0) {
+134:                 throw new NonPositiveDefiniteMatrixException(covMatEigenvalues[i], i, 0);
+135:             }
+136:         }
+137: 
+138:         // Matrix where each column is an eigenvector of the covariance matrix.
+139:         final Array2DRowRealMatrix covMatEigenvectors = new Array2DRowRealMatrix(dim, dim);
+140:         for (int v = 0; v < dim; v++) {
+141:             final double[] evec = covMatDec.getEigenvector(v).toArray();
+142:             covMatEigenvectors.setColumn(v, evec);
+143:         }
+144: 
+145:         final RealMatrix tmpMatrix = covMatEigenvectors.transpose();
+146: 
+147:         // Scale each eigenvector by the square root of its eigenvalue.
+148:         for (int row = 0; row < dim; row++) {
+149:             final double factor = FastMath.sqrt(covMatEigenvalues[row]);
+150:             for (int col = 0; col < dim; col++) {
+151:                 tmpMatrix.multiplyEntry(row, col, factor);
+152:             }
+153:         }
+154: 
+155:         samplingMatrix = covMatEigenvectors.multiply(tmpMatrix);
+156:     }
+
+[33] org.apache.commons.math3.linear.EigenDecomposition#getDeterminant  (lines 356-362)
+356:     public double getDeterminant() {
+357:         double determinant = 1;
+358:         for (double lambda : realEigenvalues) {
+359:             determinant *= lambda;
+360:         }
+361:         return determinant;
+362:     }
+
+[34] org.apache.commons.math3.random.RandomDataImpl#RandomDataImpl  (lines 114-116)
+114:     public RandomDataImpl() {
+115:         delegate = new RandomDataGenerator();
+116:     }
+
+[35] org.apache.commons.math3.util.FastMathLiteralArrays#loadExpIntB  (lines 6149-6151)
+6149:     static double[] loadExpIntB() {
+6150:         return EXP_INT_B.clone();
+6151:     }
+
+[36] org.apache.commons.math3.distribution.NormalDistribution#NormalDistribution  (lines 99-113)
+99:     public NormalDistribution(RandomGenerator rng,
+100:                               double mean,
+101:                               double sd,
+102:                               double inverseCumAccuracy)
+103:         throws NotStrictlyPositiveException {
+104:         super(rng);
+105: 
+106:         if (sd <= 0) {
+107:             throw new NotStrictlyPositiveException(LocalizedFormats.STANDARD_DEVIATION, sd);
+108:         }
+109: 
+110:         this.mean = mean;
+111:         standardDeviation = sd;
+112:         solverAbsoluteAccuracy = inverseCumAccuracy;
+113:     }
+
+[37] org.apache.commons.math3.util.FastMathLiteralArrays#loadExpIntA  (lines 6141-6143)
+6141:     static double[] loadExpIntA() {
+6142:         return EXP_INT_A.clone();
+6143:     }
+
+[38] org.apache.commons.math3.linear.Array2DRowRealMatrix#setSubMatrix  (lines 267-300)
+267:     @Override
+268:     public void setSubMatrix(final double[][] subMatrix, final int row,
+269:                              final int column)
+270:         throws NoDataException, OutOfRangeException,
+271:         DimensionMismatchException, NullArgumentException {
+272:         if (data == null) {
+273:             if (row > 0) {
+274:                 throw new MathIllegalStateException(LocalizedFormats.FIRST_ROWS_NOT_INITIALIZED_YET, row);
+275:             }
+276:             if (column > 0) {
+277:                 throw new MathIllegalStateException(LocalizedFormats.FIRST_COLUMNS_NOT_INITIALIZED_YET, column);
+278:             }
+279:             MathUtils.checkNotNull(subMatrix);
+280:             final int nRows = subMatrix.length;
+281:             if (nRows == 0) {
+282:                 throw new NoDataException(LocalizedFormats.AT_LEAST_ONE_ROW);
+283:             }
+284: 
+285:             final int nCols = subMatrix[0].length;
+286:             if (nCols == 0) {
+287:                 throw new NoDataException(LocalizedFormats.AT_LEAST_ONE_COLUMN);
+288:             }
+289:             data = new double[subMatrix.length][nCols];
+290:             for (int i = 0; i < data.length; ++i) {
+291:                 if (subMatrix[i].length != nCols) {
+292:                     throw new DimensionMismatchException(subMatrix[i].length, nCols);
+293:                 }
+294:                 System.arraycopy(subMatrix[i], 0, data[i + row], column, nCols);
+295:             }
+296:         } else {
+297:             super.setSubMatrix(subMatrix, row, column);
+298:         }
+299: 
+300:     }
+
+[39] org.apache.commons.math3.linear.EigenDecomposition#Solver  (lines 428-434)
+428:         private Solver(final double[] realEigenvalues,
+429:                 final double[] imagEigenvalues,
+430:                 final ArrayRealVector[] eigenvectors) {
+431:             this.realEigenvalues = realEigenvalues;
+432:             this.imagEigenvalues = imagEigenvalues;
+433:             this.eigenvectors = eigenvectors;
+434:         }
+
+[40] org.apache.commons.math3.util.FastMath#pow  (lines 1442-1600)
+1442:     public static double pow(double x, double y) {
+1443:         final double lns[] = new double[2];
+1444: 
+1445:         if (y == 0.0) {
+1446:             return 1.0;
+1447:         }
+1448: 
+1449:         if (x != x) { // X is NaN
+1450:             return x;
+1451:         }
+1452: 
+1453: 
+1454:         if (x == 0) {
+1455:             long bits = Double.doubleToLongBits(x);
+1456:             if ((bits & 0x8000000000000000L) != 0) {
+1457:                 // -zero
+1458:                 long yi = (long) y;
+1459: 
+1460:                 if (y < 0 && y == yi && (yi & 1) == 1) {
+1461:                     return Double.NEGATIVE_INFINITY;
+1462:                 }
+1463: 
+1464:                 if (y > 0 && y == yi && (yi & 1) == 1) {
+1465:                     return -0.0;
+1466:                 }
+1467:             }
+1468: 
+1469:             if (y < 0) {
+1470:                 return Double.POSITIVE_INFINITY;
+1471:             }
+1472:             if (y > 0) {
+1473:                 return 0.0;
+1474:             }
+1475: 
+1476:             return Double.NaN;
+1477:         }
+1478: 
+1479:         if (x == Double.POSITIVE_INFINITY) {
+1480:             if (y != y) { // y is NaN
+1481:                 return y;
+1482:             }
+1483:             if (y < 0.0) {
+1484:                 return 0.0;
+1485:             } else {
+1486:                 return Double.POSITIVE_INFINITY;
+1487:             }
+1488:         }
+1489: 
+1490:         if (y == Double.POSITIVE_INFINITY) {
+1491:             if (x * x == 1.0) {
+1492:                 return Double.NaN;
+1493:             }
+1494: 
+1495:             if (x * x > 1.0) {
+1496:                 return Double.POSITIVE_INFINITY;
+1497:             } else {
+1498:                 return 0.0;
+1499:             }
+1500:         }
+1501: 
+1502:         if (x == Double.NEGATIVE_INFINITY) {
+1503:             if (y != y) { // y is NaN
+1504:                 return y;
+1505:             }
+1506: 
+1507:             if (y < 0) {
+1508:                 long yi = (long) y;
+1509:                 if (y == yi && (yi & 1) == 1) {
+1510:                     return -0.0;
+1511:                 }
+1512: 
+1513:                 return 0.0;
+1514:             }
+1515: 
+1516:             if (y > 0)  {
+1517:                 long yi = (long) y;
+1518:                 if (y == yi && (yi & 1) == 1) {
+1519:                     return Double.NEGATIVE_INFINITY;
+1520:                 }
+1521: 
+1522:                 return Double.POSITIVE_INFINITY;
+1523:             }
+1524:         }
+1525: 
+1526:         if (y == Double.NEGATIVE_INFINITY) {
+1527: 
+1528:             if (x * x == 1.0) {
+1529:                 return Double.NaN;
+1530:             }
+1531: 
+1532:             if (x * x < 1.0) {
+1533:                 return Double.POSITIVE_INFINITY;
+1534:             } else {
+1535:                 return 0.0;
+1536:             }
+1537:         }
+1538: 
+1539:         /* Handle special case x<0 */
+1540:         if (x < 0) {
+1541:             // y is an even integer in this case
+1542:             if (y >= TWO_POWER_53 || y <= -TWO_POWER_53) {
+1543:                 return pow(-x, y);
+1544:             }
+1545: 
+1546:             if (y == (long) y) {
+1547:                 // If y is an integer
+1548:                 return ((long)y & 1) == 0 ? pow(-x, y) : -pow(-x, y);
+1549:             } else {
+1550:                 return Double.NaN;
+1551:             }
+1552:         }
+1553: 
+1554:         /* Split y into ya and yb such that y = ya+yb */
+1555:         double ya;
+1556:         double yb;
+1557:         if (y < 8e298 && y > -8e298) {
+1558:             double tmp1 = y * HEX_40000000;
+1559:             ya = y + tmp1 - tmp1;
+1560:             yb = y - ya;
+1561:         } else {
+1562:             double tmp1 = y * 9.31322574615478515625E-10;
+1563:             double tmp2 = tmp1 * 9.31322574615478515625E-10;
+1564:             ya = (tmp1 + tmp2 - tmp1) * HEX_40000000 * HEX_40000000;
+1565:             yb = y - ya;
+1566:         }
+1567: 
+1568:         /* Compute ln(x) */
+1569:         final double lores = log(x, lns);
+1570:         if (Double.isInfinite(lores)){ // don't allow this to be converted to NaN
+1571:             return lores;
+1572:         }
+1573: 
+1574:         double lna = lns[0];
+1575:         double lnb = lns[1];
+1576: 
+1577:         /* resplit lns */
+1578:         double tmp1 = lna * HEX_40000000;
+1579:         double tmp2 = lna + tmp1 - tmp1;
+1580:         lnb += lna - tmp2;
+1581:         lna = tmp2;
+1582: 
+1583:         // y*ln(x) = (aa+ab)
+1584:         final double aa = lna * ya;
+1585:         final double ab = lna * yb + lnb * ya + lnb * yb;
+1586: 
+1587:         lna = aa+ab;
+1588:         lnb = -(lna - aa - ab);
+1589: 
+1590:         double z = 1.0 / 120.0;
+1591:         z = z * lnb + (1.0 / 24.0);
+1592:         z = z * lnb + (1.0 / 6.0);
+1593:         z = z * lnb + 0.5;
+1594:         z = z * lnb + 1.0;
+1595:         z = z * lnb;
+1596: 
+1597:         final double result = exp(lna, z, null);
+1598:         //result = result + result * z;
+1599:         return result;
+1600:     }
+
+[41] org.apache.commons.math3.linear.Array2DRowRealMatrix#copyOut  (lines 527-535)
+527:     private double[][] copyOut() {
+528:         final int nRows = this.getRowDimension();
+529:         final double[][] out = new double[nRows][this.getColumnDimension()];
+530:         // can't copy 2-d array in one shot, otherwise get row references
+531:         for (int i = 0; i < nRows; i++) {
+532:             System.arraycopy(data[i], 0, out[i], 0, data[i].length);
+533:         }
+534:         return out;
+535:     }
+
+[42] org.apache.commons.math3.linear.AbstractRealMatrix#AbstractRealMatrix  (lines 65-74)
+65:     protected AbstractRealMatrix(final int rowDimension,
+66:         final int columnDimension)
+67:         throws NotStrictlyPositiveException {
+68:         if (rowDimension < 1) {
+69:             throw new NotStrictlyPositiveException(rowDimension);
+70:         }
+71:         if (columnDimension < 1) {
+72:             throw new NotStrictlyPositiveException(columnDimension);
+73:         }
+74:     }
+
+[43] org.apache.commons.math3.linear.TriDiagonalTransformer#getMainDiagonalRef  (lines 174-176)
+174:     double[] getMainDiagonalRef() {
+175:         return main;
+176:     }
+
+[44] org.apache.commons.math3.distribution.MultivariateNormalDistribution#density  (lines 177-186)
+177:     public double density(final double[] vals) throws DimensionMismatchException {
+178:         final int dim = getDimension();
+179:         if (vals.length != dim) {
+180:             throw new DimensionMismatchException(vals.length, dim);
+181:         }
+182: 
+183:         return FastMath.pow(2 * FastMath.PI, -dim / 2) *
+184:             FastMath.pow(covarianceMatrixDeterminant, -0.5) *
+185:             getExponentTerm(vals);
+186:     }
+
+[45] org.apache.commons.math3.distribution.NormalDistribution#NormalDistribution  (lines 84-87)
+84:     public NormalDistribution(double mean, double sd, double inverseCumAccuracy)
+85:         throws NotStrictlyPositiveException {
+86:         this(new Well19937c(), mean, sd, inverseCumAccuracy);
+87:     }
+
+[46] org.apache.commons.math3.distribution.MultivariateNormalDistribution#getMeans  (lines 163-165)
+163:     public double[] getMeans() {
+164:         return MathArrays.copyOf(means);
+165:     }
+
+[47] org.apache.commons.math3.linear.Array2DRowRealMatrix#preMultiply  (lines 370-390)
+370:     @Override
+371:     public double[] preMultiply(final double[] v)
+372:         throws DimensionMismatchException {
+373:         final int nRows = getRowDimension();
+374:         final int nCols = getColumnDimension();
+375:         if (v.length != nRows) {
+376:             throw new DimensionMismatchException(v.length, nRows);
+377:         }
+378: 
+379:         final double[] out = new double[nCols];
+380:         for (int col = 0; col < nCols; ++col) {
+381:             double sum = 0;
+382:             for (int i = 0; i < nRows; ++i) {
+383:                 sum += data[i][col] * v[i];
+384:             }
+385:             out[col] = sum;
+386:         }
+387: 
+388:         return out;
+389: 
+390:     }
+
+[48] org.apache.commons.math3.linear.Array2DRowRealMatrix#copyIn  (lines 545-548)
+545:     private void copyIn(final double[][] in)
+546:         throws DimensionMismatchException, NoDataException, NullArgumentException {
+547:         setSubMatrix(in, 0, 0);
+548:     }
+
+[49] org.apache.commons.math3.linear.EigenDecomposition#transformToTridiagonal  (lines 559-564)
+559:     private void transformToTridiagonal(final RealMatrix matrix) {
+560:         // transform the matrix to tridiagonal
+561:         transformer = new TriDiagonalTransformer(matrix);
+562:         main = transformer.getMainDiagonalRef();
+563:         secondary = transformer.getSecondaryDiagonalRef();
+564:     }
+
+[50] org.apache.commons.math3.distribution.NormalDistribution#density  (lines 134-138)
+134:     public double density(double x) {
+135:         final double x0 = x - mean;
+136:         final double x1 = x0 / standardDeviation;
+137:         return FastMath.exp(-0.5 * x1 * x1) / (standardDeviation * SQRT2PI);
+138:     }

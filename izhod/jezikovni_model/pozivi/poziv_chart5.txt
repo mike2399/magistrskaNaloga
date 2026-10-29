@@ -1,0 +1,181 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.jfree.data.xy.junit.XYSeriesTests::testBug1955483
+java.lang.IndexOutOfBoundsException: Index: -1, Size: 1
+	at java.util.ArrayList.rangeCheckForAdd(ArrayList.java:665)
+	at java.util.ArrayList.add(ArrayList.java:477)
+	at org.jfree.data.xy.XYSeries.addOrUpdate(XYSeries.java:564)
+	at org.jfree.data.xy.XYSeries.addOrUpdate(XYSeries.java:527)
+	at org.jfree.data.xy.junit.XYSeriesTests.testBug1955483(XYSeriesTests.java:479)
+
+=== CANDIDATE METHODS ===
+
+[1] org.jfree.data.xy.XYDataItem#compareTo  (lines 173-205)
+173:     public int compareTo(Object o1) {
+174: 
+175:         int result;
+176: 
+177:         // CASE 1 : Comparing to another TimeSeriesDataPair object
+178:         // -------------------------------------------------------
+179:         if (o1 instanceof XYDataItem) {
+180:             XYDataItem dataItem = (XYDataItem) o1;
+181:             double compare = this.x.doubleValue()
+182:                              - dataItem.getX().doubleValue();
+183:             if (compare > 0.0) {
+184:                 result = 1;
+185:             }
+186:             else {
+187:                 if (compare < 0.0) {
+188:                     result = -1;
+189:                 }
+190:                 else {
+191:                     result = 0;
+192:                 }
+193:             }
+194:         }
+195: 
+196:         // CASE 2 : Comparing to a general object
+197:         // ---------------------------------------------
+198:         else {
+199:             // consider time periods to be ordered after general objects
+200:             result = 1;
+201:         }
+202: 
+203:         return result;
+204: 
+205:     }
+
+[2] org.jfree.data.general.Series#notifyListeners  (lines 324-334)
+324:     protected void notifyListeners(SeriesChangeEvent event) {
+325: 
+326:         Object[] listenerList = this.listeners.getListenerList();
+327:         for (int i = listenerList.length - 2; i >= 0; i -= 2) {
+328:             if (listenerList[i] == SeriesChangeListener.class) {
+329:                 ((SeriesChangeListener) listenerList[i + 1]).seriesChanged(
+330:                         event);
+331:             }
+332:         }
+333: 
+334:     }
+
+[3] org.jfree.data.xy.XYSeries#addOrUpdate  (lines 540-576)
+540:     public XYDataItem addOrUpdate(Number x, Number y) {
+541:         if (x == null) {
+542:             throw new IllegalArgumentException("Null 'x' argument.");
+543:         }
+544: 
+545:         // if we get to here, we know that duplicate X values are not permitted
+546:         XYDataItem overwritten = null;
+547:         int index = indexOf(x);
+548:         if (index >= 0 && !this.allowDuplicateXValues) {
+549:             XYDataItem existing = (XYDataItem) this.data.get(index);
+550:             try {
+551:                 overwritten = (XYDataItem) existing.clone();
+552:             }
+553:             catch (CloneNotSupportedException e) {
+554:                 throw new SeriesException("Couldn't clone XYDataItem!");
+555:             }
+556:             existing.setY(y);
+557:         }
+558:         else {
+559:             // if the series is sorted, the negative index is a result from
+560:             // Collections.binarySearch() and tells us where to insert the
+561:             // new item...otherwise it will be just -1 and we should just
+562:             // append the value to the list...
+563:             if (this.autoSort) {
+564:                 this.data.add(-index - 1, new XYDataItem(x, y));
+565:             }
+566:             else {
+567:                 this.data.add(new XYDataItem(x, y));
+568:             }
+569:             // check if this addition will exceed the maximum item count...
+570:             if (getItemCount() > this.maximumItemCount) {
+571:                 this.data.remove(0);
+572:             }
+573:         }
+574:         fireSeriesChanged();
+575:         return overwritten;
+576:     }
+
+[4] org.jfree.data.general.SeriesChangeEvent#SeriesChangeEvent  (lines 60-62)
+60:     public SeriesChangeEvent(Object source) {
+61:         super(source);
+62:     }
+
+[5] org.jfree.data.xy.XYSeries#indexOf  (lines 588-601)
+588:     public int indexOf(Number x) {
+589:         if (this.autoSort) {
+590:             return Collections.binarySearch(this.data, new XYDataItem(x, null));
+591:         }
+592:         else {
+593:             for (int i = 0; i < this.data.size(); i++) {
+594:                 XYDataItem item = (XYDataItem) this.data.get(i);
+595:                 if (item.getX().equals(x)) {
+596:                     return i;
+597:                 }
+598:             }
+599:             return -1;
+600:         }
+601:     }
+
+[6] org.jfree.data.general.Series#Series  (lines 101-103)
+101:     protected Series(Comparable key) {
+102:         this(key, null);
+103:     }
+
+[7] org.jfree.data.general.Series#fireSeriesChanged  (lines 312-316)
+312:     public void fireSeriesChanged() {
+313:         if (this.notify) {
+314:             notifyListeners(new SeriesChangeEvent(this));
+315:         }
+316:     }
+
+[8] org.jfree.data.xy.XYSeries#getItemCount  (lines 185-187)
+185:     public int getItemCount() {
+186:         return this.data.size();
+187:     }
+
+[9] org.jfree.data.xy.XYDataItem#getX  (lines 95-97)
+95:     public Number getX() {
+96:         return this.x;
+97:     }
+
+[10] org.jfree.data.general.Series#Series  (lines 111-120)
+111:     protected Series(Comparable key, String description) {
+112:         if (key == null) {
+113:             throw new IllegalArgumentException("Null 'key' argument.");
+114:         }
+115:         this.key = key;
+116:         this.description = description;
+117:         this.listeners = new EventListenerList();
+118:         this.propertyChangeSupport = new PropertyChangeSupport(this);
+119:         this.notify = true;
+120:     }
+
+[11] org.jfree.data.xy.XYSeries#addOrUpdate  (lines 526-528)
+526:     public XYDataItem addOrUpdate(double x, double y) {
+527:         return addOrUpdate(new Double(x), new Double(y));
+528:     }
+
+[12] org.jfree.data.xy.XYDataItem#XYDataItem  (lines 72-78)
+72:     public XYDataItem(Number x, Number y) {
+73:         if (x == null) {
+74:             throw new IllegalArgumentException("Null 'x' argument.");
+75:         }
+76:         this.x = x;
+77:         this.y = y;
+78:     }
+
+[13] org.jfree.data.xy.XYSeries#XYSeries  (lines 150-157)
+150:     public XYSeries(Comparable key,
+151:                     boolean autoSort,
+152:                     boolean allowDuplicateXValues) {
+153:         super(key);
+154:         this.data = new java.util.ArrayList();
+155:         this.autoSort = autoSort;
+156:         this.allowDuplicateXValues = allowDuplicateXValues;
+157:     }

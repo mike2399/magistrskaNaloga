@@ -1,0 +1,1802 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math.dfp.DfpTest::testIssue567
+junit.framework.AssertionFailedError: expected:<0.0> but was:<-Infinity>
+	at org.apache.commons.math.dfp.DfpTest.testIssue567(DfpTest.java:1512)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math.dfp.Dfp#divide  (lines 1794-1852)
+1794:     public Dfp divide(int divisor) {
+1795: 
+1796:         // Handle special cases
+1797:         if (nans != FINITE) {
+1798:             if (isNaN()) {
+1799:                 return this;
+1800:             }
+1801: 
+1802:             if (nans == INFINITE) {
+1803:                 return newInstance(this);
+1804:             }
+1805:         }
+1806: 
+1807:         // Test for divide by zero
+1808:         if (divisor == 0) {
+1809:             field.setIEEEFlagsBits(DfpField.FLAG_DIV_ZERO);
+1810:             Dfp result = newInstance(getZero());
+1811:             result.sign = sign;
+1812:             result.nans = INFINITE;
+1813:             result = dotrap(DfpField.FLAG_DIV_ZERO, DIVIDE_TRAP, getZero(), result);
+1814:             return result;
+1815:         }
+1816: 
+1817:         // range check divisor
+1818:         if (divisor < 0 || divisor >= RADIX) {
+1819:             field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+1820:             Dfp result = newInstance(getZero());
+1821:             result.nans = QNAN;
+1822:             result = dotrap(DfpField.FLAG_INVALID, DIVIDE_TRAP, result, result);
+1823:             return result;
+1824:         }
+1825: 
+1826:         Dfp result = newInstance(this);
+1827: 
+1828:         int rl = 0;
+1829:         for (int i = mant.length-1; i >= 0; i--) {
+1830:             final int r = rl*RADIX + result.mant[i];
+1831:             final int rh = r / divisor;
+1832:             rl = r - rh * divisor;
+1833:             result.mant[i] = rh;
+1834:         }
+1835: 
+1836:         if (result.mant[mant.length-1] == 0) {
+1837:             // normalize
+1838:             result.shiftLeft();
+1839:             final int r = rl * RADIX;        // compute the next digit and put it in
+1840:             final int rh = r / divisor;
+1841:             rl = r - rh * divisor;
+1842:             result.mant[0] = rh;
+1843:         }
+1844: 
+1845:         final int excp = result.round(rl * RADIX / divisor);  // do the rounding
+1846:         if (excp != 0) {
+1847:             result = dotrap(excp, DIVIDE_TRAP, result, result);
+1848:         }
+1849: 
+1850:         return result;
+1851: 
+1852:     }
+
+[2] org.apache.commons.math.dfp.Dfp#getRadixDigits  (lines 639-641)
+639:     public int getRadixDigits() {
+640:         return field.getRadixDigits();
+641:     }
+
+[3] org.apache.commons.math.dfp.Dfp#complement  (lines 1143-1159)
+1143:     protected int complement(int extra) {
+1144: 
+1145:         extra = RADIX-extra;
+1146:         for (int i = 0; i < mant.length; i++) {
+1147:             mant[i] = RADIX-mant[i]-1;
+1148:         }
+1149: 
+1150:         int rh = extra / RADIX;
+1151:         extra = extra - rh * RADIX;
+1152:         for (int i = 0; i < mant.length; i++) {
+1153:             final int r = mant[i] + rh;
+1154:             rh = r / RADIX;
+1155:             mant[i] = r - rh * RADIX;
+1156:         }
+1157: 
+1158:         return extra;
+1159:     }
+
+[4] org.apache.commons.math.dfp.Dfp#trap  (lines 2203-2205)
+2203:     protected Dfp trap(int type, String what, Dfp oper, Dfp def, Dfp result) {
+2204:         return def;
+2205:     }
+
+[5] org.apache.commons.math.dfp.Dfp#compare  (lines 858-910)
+858:     private static int compare(final Dfp a, final Dfp b) {
+859:         // Ignore the sign of zero
+860:         if (a.mant[a.mant.length - 1] == 0 && b.mant[b.mant.length - 1] == 0 &&
+861:             a.nans == FINITE && b.nans == FINITE) {
+862:             return 0;
+863:         }
+864: 
+865:         if (a.sign != b.sign) {
+866:             if (a.sign == -1) {
+867:                 return -1;
+868:             } else {
+869:                 return 1;
+870:             }
+871:         }
+872: 
+873:         // deal with the infinities
+874:         if (a.nans == INFINITE && b.nans == FINITE) {
+875:             return a.sign;
+876:         }
+877: 
+878:         if (a.nans == FINITE && b.nans == INFINITE) {
+879:             return -b.sign;
+880:         }
+881: 
+882:         if (a.nans == INFINITE && b.nans == INFINITE) {
+883:             return 0;
+884:         }
+885: 
+886:         // Handle special case when a or b is zero, by ignoring the exponents
+887:         if (b.mant[b.mant.length-1] != 0 && a.mant[b.mant.length-1] != 0) {
+888:             if (a.exp < b.exp) {
+889:                 return -a.sign;
+890:             }
+891: 
+892:             if (a.exp > b.exp) {
+893:                 return a.sign;
+894:             }
+895:         }
+896: 
+897:         // compare the mantissas
+898:         for (int i = a.mant.length - 1; i >= 0; i--) {
+899:             if (a.mant[i] > b.mant[i]) {
+900:                 return a.sign;
+901:             }
+902: 
+903:             if (a.mant[i] < b.mant[i]) {
+904:                 return -a.sign;
+905:             }
+906:         }
+907: 
+908:         return 0;
+909: 
+910:     }
+
+[6] org.apache.commons.math.dfp.Dfp#multiply  (lines 1410-1510)
+1410:     public Dfp multiply(final Dfp x) {
+1411: 
+1412:         // make sure we don't mix number with different precision
+1413:         if (field.getRadixDigits() != x.field.getRadixDigits()) {
+1414:             field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+1415:             final Dfp result = newInstance(getZero());
+1416:             result.nans = QNAN;
+1417:             return dotrap(DfpField.FLAG_INVALID, MULTIPLY_TRAP, x, result);
+1418:         }
+1419: 
+1420:         Dfp result = newInstance(getZero());
+1421: 
+1422:         /* handle special cases */
+1423:         if (nans != FINITE || x.nans != FINITE) {
+1424:             if (isNaN()) {
+1425:                 return this;
+1426:             }
+1427: 
+1428:             if (x.isNaN()) {
+1429:                 return x;
+1430:             }
+1431: 
+1432:             if (nans == INFINITE && x.nans == FINITE && x.mant[mant.length-1] != 0) {
+1433:                 result = newInstance(this);
+1434:                 result.sign = (byte) (sign * x.sign);
+1435:                 return result;
+1436:             }
+1437: 
+1438:             if (x.nans == INFINITE && nans == FINITE && mant[mant.length-1] != 0) {
+1439:                 result = newInstance(x);
+1440:                 result.sign = (byte) (sign * x.sign);
+1441:                 return result;
+1442:             }
+1443: 
+1444:             if (x.nans == INFINITE && nans == INFINITE) {
+1445:                 result = newInstance(this);
+1446:                 result.sign = (byte) (sign * x.sign);
+1447:                 return result;
+1448:             }
+1449: 
+1450:             if ( (x.nans == INFINITE && nans == FINITE && mant[mant.length-1] == 0) ||
+1451:                     (nans == INFINITE && x.nans == FINITE && x.mant[mant.length-1] == 0) ) {
+1452:                 field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+1453:                 result = newInstance(getZero());
+1454:                 result.nans = QNAN;
+1455:                 result = dotrap(DfpField.FLAG_INVALID, MULTIPLY_TRAP, x, result);
+1456:                 return result;
+1457:             }
+1458:         }
+1459: 
+1460:         int[] product = new int[mant.length*2];  // Big enough to hold even the largest result
+1461: 
+1462:         for (int i = 0; i < mant.length; i++) {
+1463:             int rh = 0;  // acts as a carry
+1464:             for (int j=0; j<mant.length; j++) {
+1465:                 int r = mant[i] * x.mant[j];    // multiply the 2 digits
+1466:                 r = r + product[i+j] + rh;  // add to the product digit with carry in
+1467: 
+1468:                 rh = r / RADIX;
+1469:                 product[i+j] = r - rh * RADIX;
+1470:             }
+1471:             product[i+mant.length] = rh;
+1472:         }
+1473: 
+1474:         // Find the most sig digit
+1475:         int md = mant.length * 2 - 1;  // default, in case result is zero
+1476:         for (int i = mant.length * 2 - 1; i >= 0; i--) {
+1477:             if (product[i] != 0) {
+1478:                 md = i;
+1479:                 break;
+1480:             }
+1481:         }
+1482: 
+1483:         // Copy the digits into the result
+1484:         for (int i = 0; i < mant.length; i++) {
+1485:             result.mant[mant.length - i - 1] = product[md - i];
+1486:         }
+1487: 
+1488:         // Fixup the exponent.
+1489:         result.exp = exp + x.exp + md - 2 * mant.length + 1;
+1490:         result.sign = (byte)((sign == x.sign)?1:-1);
+1491: 
+1492:         if (result.mant[mant.length-1] == 0) {
+1493:             // if result is zero, set exp to zero
+1494:             result.exp = 0;
+1495:         }
+1496: 
+1497:         final int excp;
+1498:         if (md > (mant.length-1)) {
+1499:             excp = result.round(product[md-mant.length]);
+1500:         } else {
+1501:             excp = result.round(0); // has no effect except to check status
+1502:         }
+1503: 
+1504:         if (excp != 0) {
+1505:             result = dotrap(excp, MULTIPLY_TRAP, x, result);
+1506:         }
+1507: 
+1508:         return result;
+1509: 
+1510:     }
+
+[7] org.apache.commons.math.dfp.Dfp#negate  (lines 1313-1317)
+1313:     public Dfp negate() {
+1314:         Dfp result = newInstance(this);
+1315:         result.sign = (byte) - result.sign;
+1316:         return result;
+1317:     }
+
+[8] org.apache.commons.math.dfp.Dfp#shiftLeft  (lines 666-672)
+666:     protected void shiftLeft() {
+667:         for (int i = mant.length - 1; i > 0; i--) {
+668:             mant[i] = mant[i-1];
+669:         }
+670:         mant[0] = 0;
+671:         exp--;
+672:     }
+
+[9] org.apache.commons.math.dfp.Dfp#isNaN  (lines 807-809)
+807:     public boolean isNaN() {
+808:         return (nans == QNAN) || (nans == SNAN);
+809:     }
+
+[10] org.apache.commons.math.dfp.Dfp#dfp2string  (lines 2056-2124)
+2056:     protected String dfp2string() {
+2057:         char buffer[] = new char[mant.length*4 + 20];
+2058:         int p = 1;
+2059:         int q;
+2060:         int e = exp;
+2061:         boolean pointInserted = false;
+2062: 
+2063:         buffer[0] = ' ';
+2064: 
+2065:         if (e <= 0) {
+2066:             buffer[p++] = '0';
+2067:             buffer[p++] = '.';
+2068:             pointInserted = true;
+2069:         }
+2070: 
+2071:         while (e < 0) {
+2072:             buffer[p++] = '0';
+2073:             buffer[p++] = '0';
+2074:             buffer[p++] = '0';
+2075:             buffer[p++] = '0';
+2076:             e++;
+2077:         }
+2078: 
+2079:         for (int i = mant.length - 1; i >= 0; i--) {
+2080:             buffer[p++] = (char) ((mant[i] / 1000) + '0');
+2081:             buffer[p++] = (char) (((mant[i] / 100) % 10) + '0');
+2082:             buffer[p++] = (char) (((mant[i] / 10) % 10) + '0');
+2083:             buffer[p++] = (char) (((mant[i]) % 10) + '0');
+2084:             if (--e == 0) {
+2085:                 buffer[p++] = '.';
+2086:                 pointInserted = true;
+2087:             }
+2088:         }
+2089: 
+2090:         while (e > 0) {
+2091:             buffer[p++] = '0';
+2092:             buffer[p++] = '0';
+2093:             buffer[p++] = '0';
+2094:             buffer[p++] = '0';
+2095:             e--;
+2096:         }
+2097: 
+2098:         if (!pointInserted) {
+2099:             // Ensure we have a radix point!
+2100:             buffer[p++] = '.';
+2101:         }
+2102: 
+2103:         // Suppress leading zeros
+2104:         q = 1;
+2105:         while (buffer[q] == '0') {
+2106:             q++;
+2107:         }
+2108:         if (buffer[q] == '.') {
+2109:             q--;
+2110:         }
+2111: 
+2112:         // Suppress trailing zeros
+2113:         while (buffer[p-1] == '0') {
+2114:             p--;
+2115:         }
+2116: 
+2117:         // Insert sign
+2118:         if (sign < 0) {
+2119:             buffer[--q] = '-';
+2120:         }
+2121: 
+2122:         return new String(buffer, q, p - q);
+2123: 
+2124:     }
+
+[11] org.apache.commons.math.dfp.Dfp#sqrt  (lines 1857-1948)
+1857:     public Dfp sqrt() {
+1858: 
+1859:         // check for unusual cases
+1860:         if (nans == FINITE && mant[mant.length-1] == 0) {
+1861:             // if zero
+1862:             return newInstance(this);
+1863:         }
+1864: 
+1865:         if (nans != FINITE) {
+1866:             if (nans == INFINITE && sign == 1) {
+1867:                 // if positive infinity
+1868:                 return newInstance(this);
+1869:             }
+1870: 
+1871:             if (nans == QNAN) {
+1872:                 return newInstance(this);
+1873:             }
+1874: 
+1875:             if (nans == SNAN) {
+1876:                 Dfp result;
+1877: 
+1878:                 field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+1879:                 result = newInstance(this);
+1880:                 result = dotrap(DfpField.FLAG_INVALID, SQRT_TRAP, null, result);
+1881:                 return result;
+1882:             }
+1883:         }
+1884: 
+1885:         if (sign == -1) {
+1886:             // if negative
+1887:             Dfp result;
+1888: 
+1889:             field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+1890:             result = newInstance(this);
+1891:             result.nans = QNAN;
+1892:             result = dotrap(DfpField.FLAG_INVALID, SQRT_TRAP, null, result);
+1893:             return result;
+1894:         }
+1895: 
+1896:         Dfp x = newInstance(this);
+1897: 
+1898:         /* Lets make a reasonable guess as to the size of the square root */
+1899:         if (x.exp < -1 || x.exp > 1) {
+1900:             x.exp = this.exp / 2;
+1901:         }
+1902: 
+1903:         /* Coarsely estimate the mantissa */
+1904:         switch (x.mant[mant.length-1] / 2000) {
+1905:             case 0:
+1906:                 x.mant[mant.length-1] = x.mant[mant.length-1]/2+1;
+1907:                 break;
+1908:             case 2:
+1909:                 x.mant[mant.length-1] = 1500;
+1910:                 break;
+1911:             case 3:
+1912:                 x.mant[mant.length-1] = 2200;
+1913:                 break;
+1914:             default:
+1915:                 x.mant[mant.length-1] = 3000;
+1916:         }
+1917: 
+1918:         Dfp dx = newInstance(x);
+1919: 
+1920:         /* Now that we have the first pass estimate, compute the rest
+1921:        by the formula dx = (y - x*x) / (2x); */
+1922: 
+1923:         Dfp px  = getZero();
+1924:         Dfp ppx = getZero();
+1925:         while (x.unequal(px)) {
+1926:             dx = newInstance(x);
+1927:             dx.sign = -1;
+1928:             dx = dx.add(this.divide(x));
+1929:             dx = dx.divide(2);
+1930:             ppx = px;
+1931:             px = x;
+1932:             x = x.add(dx);
+1933: 
+1934:             if (x.equals(ppx)) {
+1935:                 // alternating between two values
+1936:                 break;
+1937:             }
+1938: 
+1939:             // if dx is zero, break.  Note testing the most sig digit
+1940:             // is a sufficient test since dx is normalized
+1941:             if (dx.mant[mant.length-1] == 0) {
+1942:                 break;
+1943:             }
+1944:         }
+1945: 
+1946:         return x;
+1947: 
+1948:     }
+
+[12] org.apache.commons.math.dfp.Dfp#newInstance  (lines 575-577)
+575:     public Dfp newInstance(final long x) {
+576:         return new Dfp(getField(), x);
+577:     }
+
+[13] org.apache.commons.math.dfp.DfpField#clearIEEEFlags  (lines 294-296)
+294:     public void clearIEEEFlags() {
+295:         ieeeFlags = 0;
+296:     }
+
+[14] org.apache.commons.math.dfp.Dfp#getZero  (lines 646-648)
+646:     public Dfp getZero() {
+647:         return field.getZero();
+648:     }
+
+[15] org.apache.commons.math.dfp.DfpField#computeStringConstants  (lines 569-593)
+569:     private static void computeStringConstants(final int highPrecisionDecimalDigits) {
+570:         if (sqr2String == null || sqr2String.length() < highPrecisionDecimalDigits - 3) {
+571: 
+572:             // recompute the string representation of the transcendental constants
+573:             final DfpField highPrecisionField = new DfpField(highPrecisionDecimalDigits, false);
+574:             final Dfp highPrecisionOne        = new Dfp(highPrecisionField, 1);
+575:             final Dfp highPrecisionTwo        = new Dfp(highPrecisionField, 2);
+576:             final Dfp highPrecisionThree      = new Dfp(highPrecisionField, 3);
+577: 
+578:             final Dfp highPrecisionSqr2 = highPrecisionTwo.sqrt();
+579:             sqr2String           = highPrecisionSqr2.toString();
+580:             sqr2ReciprocalString = highPrecisionOne.divide(highPrecisionSqr2).toString();
+581: 
+582:             final Dfp highPrecisionSqr3 = highPrecisionThree.sqrt();
+583:             sqr3String           = highPrecisionSqr3.toString();
+584:             sqr3ReciprocalString = highPrecisionOne.divide(highPrecisionSqr3).toString();
+585: 
+586:             piString   = computePi(highPrecisionOne, highPrecisionTwo, highPrecisionThree).toString();
+587:             eString    = computeExp(highPrecisionOne, highPrecisionOne).toString();
+588:             ln2String  = computeLn(highPrecisionTwo, highPrecisionOne, highPrecisionTwo).toString();
+589:             ln5String  = computeLn(new Dfp(highPrecisionField, 5),  highPrecisionOne, highPrecisionTwo).toString();
+590:             ln10String = computeLn(new Dfp(highPrecisionField, 10), highPrecisionOne, highPrecisionTwo).toString();
+591: 
+592:         }
+593:     }
+
+[16] org.apache.commons.math.dfp.DfpField#computePi  (lines 601-636)
+601:     private static Dfp computePi(final Dfp one, final Dfp two, final Dfp three) {
+602: 
+603:         Dfp sqrt2   = two.sqrt();
+604:         Dfp yk      = sqrt2.subtract(one);
+605:         Dfp four    = two.add(two);
+606:         Dfp two2kp3 = two;
+607:         Dfp ak      = two.multiply(three.subtract(two.multiply(sqrt2)));
+608: 
+609:         // The formula converges quartically. This means the number of correct
+610:         // digits is multiplied by 4 at each iteration! Five iterations are
+611:         // sufficient for about 160 digits, eight iterations give about
+612:         // 10000 digits (this has been checked) and 20 iterations more than
+613:         // 160 billions of digits (this has NOT been checked).
+614:         // So the limit here is considered sufficient for most purposes ...
+615:         for (int i = 1; i < 20; i++) {
+616:             final Dfp ykM1 = yk;
+617: 
+618:             final Dfp y2         = yk.multiply(yk);
+619:             final Dfp oneMinusY4 = one.subtract(y2.multiply(y2));
+620:             final Dfp s          = oneMinusY4.sqrt().sqrt();
+621:             yk = one.subtract(s).divide(one.add(s));
+622: 
+623:             two2kp3 = two2kp3.multiply(four);
+624: 
+625:             final Dfp p = one.add(yk);
+626:             final Dfp p2 = p.multiply(p);
+627:             ak = ak.multiply(p2.multiply(p2)).subtract(two2kp3.multiply(yk).multiply(one.add(yk).add(yk.multiply(yk))));
+628: 
+629:             if (yk.equals(ykM1)) {
+630:                 break;
+631:             }
+632:         }
+633: 
+634:         return one.divide(ak);
+635: 
+636:     }
+
+[17] org.apache.commons.math.dfp.Dfp#getTwo  (lines 660-662)
+660:     public Dfp getTwo() {
+661:         return field.getTwo();
+662:     }
+
+[18] org.apache.commons.math.dfp.Dfp#greaterThan  (lines 776-795)
+776:     public boolean greaterThan(final Dfp x) {
+777: 
+778:         // make sure we don't mix number with different precision
+779:         if (field.getRadixDigits() != x.field.getRadixDigits()) {
+780:             field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+781:             final Dfp result = newInstance(getZero());
+782:             result.nans = QNAN;
+783:             dotrap(DfpField.FLAG_INVALID, GREATER_THAN_TRAP, x, result);
+784:             return false;
+785:         }
+786: 
+787:         /* if a nan is involved, signal invalid and return false */
+788:         if (isNaN() || x.isNaN()) {
+789:             field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+790:             dotrap(DfpField.FLAG_INVALID, GREATER_THAN_TRAP, x, newInstance(getZero()));
+791:             return false;
+792:         }
+793: 
+794:         return compare(this, x) > 0;
+795:     }
+
+[19] org.apache.commons.math.dfp.Dfp#add  (lines 1165-1308)
+1165:     public Dfp add(final Dfp x) {
+1166: 
+1167:         // make sure we don't mix number with different precision
+1168:         if (field.getRadixDigits() != x.field.getRadixDigits()) {
+1169:             field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+1170:             final Dfp result = newInstance(getZero());
+1171:             result.nans = QNAN;
+1172:             return dotrap(DfpField.FLAG_INVALID, ADD_TRAP, x, result);
+1173:         }
+1174: 
+1175:         /* handle special cases */
+1176:         if (nans != FINITE || x.nans != FINITE) {
+1177:             if (isNaN()) {
+1178:                 return this;
+1179:             }
+1180: 
+1181:             if (x.isNaN()) {
+1182:                 return x;
+1183:             }
+1184: 
+1185:             if (nans == INFINITE && x.nans == FINITE) {
+1186:                 return this;
+1187:             }
+1188: 
+1189:             if (x.nans == INFINITE && nans == FINITE) {
+1190:                 return x;
+1191:             }
+1192: 
+1193:             if (x.nans == INFINITE && nans == INFINITE && sign == x.sign) {
+1194:                 return x;
+1195:             }
+1196: 
+1197:             if (x.nans == INFINITE && nans == INFINITE && sign != x.sign) {
+1198:                 field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+1199:                 Dfp result = newInstance(getZero());
+1200:                 result.nans = QNAN;
+1201:                 result = dotrap(DfpField.FLAG_INVALID, ADD_TRAP, x, result);
+1202:                 return result;
+1203:             }
+1204:         }
+1205: 
+1206:         /* copy this and the arg */
+1207:         Dfp a = newInstance(this);
+1208:         Dfp b = newInstance(x);
+1209: 
+1210:         /* initialize the result object */
+1211:         Dfp result = newInstance(getZero());
+1212: 
+1213:         /* Make all numbers positive, but remember their sign */
+1214:         final byte asign = a.sign;
+1215:         final byte bsign = b.sign;
+1216: 
+1217:         a.sign = 1;
+1218:         b.sign = 1;
+1219: 
+1220:         /* The result will be signed like the arg with greatest magnitude */
+1221:         byte rsign = bsign;
+1222:         if (compare(a, b) > 0) {
+1223:             rsign = asign;
+1224:         }
+1225: 
+1226:         /* Handle special case when a or b is zero, by setting the exponent
+1227:        of the zero number equal to the other one.  This avoids an alignment
+1228:        which would cause catastropic loss of precision */
+1229:         if (b.mant[mant.length-1] == 0) {
+1230:             b.exp = a.exp;
+1231:         }
+1232: 
+1233:         if (a.mant[mant.length-1] == 0) {
+1234:             a.exp = b.exp;
+1235:         }
+1236: 
+1237:         /* align number with the smaller exponent */
+1238:         int aextradigit = 0;
+1239:         int bextradigit = 0;
+1240:         if (a.exp < b.exp) {
+1241:             aextradigit = a.align(b.exp);
+1242:         } else {
+1243:             bextradigit = b.align(a.exp);
+1244:         }
+1245: 
+1246:         /* complement the smaller of the two if the signs are different */
+1247:         if (asign != bsign) {
+1248:             if (asign == rsign) {
+1249:                 bextradigit = b.complement(bextradigit);
+1250:             } else {
+1251:                 aextradigit = a.complement(aextradigit);
+1252:             }
+1253:         }
+1254: 
+1255:         /* add the mantissas */
+1256:         int rh = 0; /* acts as a carry */
+1257:         for (int i = 0; i < mant.length; i++) {
+1258:             final int r = a.mant[i]+b.mant[i]+rh;
+1259:             rh = r / RADIX;
+1260:             result.mant[i] = r - rh * RADIX;
+1261:         }
+1262:         result.exp = a.exp;
+1263:         result.sign = rsign;
+1264: 
+1265:         /* handle overflow -- note, when asign!=bsign an overflow is
+1266:          * normal and should be ignored.  */
+1267: 
+1268:         if (rh != 0 && (asign == bsign)) {
+1269:             final int lostdigit = result.mant[0];
+1270:             result.shiftRight();
+1271:             result.mant[mant.length-1] = rh;
+1272:             final int excp = result.round(lostdigit);
+1273:             if (excp != 0) {
+1274:                 result = dotrap(excp, ADD_TRAP, x, result);
+1275:             }
+1276:         }
+1277: 
+1278:         /* normalize the result */
+1279:         for (int i = 0; i < mant.length; i++) {
+1280:             if (result.mant[mant.length-1] != 0) {
+1281:                 break;
+1282:             }
+1283:             result.shiftLeft();
+1284:             if (i == 0) {
+1285:                 result.mant[0] = aextradigit+bextradigit;
+1286:                 aextradigit = 0;
+1287:                 bextradigit = 0;
+1288:             }
+1289:         }
+1290: 
+1291:         /* result is zero if after normalization the most sig. digit is zero */
+1292:         if (result.mant[mant.length-1] == 0) {
+1293:             result.exp = 0;
+1294: 
+1295:             if (asign != bsign) {
+1296:                 // Unless adding 2 negative zeros, sign is positive
+1297:                 result.sign = 1;  // Per IEEE 854-1987 Section 6.3
+1298:             }
+1299:         }
+1300: 
+1301:         /* Call round to test for over/under flows */
+1302:         final int excp = result.round(aextradigit + bextradigit);
+1303:         if (excp != 0) {
+1304:             result = dotrap(excp, ADD_TRAP, x, result);
+1305:         }
+1306: 
+1307:         return result;
+1308:     }
+
+[20] org.apache.commons.math.dfp.Dfp#newInstance  (lines 592-604)
+592:     public Dfp newInstance(final Dfp d) {
+593: 
+594:         // make sure we don't mix number with different precision
+595:         if (field.getRadixDigits() != d.field.getRadixDigits()) {
+596:             field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+597:             final Dfp result = newInstance(getZero());
+598:             result.nans = QNAN;
+599:             return dotrap(DfpField.FLAG_INVALID, NEW_INSTANCE_TRAP, d, result);
+600:         }
+601: 
+602:         return new Dfp(d);
+603: 
+604:     }
+
+[21] org.apache.commons.math.dfp.DfpField#computeExp  (lines 643-664)
+643:     public static Dfp computeExp(final Dfp a, final Dfp one) {
+644: 
+645:         Dfp y  = new Dfp(one);
+646:         Dfp py = new Dfp(one);
+647:         Dfp f  = new Dfp(one);
+648:         Dfp fi = new Dfp(one);
+649:         Dfp x  = new Dfp(one);
+650: 
+651:         for (int i = 0; i < 10000; i++) {
+652:             x = x.multiply(a);
+653:             y = y.add(x.divide(f));
+654:             fi = fi.add(one);
+655:             f = f.multiply(fi);
+656:             if (y.equals(py)) {
+657:                 break;
+658:             }
+659:             py = new Dfp(y);
+660:         }
+661: 
+662:         return y;
+663: 
+664:     }
+
+[22] org.apache.commons.math.dfp.Dfp#toString  (lines 1953-1970)
+1953:     @Override
+1954:     public String toString() {
+1955:         if (nans != FINITE) {
+1956:             // if non-finite exceptional cases
+1957:             if (nans == INFINITE) {
+1958:                 return (sign < 0) ? NEG_INFINITY_STRING : POS_INFINITY_STRING;
+1959:             } else {
+1960:                 return NAN_STRING;
+1961:             }
+1962:         }
+1963: 
+1964:         if (exp > mant.length || exp < -1) {
+1965:             return dfp2sci();
+1966:         }
+1967: 
+1968:         return dfp2string();
+1969: 
+1970:     }
+
+[23] org.apache.commons.math.dfp.DfpField#getTwo  (lines 413-415)
+413:     public Dfp getTwo() {
+414:         return two;
+415:     }
+
+[24] org.apache.commons.math.dfp.DfpField#DfpField  (lines 188-242)
+188:     private DfpField(final int decimalDigits, final boolean computeConstants) {
+189: 
+190:         this.radixDigits = (decimalDigits < 13) ? 4 : (decimalDigits + 3) / 4;
+191:         this.rMode       = RoundingMode.ROUND_HALF_EVEN;
+192:         this.ieeeFlags   = 0;
+193:         this.zero        = new Dfp(this, 0);
+194:         this.one         = new Dfp(this, 1);
+195:         this.two         = new Dfp(this, 2);
+196: 
+197:         if (computeConstants) {
+198:             // set up transcendental constants
+199:             synchronized (DfpField.class) {
+200: 
+201:                 // as a heuristic to circumvent Table-Maker's Dilemma, we set the string
+202:                 // representation of the constants to be at least 3 times larger than the
+203:                 // number of decimal digits, also as an attempt to really compute these
+204:                 // constants only once, we set a minimum number of digits
+205:                 computeStringConstants((decimalDigits < 67) ? 200 : (3 * decimalDigits));
+206: 
+207:                 // set up the constants at current field accuracy
+208:                 sqr2           = new Dfp(this, sqr2String);
+209:                 sqr2Split      = split(sqr2String);
+210:                 sqr2Reciprocal = new Dfp(this, sqr2ReciprocalString);
+211:                 sqr3           = new Dfp(this, sqr3String);
+212:                 sqr3Reciprocal = new Dfp(this, sqr3ReciprocalString);
+213:                 pi             = new Dfp(this, piString);
+214:                 piSplit        = split(piString);
+215:                 e              = new Dfp(this, eString);
+216:                 eSplit         = split(eString);
+217:                 ln2            = new Dfp(this, ln2String);
+218:                 ln2Split       = split(ln2String);
+219:                 ln5            = new Dfp(this, ln5String);
+220:                 ln5Split       = split(ln5String);
+221:                 ln10           = new Dfp(this, ln10String);
+222: 
+223:             }
+224:         } else {
+225:             // dummy settings for unused constants
+226:             sqr2           = null;
+227:             sqr2Split      = null;
+228:             sqr2Reciprocal = null;
+229:             sqr3           = null;
+230:             sqr3Reciprocal = null;
+231:             pi             = null;
+232:             piSplit        = null;
+233:             e              = null;
+234:             eSplit         = null;
+235:             ln2            = null;
+236:             ln2Split       = null;
+237:             ln5            = null;
+238:             ln5Split       = null;
+239:             ln10           = null;
+240:         }
+241: 
+242:     }
+
+[25] org.apache.commons.math.dfp.Dfp#Dfp  (lines 201-203)
+201:     protected Dfp(final DfpField field, int x) {
+202:         this(field, (long) x);
+203:     }
+
+[26] org.apache.commons.math.dfp.Dfp#log10  (lines 1095-1106)
+1095:     public int log10()  {
+1096:         if (mant[mant.length-1] > 1000) {
+1097:             return exp * 4 - 1;
+1098:         }
+1099:         if (mant[mant.length-1] > 100) {
+1100:             return exp * 4 - 2;
+1101:         }
+1102:         if (mant[mant.length-1] > 10) {
+1103:             return exp * 4 - 3;
+1104:         }
+1105:         return exp * 4 - 4;
+1106:     }
+
+[27] org.apache.commons.math.dfp.Dfp#getField  (lines 632-634)
+632:     public DfpField getField() {
+633:         return field;
+634:     }
+
+[28] org.apache.commons.math.dfp.Dfp#getOne  (lines 653-655)
+653:     public Dfp getOne() {
+654:         return field.getOne();
+655:     }
+
+[29] org.apache.commons.math.dfp.DfpField#newDfp  (lines 382-384)
+382:     public Dfp newDfp(final String s) {
+383:         return new Dfp(this, s);
+384:     }
+
+[30] org.apache.commons.math.dfp.Dfp#Dfp  (lines 331-531)
+331:     protected Dfp(final DfpField field, final String s) {
+332: 
+333:         // initialize as if 0
+334:         mant = new int[field.getRadixDigits()];
+335:         sign = 1;
+336:         exp = 0;
+337:         nans = FINITE;
+338:         this.field = field;
+339: 
+340:         boolean decimalFound = false;
+341:         final int rsize = 4;   // size of radix in decimal digits
+342:         final int offset = 4;  // Starting offset into Striped
+343:         final char[] striped = new char[getRadixDigits() * rsize + offset * 2];
+344: 
+345:         // Check some special cases
+346:         if (s.equals(POS_INFINITY_STRING)) {
+347:             sign = (byte) 1;
+348:             nans = INFINITE;
+349:             return;
+350:         }
+351: 
+352:         if (s.equals(NEG_INFINITY_STRING)) {
+353:             sign = (byte) -1;
+354:             nans = INFINITE;
+355:             return;
+356:         }
+357: 
+358:         if (s.equals(NAN_STRING)) {
+359:             sign = (byte) 1;
+360:             nans = QNAN;
+361:             return;
+362:         }
+363: 
+364:         // Check for scientific notation
+365:         int p = s.indexOf("e");
+366:         if (p == -1) { // try upper case?
+367:             p = s.indexOf("E");
+368:         }
+369: 
+370:         final String fpdecimal;
+371:         int sciexp = 0;
+372:         if (p != -1) {
+373:             // scientific notation
+374:             fpdecimal = s.substring(0, p);
+375:             String fpexp = s.substring(p+1);
+376:             boolean negative = false;
+377: 
+378:             for (int i=0; i<fpexp.length(); i++)
+379:             {
+380:                 if (fpexp.charAt(i) == '-')
+381:                 {
+382:                     negative = true;
+383:                     continue;
+384:                 }
+385:                 if (fpexp.charAt(i) >= '0' && fpexp.charAt(i) <= '9')
+386:                     sciexp = sciexp * 10 + fpexp.charAt(i) - '0';
+387:             }
+388: 
+389:             if (negative) {
+390:                 sciexp = -sciexp;
+391:             }
+392:         } else {
+393:             // normal case
+394:             fpdecimal = s;
+395:         }
+396: 
+397:         // If there is a minus sign in the number then it is negative
+398:         if (fpdecimal.indexOf("-") !=  -1) {
+399:             sign = -1;
+400:         }
+401: 
+402:         // First off, find all of the leading zeros, trailing zeros, and significant digits
+403:         p = 0;
+404: 
+405:         // Move p to first significant digit
+406:         int decimalPos = 0;
+407:         for (;;) {
+408:             if (fpdecimal.charAt(p) >= '1' && fpdecimal.charAt(p) <= '9') {
+409:                 break;
+410:             }
+411: 
+412:             if (decimalFound && fpdecimal.charAt(p) == '0') {
+413:                 decimalPos--;
+414:             }
+415: 
+416:             if (fpdecimal.charAt(p) == '.') {
+417:                 decimalFound = true;
+418:             }
+419: 
+420:             p++;
+421: 
+422:             if (p == fpdecimal.length()) {
+423:                 break;
+424:             }
+425:         }
+426: 
+427:         // Copy the string onto Stripped
+428:         int q = offset;
+429:         striped[0] = '0';
+430:         striped[1] = '0';
+431:         striped[2] = '0';
+432:         striped[3] = '0';
+433:         int significantDigits=0;
+434:         for(;;) {
+435:             if (p == (fpdecimal.length())) {
+436:                 break;
+437:             }
+438: 
+439:             // Don't want to run pass the end of the array
+440:             if (q == mant.length*rsize+offset+1) {
+441:                 break;
+442:             }
+443: 
+444:             if (fpdecimal.charAt(p) == '.') {
+445:                 decimalFound = true;
+446:                 decimalPos = significantDigits;
+447:                 p++;
+448:                 continue;
+449:             }
+450: 
+451:             if (fpdecimal.charAt(p) < '0' || fpdecimal.charAt(p) > '9') {
+452:                 p++;
+453:                 continue;
+454:             }
+455: 
+456:             striped[q] = fpdecimal.charAt(p);
+457:             q++;
+458:             p++;
+459:             significantDigits++;
+460:         }
+461: 
+462: 
+463:         // If the decimal point has been found then get rid of trailing zeros.
+464:         if (decimalFound && q != offset) {
+465:             for (;;) {
+466:                 q--;
+467:                 if (q == offset) {
+468:                     break;
+469:                 }
+470:                 if (striped[q] == '0') {
+471:                     significantDigits--;
+472:                 } else {
+473:                     break;
+474:                 }
+475:             }
+476:         }
+477: 
+478:         // special case of numbers like "0.00000"
+479:         if (decimalFound && significantDigits == 0) {
+480:             decimalPos = 0;
+481:         }
+482: 
+483:         // Implicit decimal point at end of number if not present
+484:         if (!decimalFound) {
+485:             decimalPos = q-offset;
+486:         }
+487: 
+488:         // Find the number of significant trailing zeros
+489:         q = offset;  // set q to point to first sig digit
+490:         p = significantDigits-1+offset;
+491: 
+492:         int trailingZeros = 0;
+493:         while (p > q) {
+494:             if (striped[p] != '0') {
+495:                 break;
+496:             }
+497:             trailingZeros++;
+498:             p--;
+499:         }
+500: 
+501:         // Make sure the decimal is on a mod 10000 boundary
+502:         int i = ((rsize * 100) - decimalPos - sciexp % rsize) % rsize;
+503:         q -= i;
+504:         decimalPos += i;
+505: 
+506:         // Make the mantissa length right by adding zeros at the end if necessary
+507:         while ((p - q) < (mant.length * rsize)) {
+508:             for (i = 0; i < rsize; i++) {
+509:                 striped[++p] = '0';
+510:             }
+511:         }
+512: 
+513:         // Ok, now we know how many trailing zeros there are,
+514:         // and where the least significant digit is
+515:         for (i = mant.length - 1; i >= 0; i--) {
+516:             mant[i] = (striped[q]   - '0') * 1000 +
+517:                       (striped[q+1] - '0') * 100  +
+518:                       (striped[q+2] - '0') * 10   +
+519:                       (striped[q+3] - '0');
+520:             q += 4;
+521:         }
+522: 
+523: 
+524:         exp = (decimalPos+sciexp) / rsize;
+525: 
+526:         if (q < striped.length) {
+527:             // Is there possible another digit?
+528:             round((striped[q] - '0')*1000);
+529:         }
+530: 
+531:     }
+
+[31] org.apache.commons.math.dfp.Dfp#unequal  (lines 844-850)
+844:     public boolean unequal(final Dfp x) {
+845:         if (isNaN() || x.isNaN() || field.getRadixDigits() != x.field.getRadixDigits()) {
+846:             return false;
+847:         }
+848: 
+849:         return greaterThan(x) || lessThan(x);
+850:     }
+
+[32] org.apache.commons.math.dfp.Dfp#dotrap  (lines 2133-2190)
+2133:     public Dfp dotrap(int type, String what, Dfp oper, Dfp result) {
+2134:         Dfp def = result;
+2135: 
+2136:         switch (type) {
+2137:             case DfpField.FLAG_INVALID:
+2138:                 def = newInstance(getZero());
+2139:                 def.sign = result.sign;
+2140:                 def.nans = QNAN;
+2141:                 break;
+2142: 
+2143:             case DfpField.FLAG_DIV_ZERO:
+2144:                 if (nans == FINITE && mant[mant.length-1] != 0) {
+2145:                     // normal case, we are finite, non-zero
+2146:                     def = newInstance(getZero());
+2147:                     def.sign = (byte)(sign*oper.sign);
+2148:                     def.nans = INFINITE;
+2149:                 }
+2150: 
+2151:                 if (nans == FINITE && mant[mant.length-1] == 0) {
+2152:                     //  0/0
+2153:                     def = newInstance(getZero());
+2154:                     def.nans = QNAN;
+2155:                 }
+2156: 
+2157:                 if (nans == INFINITE || nans == QNAN) {
+2158:                     def = newInstance(getZero());
+2159:                     def.nans = QNAN;
+2160:                 }
+2161: 
+2162:                 if (nans == INFINITE || nans == SNAN) {
+2163:                     def = newInstance(getZero());
+2164:                     def.nans = QNAN;
+2165:                 }
+2166:                 break;
+2167: 
+2168:             case DfpField.FLAG_UNDERFLOW:
+2169:                 if ( (result.exp+mant.length) < MIN_EXP) {
+2170:                     def = newInstance(getZero());
+2171:                     def.sign = result.sign;
+2172:                 } else {
+2173:                     def = newInstance(result);  // gradual underflow
+2174:                 }
+2175:                 result.exp = result.exp + ERR_SCALE;
+2176:                 break;
+2177: 
+2178:             case DfpField.FLAG_OVERFLOW:
+2179:                 result.exp = result.exp - ERR_SCALE;
+2180:                 def = newInstance(getZero());
+2181:                 def.sign = result.sign;
+2182:                 def.nans = INFINITE;
+2183:                 break;
+2184: 
+2185:             default: def = result; break;
+2186:         }
+2187: 
+2188:         return trap(type, what, oper, def, result);
+2189: 
+2190:     }
+
+[33] org.apache.commons.math.dfp.DfpField#computeLn  (lines 726-748)
+726:     public static Dfp computeLn(final Dfp a, final Dfp one, final Dfp two) {
+727: 
+728:         int den = 1;
+729:         Dfp x = a.add(new Dfp(a.getField(), -1)).divide(a.add(one));
+730: 
+731:         Dfp y = new Dfp(x);
+732:         Dfp num = new Dfp(x);
+733:         Dfp py = new Dfp(y);
+734:         for (int i = 0; i < 10000; i++) {
+735:             num = num.multiply(x);
+736:             num = num.multiply(x);
+737:             den = den + 2;
+738:             Dfp t = num.divide(den);
+739:             y = y.add(t);
+740:             if (y.equals(py)) {
+741:                 break;
+742:             }
+743:             py = new Dfp(y);
+744:         }
+745: 
+746:         return y.multiply(two);
+747: 
+748:     }
+
+[34] org.apache.commons.math.dfp.DfpField#newDfp  (lines 392-394)
+392:     public Dfp newDfp(final byte sign, final byte nans) {
+393:         return new Dfp(this, sign, nans);
+394:     }
+
+[35] org.apache.commons.math.dfp.Dfp#round  (lines 1331-1404)
+1331:     protected int round(int n) {
+1332:         boolean inc = false;
+1333:         switch (field.getRoundingMode()) {
+1334:             case ROUND_DOWN:
+1335:                 inc = false;
+1336:                 break;
+1337: 
+1338:             case ROUND_UP:
+1339:                 inc = n != 0;       // round up if n!=0
+1340:                 break;
+1341: 
+1342:             case ROUND_HALF_UP:
+1343:                 inc = n >= 5000;  // round half up
+1344:                 break;
+1345: 
+1346:             case ROUND_HALF_DOWN:
+1347:                 inc = n > 5000;  // round half down
+1348:                 break;
+1349: 
+1350:             case ROUND_HALF_EVEN:
+1351:                 inc = n > 5000 || (n == 5000 && (mant[0] & 1) == 1);  // round half-even
+1352:                 break;
+1353: 
+1354:             case ROUND_HALF_ODD:
+1355:                 inc = n > 5000 || (n == 5000 && (mant[0] & 1) == 0);  // round half-odd
+1356:                 break;
+1357: 
+1358:             case ROUND_CEIL:
+1359:                 inc = sign == 1 && n != 0;  // round ceil
+1360:                 break;
+1361: 
+1362:             case ROUND_FLOOR:
+1363:             default:
+1364:                 inc = sign == -1 && n != 0;  // round floor
+1365:                 break;
+1366:         }
+1367: 
+1368:         if (inc) {
+1369:             // increment if necessary
+1370:             int rh = 1;
+1371:             for (int i = 0; i < mant.length; i++) {
+1372:                 final int r = mant[i] + rh;
+1373:                 rh = r / RADIX;
+1374:                 mant[i] = r - rh * RADIX;
+1375:             }
+1376: 
+1377:             if (rh != 0) {
+1378:                 shiftRight();
+1379:                 mant[mant.length-1] = rh;
+1380:             }
+1381:         }
+1382: 
+1383:         // check for exceptional cases and raise signals if necessary
+1384:         if (exp < MIN_EXP) {
+1385:             // Gradual Underflow
+1386:             field.setIEEEFlagsBits(DfpField.FLAG_UNDERFLOW);
+1387:             return DfpField.FLAG_UNDERFLOW;
+1388:         }
+1389: 
+1390:         if (exp > MAX_EXP) {
+1391:             // Overflow
+1392:             field.setIEEEFlagsBits(DfpField.FLAG_OVERFLOW);
+1393:             return DfpField.FLAG_OVERFLOW;
+1394:         }
+1395: 
+1396:         if (n != 0) {
+1397:             // Inexact
+1398:             field.setIEEEFlagsBits(DfpField.FLAG_INEXACT);
+1399:             return DfpField.FLAG_INEXACT;
+1400:         }
+1401: 
+1402:         return 0;
+1403: 
+1404:     }
+
+[36] org.apache.commons.math.dfp.Dfp#toDouble  (lines 2303-2384)
+2303:     public double toDouble() {
+2304: 
+2305:         if (isInfinite()) {
+2306:             if (lessThan(getZero())) {
+2307:                 return Double.NEGATIVE_INFINITY;
+2308:             } else {
+2309:                 return Double.POSITIVE_INFINITY;
+2310:             }
+2311:         }
+2312: 
+2313:         if (isNaN()) {
+2314:             return Double.NaN;
+2315:         }
+2316: 
+2317:         Dfp y = this;
+2318:         boolean negate = false;
+2319:         if (lessThan(getZero())) {
+2320:             y = negate();
+2321:             negate = true;
+2322:         }
+2323: 
+2324:         /* Find the exponent, first estimate by integer log10, then adjust.
+2325:          Should be faster than doing a natural logarithm.  */
+2326:         int exponent = (int)(y.log10() * 3.32);
+2327:         if (exponent < 0) {
+2328:             exponent--;
+2329:         }
+2330: 
+2331:         Dfp tempDfp = DfpMath.pow(getTwo(), exponent);
+2332:         while (tempDfp.lessThan(y) || tempDfp.equals(y)) {
+2333:             tempDfp = tempDfp.multiply(2);
+2334:             exponent++;
+2335:         }
+2336:         exponent--;
+2337: 
+2338:         /* We have the exponent, now work on the mantissa */
+2339: 
+2340:         y = y.divide(DfpMath.pow(getTwo(), exponent));
+2341:         if (exponent > -1023) {
+2342:             y = y.subtract(getOne());
+2343:         }
+2344: 
+2345:         if (exponent < -1074) {
+2346:             return 0;
+2347:         }
+2348: 
+2349:         if (exponent > 1023) {
+2350:             return negate ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+2351:         }
+2352: 
+2353: 
+2354:         y = y.multiply(newInstance(4503599627370496l)).rint();
+2355:         String str = y.toString();
+2356:         str = str.substring(0, str.length()-1);
+2357:         long mantissa = Long.parseLong(str);
+2358: 
+2359:         if (mantissa == 4503599627370496L) {
+2360:             // Handle special case where we round up to next power of two
+2361:             mantissa = 0;
+2362:             exponent++;
+2363:         }
+2364: 
+2365:         /* Its going to be subnormal, so make adjustments */
+2366:         if (exponent <= -1023) {
+2367:             exponent--;
+2368:         }
+2369: 
+2370:         while (exponent < -1023) {
+2371:             exponent++;
+2372:             mantissa >>>= 1;
+2373:         }
+2374: 
+2375:         long bits = mantissa | ((exponent + 1023L) << 52);
+2376:         double x = Double.longBitsToDouble(bits);
+2377: 
+2378:         if (negate) {
+2379:             x = -x;
+2380:         }
+2381: 
+2382:         return x;
+2383: 
+2384:     }
+
+[37] org.apache.commons.math.dfp.Dfp#equals  (lines 815-829)
+815:     @Override
+816:     public boolean equals(final Object other) {
+817: 
+818:         if (other instanceof Dfp) {
+819:             final Dfp x = (Dfp) other;
+820:             if (isNaN() || x.isNaN() || field.getRadixDigits() != x.field.getRadixDigits()) {
+821:                 return false;
+822:             }
+823: 
+824:             return compare(this, x) == 0;
+825:         }
+826: 
+827:         return false;
+828: 
+829:     }
+
+[38] org.apache.commons.math.dfp.DfpField#DfpField  (lines 173-175)
+173:     public DfpField(final int decimalDigits) {
+174:         this(decimalDigits, true);
+175:     }
+
+[39] org.apache.commons.math.dfp.Dfp#trunc  (lines 958-1042)
+958:     protected Dfp trunc(final DfpField.RoundingMode rmode) {
+959:         boolean changed = false;
+960: 
+961:         if (isNaN()) {
+962:             return newInstance(this);
+963:         }
+964: 
+965:         if (nans == INFINITE) {
+966:             return newInstance(this);
+967:         }
+968: 
+969:         if (mant[mant.length-1] == 0) {
+970:             // a is zero
+971:             return newInstance(this);
+972:         }
+973: 
+974:         /* If the exponent is less than zero then we can certainly
+975:          * return zero */
+976:         if (exp < 0) {
+977:             field.setIEEEFlagsBits(DfpField.FLAG_INEXACT);
+978:             Dfp result = newInstance(getZero());
+979:             result = dotrap(DfpField.FLAG_INEXACT, TRUNC_TRAP, this, result);
+980:             return result;
+981:         }
+982: 
+983:         /* If the exponent is greater than or equal to digits, then it
+984:          * must already be an integer since there is no precision left
+985:          * for any fractional part */
+986: 
+987:         if (exp >= mant.length) {
+988:             return newInstance(this);
+989:         }
+990: 
+991:         /* General case:  create another dfp, result, that contains the
+992:          * a with the fractional part lopped off.  */
+993: 
+994:         Dfp result = newInstance(this);
+995:         for (int i = 0; i < mant.length-result.exp; i++) {
+996:             changed |= result.mant[i] != 0;
+997:             result.mant[i] = 0;
+998:         }
+999: 
+1000:         if (changed) {
+1001:             switch (rmode) {
+1002:                 case ROUND_FLOOR:
+1003:                     if (result.sign == -1) {
+1004:                         // then we must increment the mantissa by one
+1005:                         result = result.add(newInstance(-1));
+1006:                     }
+1007:                     break;
+1008: 
+1009:                 case ROUND_CEIL:
+1010:                     if (result.sign == 1) {
+1011:                         // then we must increment the mantissa by one
+1012:                         result = result.add(getOne());
+1013:                     }
+1014:                     break;
+1015: 
+1016:                 case ROUND_HALF_EVEN:
+1017:                 default:
+1018:                     final Dfp half = newInstance("0.5");
+1019:                     Dfp a = subtract(result);  // difference between this and result
+1020:                     a.sign = 1;            // force positive (take abs)
+1021:                     if (a.greaterThan(half)) {
+1022:                         a = newInstance(getOne());
+1023:                         a.sign = sign;
+1024:                         result = result.add(a);
+1025:                     }
+1026: 
+1027:                     /** If exactly equal to 1/2 and odd then increment */
+1028:                     if (a.equals(half) && result.exp > 0 && (result.mant[mant.length-result.exp]&1) != 0) {
+1029:                         a = newInstance(getOne());
+1030:                         a.sign = sign;
+1031:                         result = result.add(a);
+1032:                     }
+1033:                     break;
+1034:             }
+1035: 
+1036:             field.setIEEEFlagsBits(DfpField.FLAG_INEXACT);  // signal inexact
+1037:             result = dotrap(DfpField.FLAG_INEXACT, TRUNC_TRAP, this, result);
+1038:             return result;
+1039:         }
+1040: 
+1041:         return result;
+1042:     }
+
+[40] org.apache.commons.math.dfp.Dfp#lessThan  (lines 751-770)
+751:     public boolean lessThan(final Dfp x) {
+752: 
+753:         // make sure we don't mix number with different precision
+754:         if (field.getRadixDigits() != x.field.getRadixDigits()) {
+755:             field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+756:             final Dfp result = newInstance(getZero());
+757:             result.nans = QNAN;
+758:             dotrap(DfpField.FLAG_INVALID, LESS_THAN_TRAP, x, result);
+759:             return false;
+760:         }
+761: 
+762:         /* if a nan is involved, signal invalid and return false */
+763:         if (isNaN() || x.isNaN()) {
+764:             field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+765:             dotrap(DfpField.FLAG_INVALID, LESS_THAN_TRAP, x, newInstance(getZero()));
+766:             return false;
+767:         }
+768: 
+769:         return compare(this, x) < 0;
+770:     }
+
+[41] org.apache.commons.math.dfp.Dfp#subtract  (lines 1323-1325)
+1323:     public Dfp subtract(final Dfp x) {
+1324:         return add(x.negate());
+1325:     }
+
+[42] org.apache.commons.math.dfp.DfpField#getOne  (lines 406-408)
+406:     public Dfp getOne() {
+407:         return one;
+408:     }
+
+[43] org.apache.commons.math.dfp.Dfp#rint  (lines 917-919)
+917:     public Dfp rint() {
+918:         return trunc(DfpField.RoundingMode.ROUND_HALF_EVEN);
+919:     }
+
+[44] org.apache.commons.math.dfp.Dfp#align  (lines 694-745)
+694:     protected int align(int e) {
+695:         int lostdigit = 0;
+696:         boolean inexact = false;
+697: 
+698:         int diff = exp - e;
+699: 
+700:         int adiff = diff;
+701:         if (adiff < 0) {
+702:             adiff = -adiff;
+703:         }
+704: 
+705:         if (diff == 0) {
+706:             return 0;
+707:         }
+708: 
+709:         if (adiff > (mant.length + 1)) {
+710:             // Special case
+711:             Arrays.fill(mant, 0);
+712:             exp = e;
+713: 
+714:             field.setIEEEFlagsBits(DfpField.FLAG_INEXACT);
+715:             dotrap(DfpField.FLAG_INEXACT, ALIGN_TRAP, this, this);
+716: 
+717:             return 0;
+718:         }
+719: 
+720:         for (int i = 0; i < adiff; i++) {
+721:             if (diff < 0) {
+722:                 /* Keep track of loss -- only signal inexact after losing 2 digits.
+723:                  * the first lost digit is returned to add() and may be incorporated
+724:                  * into the result.
+725:                  */
+726:                 if (lostdigit != 0) {
+727:                     inexact = true;
+728:                 }
+729: 
+730:                 lostdigit = mant[0];
+731: 
+732:                 shiftRight();
+733:             } else {
+734:                 shiftLeft();
+735:             }
+736:         }
+737: 
+738:         if (inexact) {
+739:             field.setIEEEFlagsBits(DfpField.FLAG_INEXACT);
+740:             dotrap(DfpField.FLAG_INEXACT, ALIGN_TRAP, this, this);
+741:         }
+742: 
+743:         return lostdigit;
+744: 
+745:     }
+
+[45] org.apache.commons.math.dfp.Dfp#shiftRight  (lines 678-684)
+678:     protected void shiftRight() {
+679:         for (int i = 0; i < mant.length - 1; i++) {
+680:             mant[i] = mant[i+1];
+681:         }
+682:         mant[mant.length - 1] = 0;
+683:         exp++;
+684:     }
+
+[46] org.apache.commons.math.dfp.Dfp#divide  (lines 1579-1787)
+1579:     public Dfp divide(Dfp divisor) {
+1580:         int dividend[]; // current status of the dividend
+1581:         int quotient[]; // quotient
+1582:         int remainder[];// remainder
+1583:         int qd;         // current quotient digit we're working with
+1584:         int nsqd;       // number of significant quotient digits we have
+1585:         int trial=0;    // trial quotient digit
+1586:         int minadj;     // minimum adjustment
+1587:         boolean trialgood; // Flag to indicate a good trail digit
+1588:         int md=0;       // most sig digit in result
+1589:         int excp;       // exceptions
+1590: 
+1591:         // make sure we don't mix number with different precision
+1592:         if (field.getRadixDigits() != divisor.field.getRadixDigits()) {
+1593:             field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+1594:             final Dfp result = newInstance(getZero());
+1595:             result.nans = QNAN;
+1596:             return dotrap(DfpField.FLAG_INVALID, DIVIDE_TRAP, divisor, result);
+1597:         }
+1598: 
+1599:         Dfp result = newInstance(getZero());
+1600: 
+1601:         /* handle special cases */
+1602:         if (nans != FINITE || divisor.nans != FINITE) {
+1603:             if (isNaN()) {
+1604:                 return this;
+1605:             }
+1606: 
+1607:             if (divisor.isNaN()) {
+1608:                 return divisor;
+1609:             }
+1610: 
+1611:             if (nans == INFINITE && divisor.nans == FINITE) {
+1612:                 result = newInstance(this);
+1613:                 result.sign = (byte) (sign * divisor.sign);
+1614:                 return result;
+1615:             }
+1616: 
+1617:             if (divisor.nans == INFINITE && nans == FINITE) {
+1618:                 result = newInstance(getZero());
+1619:                 result.sign = (byte) (sign * divisor.sign);
+1620:                 return result;
+1621:             }
+1622: 
+1623:             if (divisor.nans == INFINITE && nans == INFINITE) {
+1624:                 field.setIEEEFlagsBits(DfpField.FLAG_INVALID);
+1625:                 result = newInstance(getZero());
+1626:                 result.nans = QNAN;
+1627:                 result = dotrap(DfpField.FLAG_INVALID, DIVIDE_TRAP, divisor, result);
+1628:                 return result;
+1629:             }
+1630:         }
+1631: 
+1632:         /* Test for divide by zero */
+1633:         if (divisor.mant[mant.length-1] == 0) {
+1634:             field.setIEEEFlagsBits(DfpField.FLAG_DIV_ZERO);
+1635:             result = newInstance(getZero());
+1636:             result.sign = (byte) (sign * divisor.sign);
+1637:             result.nans = INFINITE;
+1638:             result = dotrap(DfpField.FLAG_DIV_ZERO, DIVIDE_TRAP, divisor, result);
+1639:             return result;
+1640:         }
+1641: 
+1642:         dividend = new int[mant.length+1];  // one extra digit needed
+1643:         quotient = new int[mant.length+2];  // two extra digits needed 1 for overflow, 1 for rounding
+1644:         remainder = new int[mant.length+1]; // one extra digit needed
+1645: 
+1646:         /* Initialize our most significant digits to zero */
+1647: 
+1648:         dividend[mant.length] = 0;
+1649:         quotient[mant.length] = 0;
+1650:         quotient[mant.length+1] = 0;
+1651:         remainder[mant.length] = 0;
+1652: 
+1653:         /* copy our mantissa into the dividend, initialize the
+1654:        quotient while we are at it */
+1655: 
+1656:         for (int i = 0; i < mant.length; i++) {
+1657:             dividend[i] = mant[i];
+1658:             quotient[i] = 0;
+1659:             remainder[i] = 0;
+1660:         }
+1661: 
+1662:         /* outer loop.  Once per quotient digit */
+1663:         nsqd = 0;
+1664:         for (qd = mant.length+1; qd >= 0; qd--) {
+1665:             /* Determine outer limits of our quotient digit */
+1666: 
+1667:             // r =  most sig 2 digits of dividend
+1668:             final int divMsb = dividend[mant.length]*RADIX+dividend[mant.length-1];
+1669:             int min = divMsb       / (divisor.mant[mant.length-1]+1);
+1670:             int max = (divMsb + 1) / divisor.mant[mant.length-1];
+1671: 
+1672:             trialgood = false;
+1673:             while (!trialgood) {
+1674:                 // try the mean
+1675:                 trial = (min+max)/2;
+1676: 
+1677:                 /* Multiply by divisor and store as remainder */
+1678:                 int rh = 0;
+1679:                 for (int i = 0; i < mant.length + 1; i++) {
+1680:                     int dm = (i<mant.length)?divisor.mant[i]:0;
+1681:                     final int r = (dm * trial) + rh;
+1682:                     rh = r / RADIX;
+1683:                     remainder[i] = r - rh * RADIX;
+1684:                 }
+1685: 
+1686:                 /* subtract the remainder from the dividend */
+1687:                 rh = 1;  // carry in to aid the subtraction
+1688:                 for (int i = 0; i < mant.length + 1; i++) {
+1689:                     final int r = ((RADIX-1) - remainder[i]) + dividend[i] + rh;
+1690:                     rh = r / RADIX;
+1691:                     remainder[i] = r - rh * RADIX;
+1692:                 }
+1693: 
+1694:                 /* Lets analyze what we have here */
+1695:                 if (rh == 0) {
+1696:                     // trial is too big -- negative remainder
+1697:                     max = trial-1;
+1698:                     continue;
+1699:                 }
+1700: 
+1701:                 /* find out how far off the remainder is telling us we are */
+1702:                 minadj = (remainder[mant.length] * RADIX)+remainder[mant.length-1];
+1703:                 minadj = minadj / (divisor.mant[mant.length-1]+1);
+1704: 
+1705:                 if (minadj >= 2) {
+1706:                     min = trial+minadj;  // update the minimum
+1707:                     continue;
+1708:                 }
+1709: 
+1710:                 /* May have a good one here, check more thoroughly.  Basically
+1711:            its a good one if it is less than the divisor */
+1712:                 trialgood = false;  // assume false
+1713:                 for (int i = mant.length - 1; i >= 0; i--) {
+1714:                     if (divisor.mant[i] > remainder[i]) {
+1715:                         trialgood = true;
+1716:                     }
+1717:                     if (divisor.mant[i] < remainder[i]) {
+1718:                         break;
+1719:                     }
+1720:                 }
+1721: 
+1722:                 if (remainder[mant.length] != 0) {
+1723:                     trialgood = false;
+1724:                 }
+1725: 
+1726:                 if (trialgood == false) {
+1727:                     min = trial+1;
+1728:                 }
+1729:             }
+1730: 
+1731:             /* Great we have a digit! */
+1732:             quotient[qd] = trial;
+1733:             if (trial != 0 || nsqd != 0) {
+1734:                 nsqd++;
+1735:             }
+1736: 
+1737:             if (field.getRoundingMode() == DfpField.RoundingMode.ROUND_DOWN && nsqd == mant.length) {
+1738:                 // We have enough for this mode
+1739:                 break;
+1740:             }
+1741: 
+1742:             if (nsqd > mant.length) {
+1743:                 // We have enough digits
+1744:                 break;
+1745:             }
+1746: 
+1747:             /* move the remainder into the dividend while left shifting */
+1748:             dividend[0] = 0;
+1749:             for (int i = 0; i < mant.length; i++) {
+1750:                 dividend[i + 1] = remainder[i];
+1751:             }
+1752:         }
+1753: 
+1754:         /* Find the most sig digit */
+1755:         md = mant.length;  // default
+1756:         for (int i = mant.length + 1; i >= 0; i--) {
+1757:             if (quotient[i] != 0) {
+1758:                 md = i;
+1759:                 break;
+1760:             }
+1761:         }
+1762: 
+1763:         /* Copy the digits into the result */
+1764:         for (int i=0; i<mant.length; i++) {
+1765:             result.mant[mant.length-i-1] = quotient[md-i];
+1766:         }
+1767: 
+1768:         /* Fixup the exponent. */
+1769:         result.exp = exp - divisor.exp + md - mant.length;
+1770:         result.sign = (byte) ((sign == divisor.sign) ? 1 : -1);
+1771: 
+1772:         if (result.mant[mant.length-1] == 0) { // if result is zero, set exp to zero
+1773:             result.exp = 0;
+1774:         }
+1775: 
+1776:         if (md > (mant.length-1)) {
+1777:             excp = result.round(quotient[md-mant.length]);
+1778:         } else {
+1779:             excp = result.round(0);
+1780:         }
+1781: 
+1782:         if (excp != 0) {
+1783:             result = dotrap(excp, DIVIDE_TRAP, divisor, result);
+1784:         }
+1785: 
+1786:         return result;
+1787:     }
+
+[47] org.apache.commons.math.dfp.Dfp#Dfp  (lines 319-325)
+319:     public Dfp(final Dfp d) {
+320:         mant  = d.mant.clone();
+321:         sign  = d.sign;
+322:         exp   = d.exp;
+323:         nans  = d.nans;
+324:         field = d.field;
+325:     }
+
+[48] org.apache.commons.math.dfp.Dfp#Dfp  (lines 539-545)
+539:     protected Dfp(final DfpField field, final byte sign, final byte nans) {
+540:         this.field = field;
+541:         this.mant    = new int[field.getRadixDigits()];
+542:         this.sign    = sign;
+543:         this.exp     = 0;
+544:         this.nans    = nans;
+545:     }
+
+[49] org.apache.commons.math.dfp.Dfp#isInfinite  (lines 800-802)
+800:     public boolean isInfinite() {
+801:         return nans == INFINITE;
+802:     }
+
+[50] org.apache.commons.math.dfp.Dfp#Dfp  (lines 209-250)
+209:     protected Dfp(final DfpField field, long x) {
+210: 
+211:         // initialize as if 0
+212:         mant = new int[field.getRadixDigits()];
+213:         nans = FINITE;
+214:         this.field = field;
+215: 
+216:         boolean isLongMin = false;
+217:         if (x == Long.MIN_VALUE) {
+218:             // special case for Long.MIN_VALUE (-9223372036854775808)
+219:             // we must shift it before taking its absolute value
+220:             isLongMin = true;
+221:             ++x;
+222:         }
+223: 
+224:         // set the sign
+225:         if (x < 0) {
+226:             sign = -1;
+227:             x = -x;
+228:         } else {
+229:             sign = 1;
+230:         }
+231: 
+232:         exp = 0;
+233:         while (x != 0) {
+234:             System.arraycopy(mant, mant.length - exp, mant, mant.length - 1 - exp, exp);
+235:             mant[mant.length - 1] = (int) (x % RADIX);
+236:             x /= RADIX;
+237:             exp++;
+238:         }
+239: 
+240:         if (isLongMin) {
+241:             // remove the shift added for Long.MIN_VALUE
+242:             // we know in this case that fixing the last digit is sufficient
+243:             for (int i = 0; i < mant.length - 1; i++) {
+244:                 if (mant[i] != 0) {
+245:                     mant[i]++;
+246:                     break;
+247:                 }
+248:             }
+249:         }
+250:     }

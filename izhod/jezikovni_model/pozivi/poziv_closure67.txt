@@ -1,0 +1,1804 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.RemoveUnusedPrototypePropertiesTest::testAliasing7
+junit.framework.AssertionFailedError: 
+Expected: function e(){}e.prototype["alias1"]=e.prototype.method1=function(){this.method2()};e.prototype.method2=function(){}
+Result: function e(){}e.prototype["alias1"]=e.prototype.method1=function(){this.method2()}
+Node tree inequality:
+Tree1:
+BLOCK [synthetic: 1]
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:862)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:423)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:348)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:317)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:305)
+	at com.google.javascript.jscomp.CompilerTestCase.testSame(CompilerTestCase.java:537)
+	at com.google.javascript.jscomp.RemoveUnusedPrototypePropertiesTest.testAliasing7(RemoveUnusedPrototypePropertiesTest.java:189)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.PrepareAst#annotateCalls  (lines 175-191)
+175:     private void annotateCalls(Node n) {
+176:       Preconditions.checkState(n.getType() == Token.CALL);
+177: 
+178:       // Keep track of of the "this" context of a call.  A call without an
+179:       // explicit "this" is a free call.
+180:       Node first = n.getFirstChild();
+181:       if (!NodeUtil.isGet(first)) {
+182:         n.putBooleanProp(Node.FREE_CALL, true);
+183:       }
+184: 
+185:       // Keep track of the context in which eval is called. It is important
+186:       // to distinguish between "(0, eval)()" and "eval()".
+187:       if (first.getType() == Token.NAME &&
+188:           "eval".equals(first.getString())) {
+189:         first.putBooleanProp(Node.DIRECT_EVAL, true);
+190:       }
+191:     }
+
+[2] com.google.javascript.rhino.Node#toString  (lines 911-914)
+911:   @Override
+912:   public String toString() {
+913:     return toString(true, true, true);
+914:   }
+
+[3] com.google.javascript.jscomp.AnalyzePrototypeProperties#processPrototypeParent  (lines 370-402)
+370:     private void processPrototypeParent(NodeTraversal t, Node n) {
+371:       switch (n.getType()) {
+372:         // Foo.prototype.getBar = function() { ... }
+373:         case Token.GETPROP:
+374:           Node dest = n.getFirstChild().getNext();
+375:           Node parent = n.getParent();
+376:           Node grandParent = parent.getParent();
+377: 
+378:           if (dest.getType() == Token.STRING &&
+379:               NodeUtil.isExprAssign(grandParent) &&
+380:               NodeUtil.isVarOrSimpleAssignLhs(n, parent)) {
+381:             String name = dest.getString();
+382:             Property prop = new AssignmentProperty(grandParent, t.getModule());
+383:             getNameInfoForName(name, PROPERTY).getDeclarations().add(prop);
+384:           }
+385:           break;
+386: 
+387:         // Foo.prototype = { "getBar" : function() { ... } }
+388:         case Token.ASSIGN:
+389:           Node map = n.getFirstChild().getNext();
+390:           if (map.getType() == Token.OBJECTLIT) {
+391:             for (Node key = map.getFirstChild();
+392:                  key != null; key = key.getNext()) {
+393:               // May be STRING, GET, or SET,
+394:               String name = key.getString();
+395:               Property prop = new LiteralProperty(
+396:                   key, key.getFirstChild(), map, n, t.getModule());
+397:               getNameInfoForName(name, PROPERTY).getDeclarations().add(prop);
+398:             }
+399:           }
+400:           break;
+401:       }
+402:     }
+
+[4] com.google.javascript.jscomp.AnalyzePrototypeProperties#addSymbolUse  (lines 288-301)
+288:     private void addSymbolUse(String name, JSModule module, SymbolType type) {
+289:       NameInfo info = getNameInfoForName(name, type);
+290:       NameInfo def = null;
+291:       // Skip all anonymous nodes. We care only about symbols with names.
+292:       for (int i = symbolStack.size() - 1; i >= 0; i--) {
+293:         def = symbolStack.get(i).name;
+294:         if (def != anonymousNode) {
+295:           break;
+296:         }
+297:       }
+298:       if (!def.equals(info)) {
+299:         symbolGraph.connect(def, module, info);
+300:       }
+301:     }
+
+[5] com.google.javascript.jscomp.parsing.IRFactory#processAstRoot  (lines 422-430)
+422:     @Override
+423:     Node processAstRoot(AstRoot rootNode) {
+424:       Node node = newNode(Token.SCRIPT);
+425:       for (com.google.javascript.jscomp.mozilla.rhino.Node child : rootNode) {
+426:         node.addChildToBack(transform((AstNode)child));
+427:       }
+428:       parseDirectives(node);
+429:       return node;
+430:     }
+
+[6] com.google.javascript.jscomp.parsing.ParserRunner#parse  (lines 90-132)
+90:   public static Node parse(String sourceName,
+91:                            String sourceString,
+92:                            Config config,
+93:                            ErrorReporter errorReporter,
+94:                            Logger logger) throws IOException {
+95:     Context cx = Context.enter();
+96:     cx.setErrorReporter(errorReporter);
+97:     cx.setLanguageVersion(Context.VERSION_1_5);
+98:     CompilerEnvirons compilerEnv = new CompilerEnvirons();
+99:     compilerEnv.initFromContext(cx);
+100:     compilerEnv.setRecordingComments(true);
+101:     compilerEnv.setRecordingLocalJsDocComments(true);
+102:     // ES5 specifically allows trailing commas
+103:     compilerEnv.setWarnTrailingComma(
+104:         config.languageMode == LanguageMode.ECMASCRIPT3);
+105: 
+106:     if (config.isIdeMode || config.languageMode != LanguageMode.ECMASCRIPT3) {
+107:       // Do our own identifier check for ECMASCRIPT 5
+108:       compilerEnv.setReservedKeywordAsIdentifier(true);
+109:       compilerEnv.setAllowKeywordAsObjectPropertyName(true);
+110:     }
+111: 
+112:     if (config.isIdeMode) {
+113:       compilerEnv.setAllowMemberExprAsFunctionName(true);
+114:     }
+115: 
+116:     Parser p = new Parser(compilerEnv, errorReporter);
+117:     AstRoot astRoot = null;
+118:     try {
+119:       astRoot = p.parse(sourceString, sourceName, 1);
+120:     } catch (EvaluatorException e) {
+121:       logger.info("Error parsing " + sourceName + ": " + e.getMessage());
+122:     } finally {
+123:       Context.exit();
+124:     }
+125:     Node root = null;
+126:     if (astRoot != null) {
+127:       root = IRFactory.transformTree(
+128:           astRoot, sourceString, config, errorReporter);
+129:       root.setIsSyntheticBlock(true);
+130:     }
+131:     return root;
+132:   }
+
+[7] com.google.javascript.jscomp.NodeUtil#isAssociative  (lines 1343-1355)
+1343:   static boolean isAssociative(int type) {
+1344:     switch (type) {
+1345:       case Token.MUL:
+1346:       case Token.AND:
+1347:       case Token.OR:
+1348:       case Token.BITOR:
+1349:       case Token.BITXOR:
+1350:       case Token.BITAND:
+1351:         return true;
+1352:       default:
+1353:         return false;
+1354:     }
+1355:   }
+
+[8] com.google.javascript.jscomp.CodeConsumer#addOp  (lines 203-231)
+203:   void addOp(String op, boolean binOp) {
+204:     maybeEndStatement();
+205: 
+206:     char first = op.charAt(0);
+207:     char prev = getLastChar();
+208: 
+209:     if ((first == '+' || first == '-') && prev == first) {
+210:       // This is not pretty printing. This is to prevent misparsing of
+211:       // things like "x + ++y" or "x++ + ++y"
+212:       append(" ");
+213:     } else if (Character.isLetter(first) &&
+214:                isWordChar(prev)) {
+215:       // Make sure there is a space after e.g. instanceof , typeof
+216:       append(" ");
+217:     } else if (prev == '-' && first == '>') {
+218:       // Make sure that we don't emit -->
+219:       append(" ");
+220:     }
+221: 
+222:     // Allow formating around the operator.
+223:     appendOp(op, binOp);
+224: 
+225:     // Line breaking after an operator is always safe. Line breaking before an
+226:     // operator on the other hand is not. We only line break after a bin op
+227:     // because it looks strange.
+228:     if (binOp) {
+229:       maybeCutLine();
+230:     }
+231:   }
+
+[9] com.google.javascript.jscomp.AnalyzePrototypeProperties#visit  (lines 220-286)
+220:     public void visit(NodeTraversal t, Node n, Node parent) {
+221:       if (n.getType() == Token.GETPROP) {
+222:         String propName = n.getFirstChild().getNext().getString();
+223:         if (propName.equals("prototype")) {
+224:           processPrototypeParent(t, parent);
+225:         } else if (compiler.getCodingConvention().isExported(propName)) {
+226:           addGlobalUseOfSymbol(propName, t.getModule(), PROPERTY);
+227:         } else {
+228:           addSymbolUse(propName, t.getModule(), PROPERTY);
+229:         }
+230:       } else if (n.getType() == Token.OBJECTLIT &&
+231:           // Make sure that we're not handling object literals being
+232:           // assigned to a prototype, as in:
+233:           // Foo.prototype = {bar: 3, baz: 5};
+234:           !(parent.getType() == Token.ASSIGN &&
+235:             parent.getFirstChild().getType() == Token.GETPROP &&
+236:             parent.getFirstChild().getLastChild().getString().equals(
+237:                 "prototype"))) {
+238:         // var x = {a: 1, b: 2}
+239:         // should count as a use of property a and b.
+240:         for (Node propNameNode = n.getFirstChild(); propNameNode != null;
+241:              propNameNode = propNameNode.getNext()) {
+242:           // May be STRING, GET, or SET, but NUMBER isn't interesting.
+243:           if (!propNameNode.isQuotedString()) {
+244:             addSymbolUse(propNameNode.getString(), t.getModule(), PROPERTY);
+245:           }
+246:         }
+247:       } else if (n.getType() == Token.NAME) {
+248:         String name = n.getString();
+249: 
+250:         Var var = t.getScope().getVar(name);
+251:         if (var != null) {
+252:           // Only process global functions.
+253:           if (var.isGlobal()) {
+254:             if (var.getInitialValue() != null &&
+255:                 var.getInitialValue().getType() == Token.FUNCTION) {
+256:               if (t.inGlobalScope()) {
+257:                 if (!processGlobalFunctionDeclaration(t, n, parent,
+258:                         parent.getParent())) {
+259:                   addGlobalUseOfSymbol(name, t.getModule(), VAR);
+260:                 }
+261:               } else {
+262:                 addSymbolUse(name, t.getModule(), VAR);
+263:               }
+264:             }
+265: 
+266:           // If it is not a global, it might be accessing a local of the outer
+267:           // scope. If that's the case the functions between the variable's
+268:           // declaring scope and the variable reference scope cannot be moved.
+269:           } else if (var.getScope() != t.getScope()){
+270:             for (int i = symbolStack.size() - 1; i >= 0; i--) {
+271:               NameContext context = symbolStack.get(i);
+272:               context.name.readClosureVariables = true;
+273:               if (context.scope == var.getScope()) {
+274:                 break;
+275:               }
+276:             }
+277:           }
+278:         }
+279:       }
+280: 
+281:       if (isPrototypePropertyAssign(n) ||
+282:           isGlobalFunctionDeclaration(t, n) ||
+283:           NodeUtil.isFunction(n)) {
+284:         symbolStack.pop();
+285:       }
+286:     }
+
+[10] com.google.javascript.jscomp.CodeConsumer#add  (lines 181-197)
+181:   void add(String newcode) {
+182:     maybeEndStatement();
+183: 
+184:     if (newcode.length() == 0) {
+185:       return;
+186:     }
+187: 
+188:     char c = newcode.charAt(0);
+189:     if ((isWordChar(c) || c == '\\') &&
+190:         isWordChar(getLastChar())) {
+191:       // need space to separate. This is not pretty printing.
+192:       // For example: "return foo;"
+193:       append(" ");
+194:     }
+195: 
+196:     append(newcode);
+197:   }
+
+[11] com.google.javascript.jscomp.SyntacticScopeCreator#createScope  (lines 66-80)
+66:   public Scope createScope(Node n, Scope parent) {
+67:     sourceName = null;
+68:     if (parent == null) {
+69:       scope = new Scope(n, compiler);
+70:     } else {
+71:       scope = new Scope(parent, n);
+72:     }
+73: 
+74:     scanRoot(n, parent);
+75: 
+76:     sourceName = null;
+77:     Scope returnedScope = scope;
+78:     scope = null;
+79:     return returnedScope;
+80:   }
+
+[12] com.google.javascript.jscomp.AnalyzePrototypeProperties#shouldTraverse  (lines 205-218)
+205:     public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
+206:       if (isPrototypePropertyAssign(n)) {
+207:         symbolStack.push(new NameContext(getNameInfoForName(
+208:                 n.getFirstChild().getLastChild().getString(), PROPERTY)));
+209:       } else if (isGlobalFunctionDeclaration(t, n)) {
+210:         String name = parent.getType() == Token.NAME ?
+211:             parent.getString() /* VAR */ :
+212:             n.getFirstChild().getString() /* named function */;
+213:         symbolStack.push(new NameContext(getNameInfoForName(name, VAR)));
+214:       } else if (NodeUtil.isFunction(n)) {
+215:         symbolStack.push(new NameContext(anonymousNode));
+216:       }
+217:       return true;
+218:     }
+
+[13] com.google.javascript.jscomp.CodeConsumer#endBlock  (lines 115-121)
+115:   void endBlock(boolean shouldEndLine) {
+116:     appendBlockEnd();
+117:     if (shouldEndLine) {
+118:       endLine();
+119:     }
+120:     statementNeedsEnded = false;
+121:   }
+
+[14] com.google.javascript.jscomp.CodeConsumer#endStatement  (lines 134-136)
+134:   void endStatement() {
+135:     endStatement(false);
+136:   }
+
+[15] com.google.javascript.rhino.Node#toStringTreeImpl  (lines 1053-1061)
+1053:   private String toStringTreeImpl() {
+1054:     try {
+1055:       StringBuilder s = new StringBuilder();
+1056:       appendStringTree(s);
+1057:       return s.toString();
+1058:     } catch (IOException e) {
+1059:       throw new RuntimeException("Should not happen\n" + e);
+1060:     }
+1061:   }
+
+[16] com.google.javascript.jscomp.CodePrinter#maybeLineBreak  (lines 433-453)
+433:     @Override
+434:     void maybeLineBreak() {
+435:       if (lineBreak) {
+436:         if (sawFunction) {
+437:           startNewLine();
+438:           sawFunction = false;
+439:         }
+440:       }
+441: 
+442:       // Since we are at a legal line break, can we upgrade the
+443:       // preferred break position?  We prefer to break after a
+444:       // semicolon rather than before it.
+445:       int len = code.length();
+446:       if (preferredBreakPosition == len - 1) {
+447:         char ch = code.charAt(len - 1);
+448:         if (ch == ';') {
+449:           preferredBreakPosition = len;
+450:         }
+451:       }
+452:       maybeCutLine();
+453:     }
+
+[17] com.google.javascript.jscomp.AnalyzePrototypeProperties#process  (lines 145-157)
+145:   public void process(Node externRoot, Node root) {
+146:     if (!canModifyExterns) {
+147:       NodeTraversal.traverse(compiler, externRoot,
+148:           new ProcessExternProperties());
+149:     }
+150: 
+151:     NodeTraversal.traverse(compiler, root, new ProcessProperties());
+152: 
+153:     FixedPointGraphTraversal<NameInfo, JSModule> t =
+154:         FixedPointGraphTraversal.newTraversal(new PropagateReferences());
+155:     t.computeFixedPoint(symbolGraph,
+156:         Sets.newHashSet(externNode, globalNode));
+157:   }
+
+[18] com.google.javascript.jscomp.AnalyzePrototypeProperties#isPrototypePropertyAssign  (lines 314-334)
+314:     private boolean isPrototypePropertyAssign(Node assign) {
+315:       Node n = assign.getFirstChild();
+316:       if (n != null && NodeUtil.isVarOrSimpleAssignLhs(n, assign)
+317:           && n.getType() == Token.GETPROP
+318:           ) {
+319:         // We want to exclude the assignment itself from the usage list
+320:         boolean isChainedProperty =
+321:             n.getFirstChild().getType() == Token.GETPROP;
+322: 
+323:         if (isChainedProperty) {
+324:           Node child = n.getFirstChild().getFirstChild().getNext();
+325: 
+326:           if (child.getType() == Token.STRING &&
+327:               child.getString().equals("prototype")) {
+328:             return true;
+329:           }
+330:         }
+331:       }
+332: 
+333:       return false;
+334:     }
+
+[19] com.google.javascript.rhino.Node#toStringTree  (lines 1049-1051)
+1049:   public String toStringTree() {
+1050:     return toStringTreeImpl();
+1051:   }
+
+[20] com.google.javascript.jscomp.CodeConsumer#endStatement  (lines 138-146)
+138:   void endStatement(boolean needSemiColon) {
+139:     if (needSemiColon) {
+140:       append(";");
+141:       maybeLineBreak();
+142:       statementNeedsEnded = false;
+143:     } else if (statementStarted) {
+144:       statementNeedsEnded = true;
+145:     }
+146:   }
+
+[21] com.google.javascript.rhino.Node#NodeMismatch  (lines 2261-2264)
+2261:     NodeMismatch(Node nodeA, Node nodeB) {
+2262:       this.nodeA = nodeA;
+2263:       this.nodeB = nodeB;
+2264:     }
+
+[22] com.google.javascript.jscomp.Compiler#getAllInputsFromModules  (lines 420-436)
+420:   private static List<CompilerInput> getAllInputsFromModules(
+421:       List<JSModule> modules) {
+422:     List<CompilerInput> inputs = Lists.newArrayList();
+423:     Map<String, JSModule> inputMap = Maps.newHashMap();
+424:     for (JSModule module : modules) {
+425:       for (CompilerInput input : module.getInputs()) {
+426:         String inputName = input.getName();
+427: 
+428:         // NOTE(nicksantos): If an input is in more than one module,
+429:         // it will show up twice in the inputs list, and then we
+430:         // will get an error down the line.
+431:         inputs.add(input);
+432:         inputMap.put(inputName, module);
+433:       }
+434:     }
+435:     return inputs;
+436:   }
+
+[23] com.google.javascript.rhino.Node#isEquivalentTo  (lines 1599-1658)
+1599:   boolean isEquivalentTo(Node node, boolean compareJsType, boolean recurse) {
+1600:     if (type != node.getType()
+1601:         || getChildCount() != node.getChildCount()
+1602:         || getNodeClass(this) != getNodeClass(node)) {
+1603:       return false;
+1604:     }
+1605: 
+1606:     if (compareJsType && !JSType.isEquivalent(jsType, node.getJSType())) {
+1607:       return false;
+1608:     }
+1609: 
+1610:     if (type == Token.ARRAYLIT) {
+1611:       try {
+1612:         int[] indices1 = (int[]) getProp(Node.SKIP_INDEXES_PROP);
+1613:         int[] indices2 = (int[]) node.getProp(Node.SKIP_INDEXES_PROP);
+1614:         if (indices1 == null) {
+1615:           if (indices2 != null) {
+1616:             return false;
+1617:           }
+1618:         } else if (indices2 == null) {
+1619:           return false;
+1620:         } else if (indices1.length != indices2.length) {
+1621:           return false;
+1622:         } else {
+1623:           for (int i = 0; i < indices1.length; i++) {
+1624:             if (indices1[i] != indices2[i]) {
+1625:               return false;
+1626:             }
+1627:           }
+1628:         }
+1629:       } catch (Exception e) {
+1630:         return false;
+1631:       }
+1632:     } else if (type == Token.INC || type == Token.DEC) {
+1633:       int post1 = this.getIntProp(INCRDECR_PROP);
+1634:       int post2 = node.getIntProp(INCRDECR_PROP);
+1635:       if (post1 != post2) {
+1636:         return false;
+1637:       }
+1638:     } else if (type == Token.STRING) {
+1639:       int quoted1 = this.getIntProp(QUOTED_PROP);
+1640:       int quoted2 = node.getIntProp(QUOTED_PROP);
+1641:       if (quoted1 != quoted2) {
+1642:         return false;
+1643:       }
+1644:     }
+1645: 
+1646:     if (recurse) {
+1647:       Node n, n2;
+1648:       for (n = first, n2 = node.first;
+1649:            n != null;
+1650:            n = n.next, n2 = n2.next) {
+1651:         if (!n.isEquivalentTo(n2, compareJsType, true)) {
+1652:           return false;
+1653:         }
+1654:       }
+1655:     }
+1656: 
+1657:     return true;
+1658:   }
+
+[24] com.google.javascript.jscomp.RemoveUnusedPrototypeProperties#removeUnusedSymbols  (lines 80-113)
+80:   private void removeUnusedSymbols(Collection<NameInfo> allNameInfo) {
+81:     boolean changed = false;
+82:     for (NameInfo nameInfo : allNameInfo) {
+83:       if (!nameInfo.isReferenced()) {
+84:         for (Symbol declaration : nameInfo.getDeclarations()) {
+85:           boolean canRemove = false;
+86: 
+87:           if (specializationState == null) {
+88:             canRemove = true;
+89:           } else {
+90:             Node specializableFunction =
+91:               getSpecializableFunctionFromSymbol(declaration);
+92: 
+93:             if (specializableFunction != null) {
+94:               specializationState.reportRemovedFunction(
+95:                   specializableFunction, null);
+96:               canRemove = true;
+97:             }
+98:           }
+99: 
+100:           if (canRemove) {
+101:             declaration.remove();
+102:             changed = true;
+103:           }
+104:         }
+105: 
+106:         logger.fine("Removed unused prototype property: " + nameInfo.name);
+107:       }
+108:     }
+109: 
+110:     if (changed) {
+111:       compiler.reportCodeChange();
+112:     }
+113:   }
+
+[25] com.google.javascript.jscomp.RemoveUnusedPrototypeProperties#process  (lines 67-74)
+67:   @Override
+68:   public void process(Node externRoot, Node root) {
+69:     AnalyzePrototypeProperties analyzer =
+70:         new AnalyzePrototypeProperties(compiler,
+71:             null /* no module graph */, canModifyExterns, anchorUnusedVars);
+72:     analyzer.process(externRoot, root);
+73:     removeUnusedSymbols(analyzer.getAllNameInfo());
+74:   }
+
+[26] com.google.javascript.jscomp.CodeConsumer#appendOp  (lines 199-201)
+199:   void appendOp(String op, boolean binOp) {
+200:     append(op);
+201:   }
+
+[27] com.google.javascript.rhino.Node#appendStringTree  (lines 1063-1065)
+1063:   public void appendStringTree(Appendable appendable) throws IOException {
+1064:     toStringTreeHelper(this, 0, appendable);
+1065:   }
+
+[28] com.google.javascript.jscomp.SourceFile#getName  (lines 138-140)
+138:   public String getName() {
+139:     return fileName;
+140:   }
+
+[29] com.google.javascript.jscomp.Scope#getInitialValue  (lines 202-214)
+202:     public Node getInitialValue() {
+203:       Node parent = getParentNode();
+204:       int pType = parent.getType();
+205:       if (pType == Token.FUNCTION) {
+206:         return parent;
+207:       } else if (pType == Token.ASSIGN) {
+208:         return parent.getLastChild();
+209:       } else if (pType == Token.VAR) {
+210:         return nameNode.getFirstChild();
+211:       } else {
+212:         return null;
+213:       }
+214:     }
+
+[30] com.google.javascript.jscomp.AnalyzePrototypeProperties#traverseEdge  (lines 421-432)
+421:     public boolean traverseEdge(NameInfo start, JSModule edge, NameInfo dest) {
+422:       if (start.isReferenced()) {
+423:         JSModule startModule = start.getDeepestCommonModuleRef();
+424:         if (startModule != null &&
+425:             moduleGraph.dependsOn(startModule, edge)) {
+426:           return dest.markReference(startModule);
+427:         } else {
+428:           return dest.markReference(edge);
+429:         }
+430:       }
+431:       return false;
+432:     }
+
+[31] com.google.javascript.jscomp.CodeConsumer#appendBlockStart  (lines 76-78)
+76:   void appendBlockStart() {
+77:     append("{");
+78:   }
+
+[32] com.google.javascript.rhino.Node#getSortedPropTypes  (lines 843-857)
+843:   private int[] getSortedPropTypes() {
+844:     int count = 0;
+845:     for (PropListItem x = propListHead; x != null; x = x.next) {
+846:       count++;
+847:     }
+848: 
+849:     int[] keys = new int[count];
+850:     for (PropListItem x = propListHead; x != null; x = x.next) {
+851:       count--;
+852:       keys[count] = x.type;
+853:     }
+854: 
+855:     Arrays.sort(keys);
+856:     return keys;
+857:   }
+
+[33] com.google.javascript.jscomp.Scope#getVar  (lines 483-492)
+483:   public Var getVar(String name) {
+484:     Var var = vars.get(name);
+485:     if (var != null) {
+486:       return var;
+487:     } else if (parent != null) { // Recurse up the parent Scope
+488:       return parent.getVar(name);
+489:     } else {
+490:       return null;
+491:     }
+492:   }
+
+[34] com.google.javascript.jscomp.CodeConsumer#beginBlock  (lines 100-109)
+100:   void beginBlock() {
+101:     if (statementNeedsEnded) {
+102:       append(";");
+103:       maybeLineBreak();
+104:     }
+105:     appendBlockStart();
+106: 
+107:     endLine();
+108:     statementNeedsEnded = false;
+109:   }
+
+[35] com.google.javascript.jscomp.SourceFile#SourceFile  (lines 79-87)
+79:   SourceFile(String fileName) {
+80:     if (fileName == null || fileName.isEmpty()) {
+81:       throw new IllegalArgumentException("a source must have a name");
+82:     }
+83:     this.fileName = fileName;
+84:     // Starting point: offset 0 is at line 1.
+85:     this.lastOffset = 0;
+86:     this.lastLine = 1;
+87:   }
+
+[36] com.google.javascript.jscomp.NodeTraversal#popScope  (lines 542-552)
+542:   private void popScope() {
+543:     if (scopeCallback != null) {
+544:       scopeCallback.exitScope(this);
+545:     }
+546:     if (scopeRoots.isEmpty()) {
+547:       scopes.pop();
+548:     } else {
+549:       scopeRoots.pop();
+550:     }
+551:     cfgs.pop();
+552:   }
+
+[37] com.google.javascript.jscomp.Compiler#parseInputs  (lines 1091-1229)
+1091:   Node parseInputs() {
+1092:     boolean devMode = options.devMode != DevMode.OFF;
+1093: 
+1094:     // If old roots exist (we are parsing a second time), detach each of the
+1095:     // individual file parse trees.
+1096:     if (externsRoot != null) {
+1097:       externsRoot.detachChildren();
+1098:     }
+1099:     if (jsRoot != null) {
+1100:       jsRoot.detachChildren();
+1101:     }
+1102: 
+1103:     // Parse main js sources.
+1104:     jsRoot = new Node(Token.BLOCK);
+1105:     jsRoot.setIsSyntheticBlock(true);
+1106: 
+1107:     externsRoot = new Node(Token.BLOCK);
+1108:     externsRoot.setIsSyntheticBlock(true);
+1109: 
+1110:     externAndJsRoot = new Node(Token.BLOCK, externsRoot, jsRoot);
+1111:     externAndJsRoot.setIsSyntheticBlock(true);
+1112: 
+1113:     if (options.tracer.isOn()) {
+1114:       tracker = new PerformanceTracker(jsRoot,
+1115:           options.tracer == TracerMode.ALL);
+1116:       addChangeHandler(tracker.getCodeChangeHandler());
+1117:     }
+1118: 
+1119:     Tracer tracer = newTracer("parseInputs");
+1120: 
+1121:     try {
+1122:       // Parse externs sources.
+1123:       for (CompilerInput input : externs) {
+1124:         Node n = input.getAstRoot(this);
+1125:         if (hasErrors()) {
+1126:           return null;
+1127:         }
+1128:         externsRoot.addChildToBack(n);
+1129:       }
+1130: 
+1131:       // Check if the sources need to be re-ordered.
+1132:       if (options.manageClosureDependencies) {
+1133:         for (CompilerInput input : inputs) {
+1134:           input.setCompiler(this);
+1135: 
+1136:           // Forward-declare all the provided types, so that they
+1137:           // are not flagged even if they are dropped from the process.
+1138:           for (String provide : input.getProvides()) {
+1139:             getTypeRegistry().forwardDeclareType(provide);
+1140:           }
+1141:         }
+1142: 
+1143:         try {
+1144:           inputs =
+1145:               (moduleGraph == null ? new JSModuleGraph(modules) : moduleGraph)
+1146:               .manageDependencies(
+1147:                   options.manageClosureDependenciesEntryPoints, inputs);
+1148:         } catch (CircularDependencyException e) {
+1149:           report(JSError.make(
+1150:               JSModule.CIRCULAR_DEPENDENCY_ERROR, e.getMessage()));
+1151:           return null;
+1152:         } catch (MissingProvideException e) {
+1153:           report(JSError.make(
+1154:               MISSING_ENTRY_ERROR, e.getMessage()));
+1155:           return null;
+1156:         }
+1157:       }
+1158: 
+1159:       // Check if inputs need to be rebuilt from modules.
+1160:       boolean staleInputs = false;
+1161:       for (CompilerInput input : inputs) {
+1162:         Node n = input.getAstRoot(this);
+1163: 
+1164:         // Inputs can have a null AST during initial parse.
+1165:         if (n == null) {
+1166:           continue;
+1167:         }
+1168: 
+1169:         if (n.getJSDocInfo() != null) {
+1170:           JSDocInfo info = n.getJSDocInfo();
+1171:           if (info.isExterns()) {
+1172:             // If the input file is explicitly marked as an externs file, then
+1173:             // assume the programmer made a mistake and throw it into
+1174:             // the externs pile anyways.
+1175:             externsRoot.addChildToBack(n);
+1176:             input.setIsExtern(true);
+1177: 
+1178:             input.getModule().remove(input);
+1179: 
+1180:             externs.add(input);
+1181:             staleInputs = true;
+1182:           } else if (info.isNoCompile()) {
+1183:             input.getModule().remove(input);
+1184:             staleInputs = true;
+1185:           }
+1186:         }
+1187:       }
+1188: 
+1189:       if (staleInputs) {
+1190:         fillEmptyModules(modules);
+1191:         rebuildInputsFromModules();
+1192:       }
+1193: 
+1194:       // Build the AST.
+1195:       for (CompilerInput input : inputs) {
+1196:         Node n = input.getAstRoot(this);
+1197:         if (n == null) {
+1198:           continue;
+1199:         }
+1200: 
+1201:         if (devMode) {
+1202:           runSanityCheck();
+1203:           if (hasErrors()) {
+1204:             return null;
+1205:           }
+1206:         }
+1207: 
+1208:         if (options.sourceMapOutputPath != null ||
+1209:             options.nameReferenceReportPath != null) {
+1210: 
+1211:           // Annotate the nodes in the tree with information from the
+1212:           // input file. This information is used to construct the SourceMap.
+1213:           SourceInformationAnnotator sia =
+1214:               new SourceInformationAnnotator(
+1215:                   input.getName(), options.devMode != DevMode.OFF);
+1216:           NodeTraversal.traverse(this, n, sia);
+1217:         }
+1218: 
+1219:         jsRoot.addChildToBack(n);
+1220:       }
+1221: 
+1222:       if (hasErrors()) {
+1223:         return null;
+1224:       }
+1225:       return externAndJsRoot;
+1226:     } finally {
+1227:       stopTracer(tracer, "parseInputs");
+1228:     }
+1229:   }
+
+[38] com.google.javascript.rhino.Node#checkTreeEqualsImpl  (lines 1412-1431)
+1412:   NodeMismatch checkTreeEqualsImpl(Node node2) {
+1413:     if (!isEquivalentTo(node2, false, false)) {
+1414:       return new NodeMismatch(this, node2);
+1415:     }
+1416: 
+1417:     NodeMismatch res = null;
+1418:     Node n, n2;
+1419:     for (n = first, n2 = node2.first;
+1420:          res == null && n != null;
+1421:          n = n.next, n2 = n2.next) {
+1422:       if (node2 == null) {
+1423:         throw new IllegalStateException();
+1424:       }
+1425:       res = n.checkTreeEqualsImpl(n2);
+1426:       if (res != null) {
+1427:         return res;
+1428:       }
+1429:     }
+1430:     return res;
+1431:   }
+
+[39] com.google.javascript.jscomp.graph.FixedPointGraphTraversal#computeFixedPoint  (lines 93-128)
+93:   public void computeFixedPoint(DiGraph<N, E> graph, Set<N> entrySet) {
+94:     int cycleCount = 0;
+95:     long nodeCount = graph.getNodes().size();
+96: 
+97:     // Choose a bail-out heuristically in case the computation
+98:     // doesn't converge.
+99:     long maxIterations = Math.max(nodeCount * nodeCount * nodeCount, 100);
+100: 
+101:     // Use a LinkedHashSet, so that the traversal is deterministic.
+102:     LinkedHashSet<DiGraphNode<N, E>> workSet =
+103:         Sets.newLinkedHashSet();
+104:     for (N n : entrySet) {
+105:       workSet.add(graph.getDirectedGraphNode(n));
+106:     }
+107:     for (; !workSet.isEmpty() && cycleCount < maxIterations; cycleCount++) {
+108:       // For every out edge in the workSet, traverse that edge. If that
+109:       // edge updates the state of the graph, then add the destination
+110:       // node to the resultSet, so that we can update all of its out edges
+111:       // on the next iteration.
+112:       DiGraphNode<N, E> source = workSet.iterator().next();
+113:       N sourceValue = source.getValue();
+114: 
+115:       workSet.remove(source);
+116: 
+117:       List<DiGraphEdge<N, E>> outEdges = source.getOutEdges();
+118:       for (DiGraphEdge<N, E> edge : outEdges) {
+119:         N destNode = edge.getDestination().getValue();
+120:         if (callback.traverseEdge(sourceValue, edge.getValue(), destNode)) {
+121:           workSet.add(edge.getDestination());
+122:         }
+123:       }
+124:     }
+125: 
+126:     Preconditions.checkState(cycleCount != maxIterations,
+127:         NON_HALTING_ERROR_MSG);
+128:   }
+
+[40] com.google.javascript.jscomp.Compiler#toSource  (lines 1456-1460)
+1456:   @Override
+1457:   String toSource(Node n) {
+1458:     initCompilerOptionsIfTesting();
+1459:     return toSource(n, null);
+1460:   }
+
+[41] com.google.javascript.rhino.Node#checkTreeEquals  (lines 1382-1392)
+1382:   public String checkTreeEquals(Node node2) {
+1383:       NodeMismatch diff = checkTreeEqualsImpl(node2);
+1384:       if (diff != null) {
+1385:         return "Node tree inequality:" +
+1386:             "\nTree1:\n" + toStringTree() +
+1387:             "\n\nTree2:\n" + node2.toStringTree() +
+1388:             "\n\nSubtree1: " + diff.nodeA.toStringTree() +
+1389:             "\n\nSubtree2: " + diff.nodeB.toStringTree();
+1390:       }
+1391:       return null;
+1392:   }
+
+[42] com.google.javascript.rhino.Node#toString  (lines 928-1046)
+928:   private void toString(
+929:       StringBuilder sb,
+930:       boolean printSource,
+931:       boolean printAnnotations,
+932:       boolean printType) {
+933:     if (Token.printTrees) {
+934:       sb.append(Token.name(type));
+935:       if (this instanceof StringNode) {
+936:         sb.append(' ');
+937:         sb.append(getString());
+938:       } else if (type == Token.FUNCTION) {
+939:         sb.append(' ');
+940:         // In the case of JsDoc trees, the first child is often not a string
+941:         // which causes exceptions to be thrown when calling toString or
+942:         // toStringTree.
+943:         if (first == null || first.getType() != Token.NAME) {
+944:           sb.append("<invalid>");
+945:         } else {
+946:           sb.append(first.getString());
+947:         }
+948:       } else if (this instanceof ScriptOrFnNode) {
+949:         ScriptOrFnNode sof = (ScriptOrFnNode) this;
+950:         if (this instanceof FunctionNode) {
+951:           FunctionNode fn = (FunctionNode) this;
+952:           sb.append(' ');
+953:           sb.append(fn.getFunctionName());
+954:         }
+955:         if (printSource) {
+956:           sb.append(" [source name: ");
+957:           sb.append(sof.getSourceName());
+958:           sb.append("] [encoded source length: ");
+959:           sb.append(sof.getEncodedSourceEnd() - sof.getEncodedSourceStart());
+960:           sb.append("] [base line: ");
+961:           sb.append(sof.getBaseLineno());
+962:           sb.append("] [end line: ");
+963:           sb.append(sof.getEndLineno());
+964:           sb.append(']');
+965:         }
+966:       } else if (type == Token.NUMBER) {
+967:         sb.append(' ');
+968:         sb.append(getDouble());
+969:       }
+970:       if (printSource) {
+971:         int lineno = getLineno();
+972:         if (lineno != -1) {
+973:           sb.append(' ');
+974:           sb.append(lineno);
+975:         }
+976:       }
+977: 
+978:       if (printAnnotations) {
+979:         int[] keys = getSortedPropTypes();
+980:         for (int i = 0; i < keys.length; i++) {
+981:           int type = keys[i];
+982:           PropListItem x = lookupProperty(type);
+983:           sb.append(" [");
+984:           sb.append(propToString(type));
+985:           sb.append(": ");
+986:           String value;
+987:           switch (type) {
+988:             case TARGETBLOCK_PROP: // can't add this as it recurses
+989:               value = "target block property";
+990:               break;
+991:             case LOCAL_BLOCK_PROP: // can't add this as it is dull
+992:               value = "last local block";
+993:               break;
+994:             case ISNUMBER_PROP:
+995:               switch (x.intValue) {
+996:                 case BOTH:
+997:                   value = "both";
+998:                   break;
+999:                 case RIGHT:
+1000:                   value = "right";
+1001:                   break;
+1002:                 case LEFT:
+1003:                   value = "left";
+1004:                   break;
+1005:                 default:
+1006:                   throw Kit.codeBug();
+1007:               }
+1008:               break;
+1009:             case SPECIALCALL_PROP:
+1010:               switch (x.intValue) {
+1011:                 case SPECIALCALL_EVAL:
+1012:                   value = "eval";
+1013:                   break;
+1014:                 case SPECIALCALL_WITH:
+1015:                   value = "with";
+1016:                   break;
+1017:                 default:
+1018:                   // NON_SPECIALCALL should not be stored
+1019:                   throw Kit.codeBug();
+1020:               }
+1021:               break;
+1022:             default:
+1023:               Object obj = x.objectValue;
+1024:               if (obj != null) {
+1025:                 value = obj.toString();
+1026:               } else {
+1027:                 value = String.valueOf(x.intValue);
+1028:               }
+1029:               break;
+1030:           }
+1031:           sb.append(value);
+1032:           sb.append(']');
+1033:         }
+1034:       }
+1035: 
+1036:       if (printType) {
+1037:         if (jsType != null) {
+1038:           String jsTypeString = jsType.toString();
+1039:           if (jsTypeString != null) {
+1040:             sb.append(" : ");
+1041:             sb.append(jsTypeString);
+1042:           }
+1043:         }
+1044:       }
+1045:     }
+1046:   }
+
+[43] com.google.javascript.jscomp.SourceFile#fromCode  (lines 259-261)
+259:   public static SourceFile fromCode(String fileName, String code) {
+260:     return new Preloaded(fileName, code);
+261:   }
+
+[44] com.google.javascript.jscomp.AnalyzePrototypeProperties#getNameInfoForName  (lines 175-186)
+175:   private NameInfo getNameInfoForName(String name, SymbolType type) {
+176:     Map<String, NameInfo> map = type == PROPERTY ?
+177:         propertyNameInfo : varNameInfo;
+178:     if (map.containsKey(name)) {
+179:       return map.get(name);
+180:     } else {
+181:       NameInfo nameInfo = new NameInfo(name);
+182:       map.put(name, nameInfo);
+183:       symbolGraph.createNode(nameInfo);
+184:       return nameInfo;
+185:     }
+186:   }
+
+[45] com.google.javascript.jscomp.NodeTraversal#getScope  (lines 555-569)
+555:   public Scope getScope() {
+556:     Scope scope = scopes.isEmpty() ? null : scopes.peek();
+557:     if (scopeRoots.isEmpty()) {
+558:       return scope;
+559:     }
+560: 
+561:     Iterator<Node> it = scopeRoots.descendingIterator();
+562:     while (it.hasNext()) {
+563:       scope = scopeCreator.createScope(it.next(), scope);
+564:       scopes.push(scope);
+565:     }
+566:     scopeRoots.clear();
+567: 
+568:     return scope;
+569:   }
+
+[46] com.google.javascript.rhino.Node#toString  (lines 916-926)
+916:   public String toString(
+917:       boolean printSource,
+918:       boolean printAnnotations,
+919:       boolean printType) {
+920:     if (Token.printTrees) {
+921:         StringBuilder sb = new StringBuilder();
+922:         toString(sb, printSource, printAnnotations, printType);
+923:         return sb.toString();
+924:     }
+925:     return String.valueOf(type);
+926:   }
+
+[47] com.google.javascript.rhino.Node#propToString  (lines 172-238)
+172:   private static final String propToString(int propType) {
+173:       switch (propType) {
+174:         case LOCAL_BLOCK_PROP:   return "local_block";
+175:         case OBJECT_IDS_PROP:    return "object_ids_prop";
+176:         case CATCH_SCOPE_PROP:   return "catch_scope_prop";
+177:         case LABEL_ID_PROP:      return "label_id_prop";
+178:         case TARGET_PROP:        return "target";
+179:         case BRACELESS_TYPE:     return "braceless_type";
+180:         case BREAK_PROP:         return "break";
+181:         case CONTINUE_PROP:      return "continue";
+182:         case ENUM_PROP:          return "enum";
+183:         case FUNCTION_PROP:      return "function";
+184:         case TEMP_PROP:          return "temp";
+185:         case LOCAL_PROP:         return "local";
+186:         case CODEOFFSET_PROP:    return "codeoffset";
+187:         case FIXUPS_PROP:        return "fixups";
+188:         case VARS_PROP:          return "vars";
+189:         case VAR_ARGS_NAME:      return "var_args_name";
+190:         case USES_PROP:          return "uses";
+191:         case REGEXP_PROP:        return "regexp";
+192:         case CASES_PROP:         return "cases";
+193:         case DEFAULT_PROP:       return "default";
+194:         case CASEARRAY_PROP:     return "casearray";
+195:         case SOURCENAME_PROP:    return "sourcename";
+196:         case TYPE_PROP:          return "type";
+197:         case SPECIAL_PROP_PROP:  return "special_prop";
+198:         case LABEL_PROP:         return "label";
+199:         case FINALLY_PROP:       return "finally";
+200:         case LOCALCOUNT_PROP:    return "localcount";
+201: 
+202:         case TARGETBLOCK_PROP:   return "targetblock";
+203:         case VARIABLE_PROP:      return "variable";
+204:         case LASTUSE_PROP:       return "lastuse";
+205:         case ISNUMBER_PROP:      return "isnumber";
+206:         case DIRECTCALL_PROP:    return "directcall";
+207: 
+208:         case SPECIALCALL_PROP:   return "specialcall";
+209:         case DEBUGSOURCE_PROP:   return "debugsource";
+210: 
+211:         case JSDOC_INFO_PROP:    return "jsdoc_info";
+212: 
+213:         case SKIP_INDEXES_PROP:  return "skip_indexes";
+214:         case INCRDECR_PROP:      return "incrdecr";
+215:         case MEMBER_TYPE_PROP:   return "member_type";
+216:         case NAME_PROP:          return "name";
+217:         case PARENTHESIZED_PROP: return "parenthesized";
+218:         case QUOTED_PROP:        return "quoted";
+219:         case OPT_ARG_NAME:       return "opt_arg";
+220: 
+221:         case SYNTHETIC_BLOCK_PROP: return "synthetic";
+222:         case EMPTY_BLOCK:        return "empty_block";
+223:         case ORIGINALNAME_PROP:  return "originalname";
+224:         case SIDE_EFFECT_FLAGS:  return "side_effect_flags";
+225: 
+226:         case IS_CONSTANT_NAME:   return "is_constant_name";
+227:         case IS_OPTIONAL_PARAM:  return "is_optional_param";
+228:         case IS_VAR_ARGS_PARAM:  return "is_var_args_param";
+229:         case IS_NAMESPACE:       return "is_namespace";
+230:         case IS_DISPATCHER:      return "is_dispatcher";
+231:         case DIRECTIVES:         return "directives";
+232:         case DIRECT_EVAL:        return "direct_eval";
+233:         case FREE_CALL:          return "free_call";
+234:         default:
+235:           Kit.codeBug();
+236:       }
+237:       return null;
+238:   }
+
+[48] com.google.javascript.rhino.Node#toStringTreeHelper  (lines 1067-1081)
+1067:   private static void toStringTreeHelper(Node n, int level, Appendable sb)
+1068:       throws IOException {
+1069:     if (Token.printTrees) {
+1070:       for (int i = 0; i != level; ++i) {
+1071:         sb.append("    ");
+1072:       }
+1073:       sb.append(n.toString());
+1074:       sb.append('\n');
+1075:       for (Node cursor = n.getFirstChild();
+1076:            cursor != null;
+1077:            cursor = cursor.getNext()) {
+1078:         toStringTreeHelper(cursor, level + 1, sb);
+1079:       }
+1080:     }
+1081:   }
+
+[49] com.google.javascript.jscomp.CodeGenerator#add  (lines 86-735)
+86:   void add(Node n, Context context) {
+87:     if (!cc.continueProcessing()) {
+88:       return;
+89:     }
+90: 
+91:     int type = n.getType();
+92:     String opstr = NodeUtil.opToStr(type);
+93:     int childCount = n.getChildCount();
+94:     Node first = n.getFirstChild();
+95:     Node last = n.getLastChild();
+96: 
+97:     // Handle all binary operators
+98:     if (opstr != null && first != last) {
+99:       Preconditions.checkState(
+100:           childCount == 2,
+101:           "Bad binary operator \"%s\": expected 2 arguments but got %s",
+102:           opstr, childCount);
+103:       int p = NodeUtil.precedence(type);
+104:       addLeftExpr(first, p, context);
+105:       cc.addOp(opstr, true);
+106: 
+107:       // For right-hand-side of operations, only pass context if it's
+108:       // the IN_FOR_INIT_CLAUSE one.
+109:       Context rhsContext = getContextForNoInOperator(context);
+110: 
+111:       // Handle associativity.
+112:       // e.g. if the parse tree is a * (b * c),
+113:       // we can simply generate a * b * c.
+114:       if (last.getType() == type &&
+115:           NodeUtil.isAssociative(type)) {
+116:         addExpr(last, p, rhsContext);
+117:       } else if (NodeUtil.isAssignmentOp(n) && NodeUtil.isAssignmentOp(last)) {
+118:         // Assignments are the only right-associative binary operators
+119:         addExpr(last, p, rhsContext);
+120:       } else {
+121:         addExpr(last, p + 1, rhsContext);
+122:       }
+123:       return;
+124:     }
+125: 
+126:     cc.startSourceMapping(n);
+127: 
+128:     switch (type) {
+129:       case Token.TRY: {
+130:         Preconditions.checkState(first.getNext().getType() == Token.BLOCK &&
+131:                 !first.getNext().hasMoreThanOneChild());
+132:         Preconditions.checkState(childCount >= 2 && childCount <= 3);
+133: 
+134:         add("try");
+135:         add(first, Context.PRESERVE_BLOCK);
+136: 
+137:         // second child contains the catch block, or nothing if there
+138:         // isn't a catch block
+139:         Node catchblock = first.getNext().getFirstChild();
+140:         if (catchblock != null) {
+141:           add(catchblock);
+142:         }
+143: 
+144:         if (childCount == 3) {
+145:           add("finally");
+146:           add(last, Context.PRESERVE_BLOCK);
+147:         }
+148:         break;
+149:       }
+150: 
+151:       case Token.CATCH:
+152:         Preconditions.checkState(childCount == 2);
+153:         add("catch(");
+154:         add(first);
+155:         add(")");
+156:         add(last, Context.PRESERVE_BLOCK);
+157:         break;
+158: 
+159:       case Token.THROW:
+160:         Preconditions.checkState(childCount == 1);
+161:         add("throw");
+162:         add(first);
+163: 
+164:         // Must have a ';' after a throw statement, otherwise safari can't
+165:         // parse this.
+166:         cc.endStatement(true);
+167:         break;
+168: 
+169:       case Token.RETURN:
+170:         add("return");
+171:         if (childCount == 1) {
+172:           add(first);
+173:         } else {
+174:           Preconditions.checkState(childCount == 0);
+175:         }
+176:         cc.endStatement();
+177:         break;
+178: 
+179:       case Token.VAR:
+180:         if (first != null) {
+181:           add("var ");
+182:           addList(first, false, getContextForNoInOperator(context));
+183:         }
+184:         break;
+185: 
+186:       case Token.LABEL_NAME:
+187:         Preconditions.checkState(!n.getString().isEmpty());
+188:         addIdentifier(n.getString());
+189:         break;
+190: 
+191:       case Token.NAME:
+192:         if (first == null || first.getType() == Token.EMPTY) {
+193:           addIdentifier(n.getString());
+194:         } else {
+195:           Preconditions.checkState(childCount == 1);
+196:           addIdentifier(n.getString());
+197:           cc.addOp("=", true);
+198:           if (first.getType() == Token.COMMA) {
+199:             addExpr(first, NodeUtil.precedence(Token.ASSIGN));
+200:           } else {
+201:             // Add expression, consider nearby code at lowest level of
+202:             // precedence.
+203:             addExpr(first, 0, getContextForNoInOperator(context));
+204:           }
+205:         }
+206:         break;
+207: 
+208:       case Token.ARRAYLIT:
+209:         add("[");
+210:         addArrayList(first);
+211:         add("]");
+212:         break;
+213: 
+214:       case Token.LP:
+215:         add("(");
+216:         addList(first);
+217:         add(")");
+218:         break;
+219: 
+220:       case Token.COMMA:
+221:         Preconditions.checkState(childCount == 2);
+222:         addList(first, false, context);
+223:         break;
+224: 
+225:       case Token.NUMBER:
+226:         Preconditions.checkState(childCount == 0);
+227:         cc.addNumber(n.getDouble());
+228:         break;
+229: 
+230:       case Token.TYPEOF:
+231:       case Token.VOID:
+232:       case Token.NOT:
+233:       case Token.BITNOT:
+234:       case Token.POS: {
+235:         // All of these unary operators are right-associative
+236:         Preconditions.checkState(childCount == 1);
+237:         cc.addOp(NodeUtil.opToStrNoFail(type), false);
+238:         addExpr(first, NodeUtil.precedence(type));
+239:         break;
+240:       }
+241: 
+242:       case Token.NEG: {
+243:         Preconditions.checkState(childCount == 1);
+244: 
+245:         // It's important to our sanity checker that the code
+246:         // we print produces the same AST as the code we parse back.
+247:         // NEG is a weird case because Rhino parses "- -2" as "2".
+248:         if (n.getFirstChild().getType() == Token.NUMBER) {
+249:           cc.addNumber(-n.getFirstChild().getDouble());
+250:         } else {
+251:           cc.addOp(NodeUtil.opToStrNoFail(type), false);
+252:           addExpr(first, NodeUtil.precedence(type));
+253:         }
+254: 
+255:         break;
+256:       }
+257: 
+258:       case Token.HOOK: {
+259:         Preconditions.checkState(childCount == 3);
+260:         int p = NodeUtil.precedence(type);
+261:         addLeftExpr(first, p + 1, context);
+262:         cc.addOp("?", true);
+263:         addExpr(first.getNext(), 1);
+264:         cc.addOp(":", true);
+265:         addExpr(last, 1);
+266:         break;
+267:       }
+268: 
+269:       case Token.REGEXP:
+270:         if (first.getType() != Token.STRING ||
+271:             last.getType() != Token.STRING) {
+272:           throw new Error("Expected children to be strings");
+273:         }
+274: 
+275:         String regexp = regexpEscape(first.getString(), outputCharsetEncoder);
+276: 
+277:         // I only use one .add because whitespace matters
+278:         if (childCount == 2) {
+279:           add(regexp + last.getString());
+280:         } else {
+281:           Preconditions.checkState(childCount == 1);
+282:           add(regexp);
+283:         }
+284:         break;
+285: 
+286:       case Token.GET_REF:
+287:         add(first);
+288:         break;
+289: 
+290:       case Token.REF_SPECIAL:
+291:         Preconditions.checkState(childCount == 1);
+292:         add(first);
+293:         add(".");
+294:         add((String) n.getProp(Node.NAME_PROP));
+295:         break;
+296: 
+297:       case Token.FUNCTION:
+298:         if (n.getClass() != Node.class) {
+299:           throw new Error("Unexpected Node subclass.");
+300:         }
+301:         Preconditions.checkState(childCount == 3);
+302:         boolean funcNeedsParens = (context == Context.START_OF_EXPR);
+303:         if (funcNeedsParens) {
+304:           add("(");
+305:         }
+306: 
+307:         add("function");
+308:         add(first);
+309: 
+310:         add(first.getNext());
+311:         add(last, Context.PRESERVE_BLOCK);
+312:         cc.endFunction(context == Context.STATEMENT);
+313: 
+314:         if (funcNeedsParens) {
+315:           add(")");
+316:         }
+317:         break;
+318: 
+319:       case Token.GET:
+320:       case Token.SET:
+321:         Preconditions.checkState(n.getParent().getType() == Token.OBJECTLIT);
+322:         Preconditions.checkState(childCount == 1);
+323:         Preconditions.checkState(first.getType() == Token.FUNCTION);
+324: 
+325:         // Get methods are unnamed
+326:         Preconditions.checkState(first.getFirstChild().getString().isEmpty());
+327:         if (type == Token.GET) {
+328:           // Get methods have no parameters.
+329:           Preconditions.checkState(!first.getChildAtIndex(1).hasChildren());
+330:           add("get ");
+331:         } else {
+332:           // Set methods have one parameter.
+333:           Preconditions.checkState(first.getChildAtIndex(1).hasOneChild());
+334:           add("set ");
+335:         }
+336: 
+337:         // The name is on the GET or SET node.
+338:         String name = n.getString();
+339:         Node fn = first;
+340:         Node parameters = fn.getChildAtIndex(1);
+341:         Node body = fn.getLastChild();
+342: 
+343:         // Add the property name.
+344:         if (!n.isQuotedString() &&
+345:             TokenStream.isJSIdentifier(name) &&
+346:             // do not encode literally any non-literal characters that were
+347:             // unicode escaped.
+348:             NodeUtil.isLatin(name)) {
+349:           add(name);
+350:         } else {
+351:           // Determine if the string is a simple number.
+352:           double d = getSimpleNumber(name);
+353:           if (!Double.isNaN(d)) {
+354:             cc.addNumber(d);
+355:           } else {
+356:             addJsString(n.getString());
+357:           }
+358:         }
+359: 
+360:         add(parameters);
+361:         add(body, Context.PRESERVE_BLOCK);
+362:         break;
+363: 
+364:       case Token.SCRIPT:
+365:       case Token.BLOCK: {
+366:         if (n.getClass() != Node.class) {
+367:           throw new Error("Unexpected Node subclass.");
+368:         }
+369:         boolean preserveBlock = context == Context.PRESERVE_BLOCK;
+370:         if (preserveBlock) {
+371:           cc.beginBlock();
+372:         }
+373: 
+374:         boolean preferLineBreaks =
+375:             type == Token.SCRIPT ||
+376:             (type == Token.BLOCK &&
+377:                 !preserveBlock &&
+378:                 n.getParent() != null &&
+379:                 n.getParent().getType() == Token.SCRIPT);
+380:         for (Node c = first; c != null; c = c.getNext()) {
+381:           add(c, Context.STATEMENT);
+382: 
+383:           // VAR doesn't include ';' since it gets used in expressions
+384:           if (c.getType() == Token.VAR) {
+385:             cc.endStatement();
+386:           }
+387: 
+388:           if (c.getType() == Token.FUNCTION) {
+389:             cc.maybeLineBreak();
+390:           }
+391: 
+392:           // Prefer to break lines in between top-level statements
+393:           // because top level statements are more homogeneous.
+394:           if (preferLineBreaks) {
+395:             cc.notePreferredLineBreak();
+396:           }
+397:         }
+398:         if (preserveBlock) {
+399:           cc.endBlock(cc.breakAfterBlockFor(n, context == Context.STATEMENT));
+400:         }
+401:         break;
+402:       }
+403: 
+404:       case Token.FOR:
+405:         if (childCount == 4) {
+406:           add("for(");
+407:           if (first.getType() == Token.VAR) {
+408:             add(first, Context.IN_FOR_INIT_CLAUSE);
+409:           } else {
+410:             addExpr(first, 0, Context.IN_FOR_INIT_CLAUSE);
+411:           }
+412:           add(";");
+413:           add(first.getNext());
+414:           add(";");
+415:           add(first.getNext().getNext());
+416:           add(")");
+417:           addNonEmptyStatement(
+418:               last, getContextForNonEmptyExpression(context), false);
+419:         } else {
+420:           Preconditions.checkState(childCount == 3);
+421:           add("for(");
+422:           add(first);
+423:           add("in");
+424:           add(first.getNext());
+425:           add(")");
+426:           addNonEmptyStatement(
+427:               last, getContextForNonEmptyExpression(context), false);
+428:         }
+429:         break;
+430: 
+431:       case Token.DO:
+432:         Preconditions.checkState(childCount == 2);
+433:         add("do");
+434:         addNonEmptyStatement(first, Context.OTHER, false);
+435:         add("while(");
+436:         add(last);
+437:         add(")");
+438:         cc.endStatement();
+439:         break;
+440: 
+441:       case Token.WHILE:
+442:         Preconditions.checkState(childCount == 2);
+443:         add("while(");
+444:         add(first);
+445:         add(")");
+446:         addNonEmptyStatement(
+447:             last, getContextForNonEmptyExpression(context), false);
+448:         break;
+449: 
+450:       case Token.EMPTY:
+451:         Preconditions.checkState(childCount == 0);
+452:         break;
+453: 
+454:       case Token.GETPROP: {
+455:         Preconditions.checkState(
+456:             childCount == 2,
+457:             "Bad GETPROP: expected 2 children, but got %s", childCount);
+458:         Preconditions.checkState(
+459:             last.getType() == Token.STRING,
+460:             "Bad GETPROP: RHS should be STRING");
+461:         boolean needsParens = (first.getType() == Token.NUMBER);
+462:         if (needsParens) {
+463:           add("(");
+464:         }
+465:         addLeftExpr(first, NodeUtil.precedence(type), context);
+466:         if (needsParens) {
+467:           add(")");
+468:         }
+469:         add(".");
+470:         addIdentifier(last.getString());
+471:         break;
+472:       }
+473: 
+474:       case Token.GETELEM:
+475:         Preconditions.checkState(
+476:             childCount == 2,
+477:             "Bad GETELEM: expected 2 children but got %s", childCount);
+478:         addLeftExpr(first, NodeUtil.precedence(type), context);
+479:         add("[");
+480:         add(first.getNext());
+481:         add("]");
+482:         break;
+483: 
+484:       case Token.WITH:
+485:         Preconditions.checkState(childCount == 2);
+486:         add("with(");
+487:         add(first);
+488:         add(")");
+489:         addNonEmptyStatement(
+490:             last, getContextForNonEmptyExpression(context), false);
+491:         break;
+492: 
+493:       case Token.INC:
+494:       case Token.DEC: {
+495:         Preconditions.checkState(childCount == 1);
+496:         String o = type == Token.INC ? "++" : "--";
+497:         int postProp = n.getIntProp(Node.INCRDECR_PROP);
+498:         // A non-zero post-prop value indicates a post inc/dec, default of zero
+499:         // is a pre-inc/dec.
+500:         if (postProp != 0) {
+501:           addLeftExpr(first, NodeUtil.precedence(type), context);
+502:           cc.addOp(o, false);
+503:         } else {
+504:           cc.addOp(o, false);
+505:           add(first);
+506:         }
+507:         break;
+508:       }
+509: 
+510:       case Token.CALL:
+511:         // We have two special cases here:
+512:         // 1) If the left hand side of the call is a direct reference to eval,
+513:         // then it must have a DIRECT_EVAL annotation. If it does not, then
+514:         // that means it was originally an indirect call to eval, and that
+515:         // indirectness must be preserved.
+516:         // 2) If the left hand side of the call is a property reference,
+517:         // then the call must not a FREE_CALL annotation. If it does, then
+518:         // that means it was originally an call without an explicit this and
+519:         // that must be preserved.
+520:         if (isIndirectEval(first)
+521:             || n.getBooleanProp(Node.FREE_CALL) && NodeUtil.isGet(first)) {
+522:           add("(0,");
+523:           addExpr(first, NodeUtil.precedence(Token.COMMA));
+524:           add(")");
+525:         } else {
+526:           addLeftExpr(first, NodeUtil.precedence(type), context);
+527:         }
+528:         add("(");
+529:         addList(first.getNext());
+530:         add(")");
+531:         break;
+532: 
+533:       case Token.IF:
+534:         boolean hasElse = childCount == 3;
+535:         boolean ambiguousElseClause =
+536:             context == Context.BEFORE_DANGLING_ELSE && !hasElse;
+537:         if (ambiguousElseClause) {
+538:           cc.beginBlock();
+539:         }
+540: 
+541:         add("if(");
+542:         add(first);
+543:         add(")");
+544: 
+545:         if (hasElse) {
+546:           addNonEmptyStatement(
+547:               first.getNext(), Context.BEFORE_DANGLING_ELSE, false);
+548:           add("else");
+549:           addNonEmptyStatement(
+550:               last, getContextForNonEmptyExpression(context), false);
+551:         } else {
+552:           addNonEmptyStatement(first.getNext(), Context.OTHER, false);
+553:           Preconditions.checkState(childCount == 2);
+554:         }
+555: 
+556:         if (ambiguousElseClause) {
+557:           cc.endBlock();
+558:         }
+559:         break;
+560: 
+561:       case Token.NULL:
+562:       case Token.THIS:
+563:       case Token.FALSE:
+564:       case Token.TRUE:
+565:         Preconditions.checkState(childCount == 0);
+566:         add(Node.tokenToName(type));
+567:         break;
+568: 
+569:       case Token.CONTINUE:
+570:         Preconditions.checkState(childCount <= 1);
+571:         add("continue");
+572:         if (childCount == 1) {
+573:           if (first.getType() != Token.LABEL_NAME) {
+574:             throw new Error("Unexpected token type. Should be LABEL_NAME.");
+575:           }
+576:           add(" ");
+577:           add(first);
+578:         }
+579:         cc.endStatement();
+580:         break;
+581: 
+582:       case Token.DEBUGGER:
+583:         Preconditions.checkState(childCount == 0);
+584:         add("debugger");
+585:         cc.endStatement();
+586:         break;
+587: 
+588:       case Token.BREAK:
+589:         Preconditions.checkState(childCount <= 1);
+590:         add("break");
+591:         if (childCount == 1) {
+592:           if (first.getType() != Token.LABEL_NAME) {
+593:             throw new Error("Unexpected token type. Should be LABEL_NAME.");
+594:           }
+595:           add(" ");
+596:           add(first);
+597:         }
+598:         cc.endStatement();
+599:         break;
+600: 
+601:       case Token.EXPR_VOID:
+602:         throw new Error("Unexpected EXPR_VOID. Should be EXPR_RESULT.");
+603: 
+604:       case Token.EXPR_RESULT:
+605:         Preconditions.checkState(childCount == 1);
+606:         add(first, Context.START_OF_EXPR);
+607:         cc.endStatement();
+608:         break;
+609: 
+610:       case Token.NEW:
+611:         add("new ");
+612:         int precedence = NodeUtil.precedence(type);
+613: 
+614:         // If the first child contains a CALL, then claim higher precedence
+615:         // to force parentheses. Otherwise, when parsed, NEW will bind to the
+616:         // first viable parentheses (don't traverse into functions).
+617:         if (NodeUtil.containsType(first, Token.CALL, new MatchNotFunction())) {
+618:           precedence = NodeUtil.precedence(first.getType()) + 1;
+619:         }
+620:         addExpr(first, precedence);
+621: 
+622:         // '()' is optional when no arguments are present
+623:         Node next = first.getNext();
+624:         if (next != null) {
+625:           add("(");
+626:           addList(next);
+627:           add(")");
+628:         }
+629:         break;
+630: 
+631:       case Token.STRING:
+632:         if (childCount !=
+633:             ((n.getParent() != null &&
+634:               n.getParent().getType() == Token.OBJECTLIT) ? 1 : 0)) {
+635:           throw new IllegalStateException(
+636:               "Unexpected String children: " + n.getParent().toStringTree());
+637:         }
+638:         addJsString(n.getString());
+639:         break;
+640: 
+641:       case Token.DELPROP:
+642:         Preconditions.checkState(childCount == 1);
+643:         add("delete ");
+644:         add(first);
+645:         break;
+646: 
+647:       case Token.OBJECTLIT: {
+648:         boolean needsParens = (context == Context.START_OF_EXPR);
+649:         if (needsParens) {
+650:           add("(");
+651:         }
+652:         add("{");
+653:         for (Node c = first; c != null; c = c.getNext()) {
+654:           if (c != first) {
+655:             cc.listSeparator();
+656:           }
+657: 
+658:           if (c.getType() == Token.GET || c.getType() == Token.SET) {
+659:             add(c);
+660:           } else {
+661:             Preconditions.checkState(c.getType() == Token.STRING);
+662:             String key = c.getString();
+663:             // Object literal property names don't have to be quoted if they
+664:             // are not JavaScript keywords
+665:             if (!c.isQuotedString() &&
+666:                 !TokenStream.isKeyword(key) &&
+667:                 TokenStream.isJSIdentifier(key) &&
+668:                 // do not encode literally any non-literal characters that
+669:                 // were unicode escaped.
+670:                 NodeUtil.isLatin(key)) {
+671:               add(key);
+672:             } else {
+673:               // Determine if the string is a simple number.
+674:               double d = getSimpleNumber(key);
+675:               if (!Double.isNaN(d)) {
+676:                 cc.addNumber(d);
+677:               } else {
+678:                 addExpr(c, 1);
+679:               }
+680:             }
+681:             add(":");
+682:             addExpr(c.getFirstChild(), 1);
+683:           }
+684:         }
+685:         add("}");
+686:         if (needsParens) {
+687:           add(")");
+688:         }
+689:         break;
+690:       }
+691: 
+692:       case Token.SWITCH:
+693:         add("switch(");
+694:         add(first);
+695:         add(")");
+696:         cc.beginBlock();
+697:         addAllSiblings(first.getNext());
+698:         cc.endBlock(context == Context.STATEMENT);
+699:         break;
+700: 
+701:       case Token.CASE:
+702:         Preconditions.checkState(childCount == 2);
+703:         add("case ");
+704:         add(first);
+705:         addCaseBody(last);
+706:         break;
+707: 
+708:       case Token.DEFAULT:
+709:         Preconditions.checkState(childCount == 1);
+710:         add("default");
+711:         addCaseBody(first);
+712:         break;
+713: 
+714:       case Token.LABEL:
+715:         Preconditions.checkState(childCount == 2);
+716:         if (first.getType() != Token.LABEL_NAME) {
+717:           throw new Error("Unexpected token type. Should be LABEL_NAME.");
+718:         }
+719:         add(first);
+720:         add(":");
+721:         addNonEmptyStatement(
+722:             last, getContextForNonEmptyExpression(context), true);
+723:         break;
+724: 
+725:       // This node is auto generated in anonymous functions and should just get
+726:       // ignored for our purposes.
+727:       case Token.SETNAME:
+728:         break;
+729: 
+730:       default:
+731:         throw new Error("Unknown type " + type + "\n" + n.toStringTree());
+732:     }
+733: 
+734:     cc.endSourceMapping(n);
+735:   }
+
+[50] com.google.javascript.jscomp.CodeConsumer#appendBlockEnd  (lines 80-82)
+80:   void appendBlockEnd() {
+81:     append("}");
+82:   }

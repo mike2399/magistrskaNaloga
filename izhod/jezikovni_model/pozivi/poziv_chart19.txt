@@ -1,0 +1,1038 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.jfree.chart.plot.junit.CategoryPlotTests::testGetRangeAxisIndex
+junit.framework.AssertionFailedError
+	at org.jfree.chart.plot.junit.CategoryPlotTests.testGetRangeAxisIndex(CategoryPlotTests.java:761)
+--- org.jfree.chart.plot.junit.CategoryPlotTests::testGetDomainAxisIndex
+junit.framework.AssertionFailedError
+	at org.jfree.chart.plot.junit.CategoryPlotTests.testGetDomainAxisIndex(CategoryPlotTests.java:737)
+
+=== CANDIDATE METHODS ===
+
+[1] org.jfree.chart.plot.CategoryPlot#setDomainAxis  (lines 639-641)
+639:     public void setDomainAxis(int index, CategoryAxis axis) {
+640:         setDomainAxis(index, axis, true);
+641:     }
+
+[2] org.jfree.chart.axis.Axis#setTickMarksVisible  (lines 762-767)
+762:     public void setTickMarksVisible(boolean flag) {
+763:         if (flag != this.tickMarksVisible) {
+764:             this.tickMarksVisible = flag;
+765:             notifyListeners(new AxisChangeEvent(this));
+766:         }
+767:     }
+
+[3] org.jfree.chart.axis.NumberAxis#autoAdjustRange  (lines 419-505)
+419:     protected void autoAdjustRange() {
+420: 
+421:         Plot plot = getPlot();
+422:         if (plot == null) {
+423:             return;  // no plot, no data
+424:         }
+425: 
+426:         if (plot instanceof ValueAxisPlot) {
+427:             ValueAxisPlot vap = (ValueAxisPlot) plot;
+428: 
+429:             Range r = vap.getDataRange(this);
+430:             if (r == null) {
+431:                 r = getDefaultAutoRange();
+432:             }
+433:             
+434:             double upper = r.getUpperBound();
+435:             double lower = r.getLowerBound();
+436:             if (this.rangeType == RangeType.POSITIVE) {
+437:                 lower = Math.max(0.0, lower);
+438:                 upper = Math.max(0.0, upper);
+439:             }
+440:             else if (this.rangeType == RangeType.NEGATIVE) {
+441:                 lower = Math.min(0.0, lower);
+442:                 upper = Math.min(0.0, upper);                   
+443:             }
+444:             
+445:             if (getAutoRangeIncludesZero()) {
+446:                 lower = Math.min(lower, 0.0);
+447:                 upper = Math.max(upper, 0.0);
+448:             }
+449:             double range = upper - lower;
+450: 
+451:             // if fixed auto range, then derive lower bound...
+452:             double fixedAutoRange = getFixedAutoRange();
+453:             if (fixedAutoRange > 0.0) {
+454:                 lower = upper - fixedAutoRange;
+455:             }
+456:             else {
+457:                 // ensure the autorange is at least <minRange> in size...
+458:                 double minRange = getAutoRangeMinimumSize();
+459:                 if (range < minRange) {
+460:                     double expand = (minRange - range) / 2;
+461:                     upper = upper + expand;
+462:                     lower = lower - expand;
+463:                     if (lower == upper) { // see bug report 1549218
+464:                         double adjust = Math.abs(lower) / 10.0;
+465:                         lower = lower - adjust;
+466:                         upper = upper + adjust;
+467:                     }
+468:                     if (this.rangeType == RangeType.POSITIVE) {
+469:                         if (lower < 0.0) {
+470:                             upper = upper - lower;
+471:                             lower = 0.0;
+472:                         }
+473:                     }
+474:                     else if (this.rangeType == RangeType.NEGATIVE) {
+475:                         if (upper > 0.0) {
+476:                             lower = lower - upper;
+477:                             upper = 0.0;
+478:                         }
+479:                     }
+480:                 }
+481: 
+482:                 if (getAutoRangeStickyZero()) {
+483:                     if (upper <= 0.0) {
+484:                         upper = Math.min(0.0, upper + getUpperMargin() * range);
+485:                     }
+486:                     else {
+487:                         upper = upper + getUpperMargin() * range;
+488:                     }
+489:                     if (lower >= 0.0) {
+490:                         lower = Math.max(0.0, lower - getLowerMargin() * range);
+491:                     }
+492:                     else {
+493:                         lower = lower - getLowerMargin() * range;
+494:                     }
+495:                 }
+496:                 else {
+497:                     upper = upper + getUpperMargin() * range;
+498:                     lower = lower - getLowerMargin() * range;
+499:                 }
+500:             }
+501: 
+502:             setRange(new Range(lower, upper), false, false);
+503:         }
+504: 
+505:     }
+
+[4] org.jfree.chart.plot.CategoryPlot#setDomainAxisLocation  (lines 786-796)
+786:     public void setDomainAxisLocation(int index, AxisLocation location, 
+787:             boolean notify) {
+788:         if (index == 0 && location == null) {
+789:             throw new IllegalArgumentException(
+790:                     "Null 'location' for index 0 not permitted.");
+791:         }
+792:         this.domainAxisLocations.set(index, location);
+793:         if (notify) {
+794:             notifyListeners(new PlotChangeEvent(this));
+795:         }
+796:     }
+
+[5] org.jfree.chart.plot.CategoryPlot#datasetChanged  (lines 1839-1857)
+1839:     public void datasetChanged(DatasetChangeEvent event) {
+1840: 
+1841:         int count = this.rangeAxes.size();
+1842:         for (int axisIndex = 0; axisIndex < count; axisIndex++) {
+1843:             ValueAxis yAxis = getRangeAxis(axisIndex);
+1844:             if (yAxis != null) {
+1845:                 yAxis.configure();
+1846:             }
+1847:         }
+1848:         if (getParent() != null) {
+1849:             getParent().datasetChanged(event);
+1850:         }
+1851:         else {
+1852:             PlotChangeEvent e = new PlotChangeEvent(this);
+1853:             e.setType(ChartChangeEventType.DATASET_UPDATED);
+1854:             notifyListeners(e);
+1855:         }
+1856: 
+1857:     }
+
+[6] org.jfree.chart.util.ObjectList#set  (lines 94-96)
+94:     public void set(int index, Object object) {      
+95:         super.set(index, object);        
+96:     }    
+
+[7] org.jfree.chart.plot.DefaultDrawingSupplier#createStandardSeriesShapes  (lines 287-337)
+287:     public static Shape[] createStandardSeriesShapes() {
+288: 
+289:         Shape[] result = new Shape[10];
+290: 
+291:         double size = 6.0;
+292:         double delta = size / 2.0;
+293:         int[] xpoints = null;
+294:         int[] ypoints = null;
+295: 
+296:         // square
+297:         result[0] = new Rectangle2D.Double(-delta, -delta, size, size);
+298:         // circle
+299:         result[1] = new Ellipse2D.Double(-delta, -delta, size, size);
+300: 
+301:         // up-pointing triangle
+302:         xpoints = intArray(0.0, delta, -delta);
+303:         ypoints = intArray(-delta, delta, delta);
+304:         result[2] = new Polygon(xpoints, ypoints, 3);
+305: 
+306:         // diamond
+307:         xpoints = intArray(0.0, delta, 0.0, -delta);
+308:         ypoints = intArray(-delta, 0.0, delta, 0.0);
+309:         result[3] = new Polygon(xpoints, ypoints, 4);
+310: 
+311:         // horizontal rectangle
+312:         result[4] = new Rectangle2D.Double(-delta, -delta / 2, size, size / 2);
+313: 
+314:         // down-pointing triangle
+315:         xpoints = intArray(-delta, +delta, 0.0);
+316:         ypoints = intArray(-delta, -delta, delta);
+317:         result[5] = new Polygon(xpoints, ypoints, 3);
+318: 
+319:         // horizontal ellipse
+320:         result[6] = new Ellipse2D.Double(-delta, -delta / 2, size, size / 2);
+321: 
+322:         // right-pointing triangle
+323:         xpoints = intArray(-delta, delta, -delta);
+324:         ypoints = intArray(-delta, 0.0, delta);
+325:         result[7] = new Polygon(xpoints, ypoints, 3);
+326: 
+327:         // vertical rectangle
+328:         result[8] = new Rectangle2D.Double(-delta / 2, -delta, size / 2, size);
+329: 
+330:         // left-pointing triangle
+331:         xpoints = intArray(-delta, delta, delta);
+332:         ypoints = intArray(0.0, -delta, +delta);
+333:         result[9] = new Polygon(xpoints, ypoints, 3);
+334: 
+335:         return result;
+336: 
+337:     }
+
+[8] org.jfree.chart.plot.CategoryPlot#getDomainAxisIndex  (lines 697-699)
+697:     public int getDomainAxisIndex(CategoryAxis axis) {
+698:         return this.domainAxes.indexOf(axis);
+699:     }
+
+[9] org.jfree.chart.axis.CategoryLabelWidthType#CategoryLabelWidthType  (lines 72-77)
+72:     private CategoryLabelWidthType(String name) {
+73:         if (name == null) {
+74:             throw new IllegalArgumentException("Null 'name' argument.");   
+75:         }
+76:         this.name = name;
+77:     }
+
+[10] org.jfree.chart.axis.TickUnits#TickUnits  (lines 79-81)
+79:     public TickUnits() {
+80:         this.tickUnits = new ArrayList();
+81:     }
+
+[11] org.jfree.chart.plot.CategoryPlot#addRangeMarker  (lines 2086-2108)
+2086:     public void addRangeMarker(int index, Marker marker, Layer layer) {
+2087:         Collection markers;
+2088:         if (layer == Layer.FOREGROUND) {
+2089:             markers = (Collection) this.foregroundRangeMarkers.get(
+2090:                     new Integer(index));
+2091:             if (markers == null) {
+2092:                 markers = new java.util.ArrayList();
+2093:                 this.foregroundRangeMarkers.put(new Integer(index), markers);
+2094:             }
+2095:             markers.add(marker);
+2096:         }
+2097:         else if (layer == Layer.BACKGROUND) {
+2098:             markers = (Collection) this.backgroundRangeMarkers.get(
+2099:                     new Integer(index));
+2100:             if (markers == null) {
+2101:                 markers = new java.util.ArrayList();
+2102:                 this.backgroundRangeMarkers.put(new Integer(index), markers);
+2103:             }
+2104:             markers.add(marker);            
+2105:         }
+2106:         marker.addChangeListener(this);
+2107:         notifyListeners(new PlotChangeEvent(this));
+2108:     }
+
+[12] org.jfree.chart.axis.CategoryLabelPosition#CategoryLabelPosition  (lines 118-125)
+118:     public CategoryLabelPosition(RectangleAnchor categoryAnchor, 
+119:                                  TextBlockAnchor labelAnchor,
+120:                                  CategoryLabelWidthType widthType,
+121:                                  float widthRatio) {
+122:         // argument checking delegated...
+123:         this(categoryAnchor, labelAnchor, TextAnchor.CENTER, 0.0, widthType, 
+124:                 widthRatio);
+125:     }
+
+[13] org.jfree.chart.plot.CategoryPlot#datasetsMappedToRangeAxis  (lines 3211-3231)
+3211:     private List datasetsMappedToRangeAxis(int index) {
+3212:         List result = new ArrayList();
+3213:         for (int i = 0; i < this.datasets.size(); i++) {
+3214:             Object dataset = this.datasets.get(i);
+3215:             if (dataset != null) {
+3216:                 Integer m = (Integer) this.datasetToRangeAxisMap.get(i);
+3217:                 if (m == null) {  // a dataset with no mapping is assigned to 
+3218:                                   // axis 0
+3219:                     if (index == 0) { 
+3220:                         result.add(dataset);
+3221:                     }
+3222:                 }
+3223:                 else {
+3224:                     if (m.intValue() == index) {
+3225:                         result.add(dataset);
+3226:                     }
+3227:                 }
+3228:             }
+3229:         }
+3230:         return result;    
+3231:     }
+
+[14] org.jfree.chart.plot.CategoryPlot#configureDomainAxes  (lines 854-861)
+854:     public void configureDomainAxes() {
+855:         for (int i = 0; i < this.domainAxes.size(); i++) {
+856:             CategoryAxis axis = (CategoryAxis) this.domainAxes.get(i);
+857:             if (axis != null) {
+858:                 axis.configure();
+859:             }
+860:         }
+861:     }
+
+[15] org.jfree.chart.plot.Marker#Marker  (lines 171-199)
+171:     protected Marker(Paint paint, Stroke stroke, 
+172:                      Paint outlinePaint, Stroke outlineStroke, 
+173:                      float alpha) {
+174: 
+175:         if (paint == null) {
+176:             throw new IllegalArgumentException("Null 'paint' argument.");
+177:         }
+178:         if (stroke == null) {
+179:             throw new IllegalArgumentException("Null 'stroke' argument.");
+180:         }
+181:         if (alpha < 0.0f || alpha > 1.0f)
+182:             throw new IllegalArgumentException(
+183:                     "The 'alpha' value must be in the range 0.0f to 1.0f");
+184:         
+185:         this.paint = paint;
+186:         this.stroke = stroke;
+187:         this.outlinePaint = outlinePaint;
+188:         this.outlineStroke = outlineStroke;
+189:         this.alpha = alpha;
+190:         
+191:         this.labelFont = new Font("SansSerif", Font.PLAIN, 9);
+192:         this.labelPaint = Color.black;
+193:         this.labelAnchor = RectangleAnchor.TOP_LEFT;
+194:         this.labelOffset = new RectangleInsets(3.0, 3.0, 3.0, 3.0);
+195:         this.labelOffsetType = LengthAdjustmentType.CONTRACT;
+196:         this.labelTextAnchor = TextAnchor.CENTER;
+197:         
+198:         this.listenerList = new EventListenerList();
+199:     }
+
+[16] org.jfree.chart.axis.ValueAxis#ValueAxis  (lines 260-312)
+260:     protected ValueAxis(String label, TickUnitSource standardTickUnits) {
+261: 
+262:         super(label);
+263: 
+264:         this.positiveArrowVisible = false;
+265:         this.negativeArrowVisible = false;
+266: 
+267:         this.range = DEFAULT_RANGE;
+268:         this.autoRange = DEFAULT_AUTO_RANGE;
+269:         this.defaultAutoRange = DEFAULT_RANGE;
+270: 
+271:         this.inverted = DEFAULT_INVERTED;
+272:         this.autoRangeMinimumSize = DEFAULT_AUTO_RANGE_MINIMUM_SIZE;
+273: 
+274:         this.lowerMargin = DEFAULT_LOWER_MARGIN;
+275:         this.upperMargin = DEFAULT_UPPER_MARGIN;
+276: 
+277:         this.fixedAutoRange = 0.0;
+278: 
+279:         this.autoTickUnitSelection = DEFAULT_AUTO_TICK_UNIT_SELECTION;
+280:         this.standardTickUnits = standardTickUnits;
+281:         
+282:         Polygon p1 = new Polygon();
+283:         p1.addPoint(0, 0);
+284:         p1.addPoint(-2, 2);
+285:         p1.addPoint(2, 2);
+286:         
+287:         this.upArrow = p1;
+288: 
+289:         Polygon p2 = new Polygon();
+290:         p2.addPoint(0, 0);
+291:         p2.addPoint(-2, -2);
+292:         p2.addPoint(2, -2);
+293: 
+294:         this.downArrow = p2;
+295: 
+296:         Polygon p3 = new Polygon();
+297:         p3.addPoint(0, 0);
+298:         p3.addPoint(-2, -2);
+299:         p3.addPoint(-2, 2);
+300:         
+301:         this.rightArrow = p3;
+302: 
+303:         Polygon p4 = new Polygon();
+304:         p4.addPoint(0, 0);
+305:         p4.addPoint(2, -2);
+306:         p4.addPoint(2, 2);
+307: 
+308:         this.leftArrow = p4;
+309:         
+310:         this.verticalTickLabels = false;
+311:         
+312:     }
+
+[17] org.jfree.chart.axis.Axis#notifyListeners  (lines 1033-1042)
+1033:     protected void notifyListeners(AxisChangeEvent event) {
+1034: 
+1035:         Object[] listeners = this.listenerList.getListenerList();
+1036:         for (int i = listeners.length - 2; i >= 0; i -= 2) {
+1037:             if (listeners[i] == AxisChangeListener.class) {
+1038:                 ((AxisChangeListener) listeners[i + 1]).axisChanged(event);
+1039:             }
+1040:         }
+1041: 
+1042:     }
+
+[18] org.jfree.chart.plot.CategoryPlot#setRangeAxis  (lines 925-941)
+925:     public void setRangeAxis(int index, ValueAxis axis, boolean notify) {
+926:         ValueAxis existing = (ValueAxis) this.rangeAxes.get(index);
+927:         if (existing != null) {
+928:             existing.removeChangeListener(this);
+929:         }
+930:         if (axis != null) {
+931:             axis.setPlot(this);
+932:         }
+933:         this.rangeAxes.set(index, axis);
+934:         if (axis != null) {
+935:             axis.configure();
+936:             axis.addChangeListener(this);
+937:         }
+938:         if (notify) {
+939:             notifyListeners(new PlotChangeEvent(this));
+940:         }
+941:     }
+
+[19] org.jfree.chart.axis.CategoryLabelPosition#CategoryLabelPosition  (lines 101-106)
+101:     public CategoryLabelPosition(RectangleAnchor categoryAnchor, 
+102:                                  TextBlockAnchor labelAnchor) {
+103:         // argument checking delegated...
+104:         this(categoryAnchor, labelAnchor, TextAnchor.CENTER, 0.0, 
+105:                 CategoryLabelWidthType.CATEGORY, 0.95f);
+106:     }
+
+[20] org.jfree.chart.plot.CategoryPlot#getDataRange  (lines 3142-3167)
+3142:     public Range getDataRange(ValueAxis axis) {
+3143: 
+3144:         Range result = null;
+3145:         List mappedDatasets = new ArrayList();
+3146:         
+3147:         int rangeIndex = this.rangeAxes.indexOf(axis);
+3148:         if (rangeIndex >= 0) {
+3149:             mappedDatasets.addAll(datasetsMappedToRangeAxis(rangeIndex));
+3150:         }
+3151:         else if (axis == getRangeAxis()) {
+3152:             mappedDatasets.addAll(datasetsMappedToRangeAxis(0));
+3153:         }
+3154: 
+3155:         // iterate through the datasets that map to the axis and get the union 
+3156:         // of the ranges.
+3157:         Iterator iterator = mappedDatasets.iterator();
+3158:         while (iterator.hasNext()) {
+3159:             CategoryDataset d = (CategoryDataset) iterator.next();
+3160:             CategoryItemRenderer r = getRendererForDataset(d);
+3161:             if (r != null) {
+3162:                 result = Range.combine(result, r.findRangeBounds(d));
+3163:             }
+3164:         }
+3165:         return result;
+3166: 
+3167:     }
+
+[21] org.jfree.chart.plot.CategoryPlot#addRangeMarker  (lines 2072-2074)
+2072:     public void addRangeMarker(Marker marker, Layer layer) {
+2073:         addRangeMarker(0, marker, layer);
+2074:     }
+
+[22] org.jfree.chart.plot.CategoryPlot#CategoryPlot  (lines 433-516)
+433:     public CategoryPlot(CategoryDataset dataset,
+434:                         CategoryAxis domainAxis,
+435:                         ValueAxis rangeAxis,
+436:                         CategoryItemRenderer renderer) {
+437: 
+438:         super();
+439: 
+440:         this.orientation = PlotOrientation.VERTICAL;
+441: 
+442:         // allocate storage for dataset, axes and renderers
+443:         this.domainAxes = new ObjectList();
+444:         this.domainAxisLocations = new ObjectList();
+445:         this.rangeAxes = new ObjectList();
+446:         this.rangeAxisLocations = new ObjectList();
+447:         
+448:         this.datasetToDomainAxisMap = new ObjectList();
+449:         this.datasetToRangeAxisMap = new ObjectList();
+450: 
+451:         this.renderers = new ObjectList();
+452: 
+453:         this.datasets = new ObjectList();
+454:         this.datasets.set(0, dataset);
+455:         if (dataset != null) {
+456:             dataset.addChangeListener(this);
+457:         }
+458: 
+459:         this.axisOffset = new RectangleInsets(4.0, 4.0, 4.0, 4.0);
+460: 
+461:         setDomainAxisLocation(AxisLocation.BOTTOM_OR_LEFT, false);
+462:         setRangeAxisLocation(AxisLocation.TOP_OR_LEFT, false);
+463: 
+464:         this.renderers.set(0, renderer);
+465:         if (renderer != null) {
+466:             renderer.setPlot(this);
+467:             renderer.addChangeListener(this);
+468:         }
+469: 
+470:         this.domainAxes.set(0, domainAxis);
+471:         this.mapDatasetToDomainAxis(0, 0);
+472:         if (domainAxis != null) {
+473:             domainAxis.setPlot(this);
+474:             domainAxis.addChangeListener(this);
+475:         }
+476:         this.drawSharedDomainAxis = false;
+477: 
+478:         this.rangeAxes.set(0, rangeAxis);
+479:         this.mapDatasetToRangeAxis(0, 0);
+480:         if (rangeAxis != null) {
+481:             rangeAxis.setPlot(this);
+482:             rangeAxis.addChangeListener(this);
+483:         }
+484:         
+485:         configureDomainAxes();
+486:         configureRangeAxes();
+487: 
+488:         this.domainGridlinesVisible = DEFAULT_DOMAIN_GRIDLINES_VISIBLE;
+489:         this.domainGridlinePosition = CategoryAnchor.MIDDLE;
+490:         this.domainGridlineStroke = DEFAULT_GRIDLINE_STROKE;
+491:         this.domainGridlinePaint = DEFAULT_GRIDLINE_PAINT;
+492: 
+493:         this.rangeGridlinesVisible = DEFAULT_RANGE_GRIDLINES_VISIBLE;
+494:         this.rangeGridlineStroke = DEFAULT_GRIDLINE_STROKE;
+495:         this.rangeGridlinePaint = DEFAULT_GRIDLINE_PAINT;
+496: 
+497:         this.foregroundDomainMarkers = new HashMap();
+498:         this.backgroundDomainMarkers = new HashMap();
+499:         this.foregroundRangeMarkers = new HashMap();
+500:         this.backgroundRangeMarkers = new HashMap();
+501: 
+502:         Marker baseline = new ValueMarker(0.0, new Color(0.8f, 0.8f, 0.8f, 
+503:                 0.5f), new BasicStroke(1.0f), new Color(0.85f, 0.85f, 0.95f, 
+504:                 0.5f), new BasicStroke(1.0f), 0.6f);
+505:         addRangeMarker(baseline, Layer.BACKGROUND);
+506: 
+507:         this.anchorValue = 0.0;
+508: 
+509:         this.rangeCrosshairVisible = DEFAULT_CROSSHAIR_VISIBLE;
+510:         this.rangeCrosshairValue = 0.0;
+511:         this.rangeCrosshairStroke = DEFAULT_CROSSHAIR_STROKE;
+512:         this.rangeCrosshairPaint = DEFAULT_CROSSHAIR_PAINT;
+513:         
+514:         this.annotations = new java.util.ArrayList();
+515: 
+516:     }
+
+[23] org.jfree.chart.util.AbstractObjectList#indexOf  (lines 158-165)
+158:     protected int indexOf(Object object) {
+159:         for (int index = 0; index < this.size; index++) {
+160:             if (this.objects[index] == object) {
+161:                 return (index);
+162:             }
+163:         }
+164:         return -1;
+165:     }
+
+[24] org.jfree.chart.plot.Plot#Plot  (lines 286-306)
+286:     protected Plot() {
+287: 
+288:         this.parent = null;
+289:         this.insets = DEFAULT_INSETS;
+290:         this.backgroundPaint = DEFAULT_BACKGROUND_PAINT;
+291:         this.backgroundAlpha = DEFAULT_BACKGROUND_ALPHA;
+292:         this.backgroundImage = null;
+293:         this.outlineVisible = true;
+294:         this.outlineStroke = DEFAULT_OUTLINE_STROKE;
+295:         this.outlinePaint = DEFAULT_OUTLINE_PAINT;
+296:         this.foregroundAlpha = DEFAULT_FOREGROUND_ALPHA;
+297: 
+298:         this.noDataMessage = null;
+299:         this.noDataMessageFont = new Font("SansSerif", Font.PLAIN, 12);
+300:         this.noDataMessagePaint = Color.black;
+301: 
+302:         this.drawingSupplier = new DefaultDrawingSupplier();
+303: 
+304:         this.listenerList = new EventListenerList();
+305: 
+306:     }
+
+[25] org.jfree.chart.axis.NumberAxis#createStandardTickUnits  (lines 699-778)
+699:     public static TickUnitSource createStandardTickUnits() {
+700: 
+701:         TickUnits units = new TickUnits();
+702:         DecimalFormat df0 = new DecimalFormat("0.00000000");
+703:         DecimalFormat df1 = new DecimalFormat("0.0000000");
+704:         DecimalFormat df2 = new DecimalFormat("0.000000");
+705:         DecimalFormat df3 = new DecimalFormat("0.00000");
+706:         DecimalFormat df4 = new DecimalFormat("0.0000");
+707:         DecimalFormat df5 = new DecimalFormat("0.000");
+708:         DecimalFormat df6 = new DecimalFormat("0.00");
+709:         DecimalFormat df7 = new DecimalFormat("0.0");
+710:         DecimalFormat df8 = new DecimalFormat("#,##0");
+711:         DecimalFormat df9 = new DecimalFormat("#,###,##0");
+712:         DecimalFormat df10 = new DecimalFormat("#,###,###,##0");
+713:         
+714:         // we can add the units in any order, the TickUnits collection will 
+715:         // sort them...
+716:         units.add(new NumberTickUnit(0.0000001, df1));
+717:         units.add(new NumberTickUnit(0.000001, df2));
+718:         units.add(new NumberTickUnit(0.00001, df3));
+719:         units.add(new NumberTickUnit(0.0001, df4));
+720:         units.add(new NumberTickUnit(0.001, df5));
+721:         units.add(new NumberTickUnit(0.01, df6));
+722:         units.add(new NumberTickUnit(0.1, df7));
+723:         units.add(new NumberTickUnit(1, df8));
+724:         units.add(new NumberTickUnit(10, df8));
+725:         units.add(new NumberTickUnit(100, df8));
+726:         units.add(new NumberTickUnit(1000, df8));
+727:         units.add(new NumberTickUnit(10000, df8));
+728:         units.add(new NumberTickUnit(100000, df8));
+729:         units.add(new NumberTickUnit(1000000, df9));
+730:         units.add(new NumberTickUnit(10000000, df9));
+731:         units.add(new NumberTickUnit(100000000, df9));
+732:         units.add(new NumberTickUnit(1000000000, df10));
+733:         units.add(new NumberTickUnit(10000000000.0, df10));
+734:         units.add(new NumberTickUnit(100000000000.0, df10));
+735:         
+736:         units.add(new NumberTickUnit(0.00000025, df0));
+737:         units.add(new NumberTickUnit(0.0000025, df1));
+738:         units.add(new NumberTickUnit(0.000025, df2));
+739:         units.add(new NumberTickUnit(0.00025, df3));
+740:         units.add(new NumberTickUnit(0.0025, df4));
+741:         units.add(new NumberTickUnit(0.025, df5));
+742:         units.add(new NumberTickUnit(0.25, df6));
+743:         units.add(new NumberTickUnit(2.5, df7));
+744:         units.add(new NumberTickUnit(25, df8));
+745:         units.add(new NumberTickUnit(250, df8));
+746:         units.add(new NumberTickUnit(2500, df8));
+747:         units.add(new NumberTickUnit(25000, df8));
+748:         units.add(new NumberTickUnit(250000, df8));
+749:         units.add(new NumberTickUnit(2500000, df9));
+750:         units.add(new NumberTickUnit(25000000, df9));
+751:         units.add(new NumberTickUnit(250000000, df9));
+752:         units.add(new NumberTickUnit(2500000000.0, df10));
+753:         units.add(new NumberTickUnit(25000000000.0, df10));
+754:         units.add(new NumberTickUnit(250000000000.0, df10));
+755: 
+756:         units.add(new NumberTickUnit(0.0000005, df1));
+757:         units.add(new NumberTickUnit(0.000005, df2));
+758:         units.add(new NumberTickUnit(0.00005, df3));
+759:         units.add(new NumberTickUnit(0.0005, df4));
+760:         units.add(new NumberTickUnit(0.005, df5));
+761:         units.add(new NumberTickUnit(0.05, df6));
+762:         units.add(new NumberTickUnit(0.5, df7));
+763:         units.add(new NumberTickUnit(5L, df8));
+764:         units.add(new NumberTickUnit(50L, df8));
+765:         units.add(new NumberTickUnit(500L, df8));
+766:         units.add(new NumberTickUnit(5000L, df8));
+767:         units.add(new NumberTickUnit(50000L, df8));
+768:         units.add(new NumberTickUnit(500000L, df8));
+769:         units.add(new NumberTickUnit(5000000L, df9));
+770:         units.add(new NumberTickUnit(50000000L, df9));
+771:         units.add(new NumberTickUnit(500000000L, df9));
+772:         units.add(new NumberTickUnit(5000000000L, df10));
+773:         units.add(new NumberTickUnit(50000000000L, df10));
+774:         units.add(new NumberTickUnit(500000000000L, df10));
+775: 
+776:         return units;
+777: 
+778:     }
+
+[26] org.jfree.chart.plot.CategoryPlot#getDataset  (lines 1159-1165)
+1159:     public CategoryDataset getDataset(int index) {
+1160:         CategoryDataset result = null;
+1161:         if (this.datasets.size() > index) {
+1162:             result = (CategoryDataset) this.datasets.get(index);
+1163:         }
+1164:         return result;
+1165:     }
+
+[27] org.jfree.chart.axis.CategoryLabelPositions#createUpRotationLabelPositions  (lines 147-171)
+147:     public static CategoryLabelPositions createUpRotationLabelPositions(
+148:             double angle) {
+149:         return new CategoryLabelPositions(
+150:             new CategoryLabelPosition(
+151:                 RectangleAnchor.BOTTOM, TextBlockAnchor.BOTTOM_LEFT, 
+152:                 TextAnchor.BOTTOM_LEFT, -angle,
+153:                 CategoryLabelWidthType.RANGE, 0.50f
+154:             ), // TOP
+155:             new CategoryLabelPosition(
+156:                 RectangleAnchor.TOP, TextBlockAnchor.TOP_RIGHT, 
+157:                 TextAnchor.TOP_RIGHT, -angle,
+158:                 CategoryLabelWidthType.RANGE, 0.50f
+159:             ), // BOTTOM
+160:             new CategoryLabelPosition(
+161:                 RectangleAnchor.RIGHT, TextBlockAnchor.BOTTOM_RIGHT, 
+162:                 TextAnchor.BOTTOM_RIGHT, -angle,
+163:                 CategoryLabelWidthType.RANGE, 0.50f
+164:             ), // LEFT
+165:             new CategoryLabelPosition(
+166:                 RectangleAnchor.LEFT, TextBlockAnchor.TOP_LEFT, 
+167:                 TextAnchor.TOP_LEFT, -angle,
+168:                 CategoryLabelWidthType.RANGE, 0.50f
+169:             ) // RIGHT
+170:         );
+171:     }
+
+[28] org.jfree.chart.util.ObjectList#indexOf  (lines 106-108)
+106:     public int indexOf(Object object) {    
+107:         return super.indexOf(object);    
+108:     }    
+
+[29] org.jfree.chart.axis.CategoryLabelPositions#CategoryLabelPositions  (lines 253-276)
+253:     public CategoryLabelPositions(CategoryLabelPosition top,
+254:                                   CategoryLabelPosition bottom,
+255:                                   CategoryLabelPosition left,
+256:                                   CategoryLabelPosition right) {
+257:         
+258:         if (top == null) {
+259:             throw new IllegalArgumentException("Null 'top' argument.");
+260:         }
+261:         if (bottom == null) {
+262:             throw new IllegalArgumentException("Null 'bottom' argument.");
+263:         }
+264:         if (left == null) {
+265:             throw new IllegalArgumentException("Null 'left' argument.");
+266:         }
+267:         if (right == null) {
+268:             throw new IllegalArgumentException("Null 'right' argument.");
+269:         }
+270:         
+271:         this.positionForAxisAtTop = top;
+272:         this.positionForAxisAtBottom = bottom;
+273:         this.positionForAxisAtLeft = left;
+274:         this.positionForAxisAtRight = right;
+275:     
+276:     }
+
+[30] org.jfree.chart.axis.CategoryAxis#configure  (lines 825-827)
+825:     public void configure() {
+826:         // nothing required
+827:     }
+
+[31] org.jfree.chart.plot.CategoryPlot#setRangeAxisLocation  (lines 1065-1075)
+1065:     public void setRangeAxisLocation(int index, AxisLocation location, 
+1066:                                      boolean notify) {
+1067:         if (index == 0 && location == null) {
+1068:             throw new IllegalArgumentException(
+1069:                     "Null 'location' for index 0 not permitted.");
+1070:         }
+1071:         this.rangeAxisLocations.set(index, location);
+1072:         if (notify) {
+1073:             notifyListeners(new PlotChangeEvent(this));
+1074:         }
+1075:     }
+
+[32] org.jfree.chart.plot.DefaultDrawingSupplier#intArray  (lines 531-533)
+531:     private static int[] intArray(double a, double b, double c, double d) {
+532:         return new int[] {(int) a, (int) b, (int) c, (int) d};
+533:     }
+
+[33] org.jfree.chart.plot.CategoryPlot#getRangeAxis  (lines 881-894)
+881:     public ValueAxis getRangeAxis(int index) {
+882:         ValueAxis result = null;
+883:         if (index < this.rangeAxes.size()) {
+884:             result = (ValueAxis) this.rangeAxes.get(index);
+885:         }
+886:         if (result == null) {
+887:             Plot parent = getParent();
+888:             if (parent instanceof CategoryPlot) {
+889:                 CategoryPlot cp = (CategoryPlot) parent;
+890:                 result = cp.getRangeAxis(index);
+891:             }
+892:         }
+893:         return result;
+894:     }
+
+[34] org.jfree.chart.axis.ValueAxis#getDefaultAutoRange  (lines 1026-1028)
+1026:     public Range getDefaultAutoRange() {
+1027:         return this.defaultAutoRange;
+1028:     }
+
+[35] org.jfree.chart.plot.CategoryPlot#getRangeAxisIndex  (lines 972-982)
+972:     public int getRangeAxisIndex(ValueAxis axis) {
+973:         int result = this.rangeAxes.indexOf(axis);
+974:         if (result < 0) { // try the parent plot
+975:             Plot parent = getParent();
+976:             if (parent instanceof CategoryPlot) {
+977:                 CategoryPlot p = (CategoryPlot) parent;
+978:                 result = p.getRangeAxisIndex(axis);
+979:             }
+980:         }
+981:         return result;
+982:     }
+
+[36] org.jfree.chart.plot.CategoryPlot#setRangeAxisLocation  (lines 1036-1038)
+1036:     public void setRangeAxisLocation(AxisLocation location, boolean notify) {
+1037:         setRangeAxisLocation(0, location, notify);
+1038:     }
+
+[37] org.jfree.chart.axis.CategoryAxis#CategoryAxis  (lines 195-213)
+195:     public CategoryAxis(String label) {
+196: 
+197:         super(label);
+198: 
+199:         this.lowerMargin = DEFAULT_AXIS_MARGIN;
+200:         this.upperMargin = DEFAULT_AXIS_MARGIN;
+201:         this.categoryMargin = DEFAULT_CATEGORY_MARGIN;
+202:         this.maximumCategoryLabelLines = 1;
+203:         this.maximumCategoryLabelWidthRatio = 0.0f;
+204:         
+205:         setTickMarksVisible(false);  // not supported by this axis type yet
+206:         
+207:         this.categoryLabelPositionOffset = 4;
+208:         this.categoryLabelPositions = CategoryLabelPositions.STANDARD;
+209:         this.tickLabelFontMap = new HashMap();
+210:         this.tickLabelPaintMap = new HashMap();
+211:         this.categoryLabelToolTips = new HashMap();
+212:         
+213:     }
+
+[38] org.jfree.chart.util.AbstractObjectList#set  (lines 120-131)
+120:     protected void set(int index, Object object) {
+121:         if (index < 0) {
+122:             throw new IllegalArgumentException("Requires index >= 0.");
+123:         }
+124:         if (index >= this.objects.length) {
+125:             Object[] enlarged = new Object[index + this.increment];
+126:             System.arraycopy(this.objects, 0, enlarged, 0, this.objects.length);
+127:             this.objects = enlarged;
+128:         }
+129:         this.objects[index] = object;
+130:         this.size = Math.max(this.size, index + 1);
+131:     }
+
+[39] org.jfree.chart.axis.CategoryLabelPositions#createDownRotationLabelPositions  (lines 181-205)
+181:     public static CategoryLabelPositions createDownRotationLabelPositions(
+182:             double angle) {
+183:         return new CategoryLabelPositions(
+184:             new CategoryLabelPosition(
+185:                 RectangleAnchor.BOTTOM, TextBlockAnchor.BOTTOM_RIGHT, 
+186:                 TextAnchor.BOTTOM_RIGHT, angle,
+187:                 CategoryLabelWidthType.RANGE, 0.50f
+188:             ), // TOP
+189:             new CategoryLabelPosition(
+190:                 RectangleAnchor.TOP, TextBlockAnchor.TOP_LEFT, 
+191:                 TextAnchor.TOP_LEFT, angle,
+192:                 CategoryLabelWidthType.RANGE, 0.50f
+193:             ), // BOTTOM
+194:             new CategoryLabelPosition(
+195:                 RectangleAnchor.RIGHT, TextBlockAnchor.TOP_RIGHT, 
+196:                 TextAnchor.TOP_RIGHT, angle,
+197:                 CategoryLabelWidthType.RANGE, 0.50f
+198:             ), // LEFT
+199:             new CategoryLabelPosition(
+200:                 RectangleAnchor.LEFT, TextBlockAnchor.BOTTOM_LEFT, 
+201:                 TextAnchor.BOTTOM_LEFT, angle,
+202:                 CategoryLabelWidthType.RANGE, 0.50f
+203:             ) // RIGHT
+204:         );
+205:     }
+
+[40] org.jfree.chart.plot.CategoryPlot#setDomainAxisLocation  (lines 753-756)
+753:     public void setDomainAxisLocation(AxisLocation location, boolean notify) {
+754:         // delegate...
+755:         setDomainAxisLocation(0, location, notify);
+756:     }
+
+[41] org.jfree.chart.axis.TickUnit#compareTo  (lines 142-160)
+142:     public int compareTo(Object object) {
+143: 
+144:         if (object instanceof TickUnit) {
+145:             TickUnit other = (TickUnit) object;
+146:             if (this.size > other.getSize()) {
+147:                 return 1;
+148:             }
+149:             else if (this.size < other.getSize()) {
+150:                 return -1;
+151:             }
+152:             else {
+153:                 return 0;
+154:             }
+155:         }
+156:         else {
+157:             return -1;
+158:         }
+159: 
+160:     }
+
+[42] org.jfree.chart.plot.Plot#notifyListeners  (lines 889-896)
+889:     public void notifyListeners(PlotChangeEvent event) {
+890:         Object[] listeners = this.listenerList.getListenerList();
+891:         for (int i = listeners.length - 2; i >= 0; i -= 2) {
+892:             if (listeners[i] == PlotChangeListener.class) {
+893:                 ((PlotChangeListener) listeners[i + 1]).plotChanged(event);
+894:             }
+895:         }
+896:     }
+
+[43] org.jfree.chart.axis.CategoryLabelPosition#CategoryLabelPosition  (lines 143-173)
+143:     public CategoryLabelPosition(RectangleAnchor categoryAnchor, 
+144:                                  TextBlockAnchor labelAnchor,
+145:                                  TextAnchor rotationAnchor,
+146:                                  double angle,
+147:                                  CategoryLabelWidthType widthType,
+148:                                  float widthRatio) {
+149:         
+150:         if (categoryAnchor == null) {
+151:             throw new IllegalArgumentException(
+152:                     "Null 'categoryAnchor' argument.");
+153:         }
+154:         if (labelAnchor == null) {
+155:             throw new IllegalArgumentException(
+156:                     "Null 'labelAnchor' argument.");
+157:         }
+158:         if (rotationAnchor == null) {
+159:             throw new IllegalArgumentException(
+160:                     "Null 'rotationAnchor' argument.");
+161:         }
+162:         if (widthType == null) {
+163:             throw new IllegalArgumentException("Null 'widthType' argument.");   
+164:         }
+165:         
+166:         this.categoryAnchor = categoryAnchor;
+167:         this.labelAnchor = labelAnchor;
+168:         this.rotationAnchor = rotationAnchor;
+169:         this.angle = angle;
+170:         this.widthType = widthType;
+171:         this.widthRatio = widthRatio;
+172:     
+173:     }
+
+[44] org.jfree.data.Range#Range  (lines 83-91)
+83:     public Range(double lower, double upper) {
+84:         if (lower > upper) {
+85:             String msg = "Range(double, double): require lower (" + lower 
+86:                 + ") <= upper (" + upper + ").";
+87:             throw new IllegalArgumentException(msg);
+88:         }
+89:         this.lower = lower;
+90:         this.upper = upper;
+91:     }
+
+[45] org.jfree.chart.plot.CategoryPlot#setDomainAxis  (lines 651-667)
+651:     public void setDomainAxis(int index, CategoryAxis axis, boolean notify) {
+652:         CategoryAxis existing = (CategoryAxis) this.domainAxes.get(index);
+653:         if (existing != null) {
+654:             existing.removeChangeListener(this);
+655:         }
+656:         if (axis != null) {
+657:             axis.setPlot(this);
+658:         }
+659:         this.domainAxes.set(index, axis);
+660:         if (axis != null) {
+661:             axis.configure();
+662:             axis.addChangeListener(this);
+663:         }
+664:         if (notify) {
+665:             notifyListeners(new PlotChangeEvent(this));
+666:         }
+667:     }
+
+[46] org.jfree.chart.ChartColor#createDefaultPaintArray  (lines 149-187)
+149:     public static Paint[] createDefaultPaintArray() {
+150: 
+151:         return new Paint[] {
+152:             new Color(0xFF, 0x55, 0x55),
+153:             new Color(0x55, 0x55, 0xFF),
+154:             new Color(0x55, 0xFF, 0x55),
+155:             new Color(0xFF, 0xFF, 0x55),
+156:             new Color(0xFF, 0x55, 0xFF),
+157:             new Color(0x55, 0xFF, 0xFF),
+158:             Color.pink,
+159:             Color.gray,
+160:             ChartColor.DARK_RED,
+161:             ChartColor.DARK_BLUE,
+162:             ChartColor.DARK_GREEN,
+163:             ChartColor.DARK_YELLOW,
+164:             ChartColor.DARK_MAGENTA,
+165:             ChartColor.DARK_CYAN,
+166:             Color.darkGray,
+167:             ChartColor.LIGHT_RED,
+168:             ChartColor.LIGHT_BLUE,
+169:             ChartColor.LIGHT_GREEN,
+170:             ChartColor.LIGHT_YELLOW,
+171:             ChartColor.LIGHT_MAGENTA,
+172:             ChartColor.LIGHT_CYAN,
+173:             Color.lightGray,
+174:             ChartColor.VERY_DARK_RED,
+175:             ChartColor.VERY_DARK_BLUE,
+176:             ChartColor.VERY_DARK_GREEN,
+177:             ChartColor.VERY_DARK_YELLOW,
+178:             ChartColor.VERY_DARK_MAGENTA,
+179:             ChartColor.VERY_DARK_CYAN,
+180:             ChartColor.VERY_LIGHT_RED,
+181:             ChartColor.VERY_LIGHT_BLUE,
+182:             ChartColor.VERY_LIGHT_GREEN,
+183:             ChartColor.VERY_LIGHT_YELLOW,
+184:             ChartColor.VERY_LIGHT_MAGENTA,
+185:             ChartColor.VERY_LIGHT_CYAN
+186:         };
+187:     }
+
+[47] org.jfree.chart.plot.DefaultDrawingSupplier#intArray  (lines 516-518)
+516:     private static int[] intArray(double a, double b, double c) {
+517:         return new int[] {(int) a, (int) b, (int) c};
+518:     }
+
+[48] org.jfree.chart.plot.CategoryPlot#configureRangeAxes  (lines 1130-1137)
+1130:     public void configureRangeAxes() {
+1131:         for (int i = 0; i < this.rangeAxes.size(); i++) {
+1132:             ValueAxis axis = (ValueAxis) this.rangeAxes.get(i);
+1133:             if (axis != null) {
+1134:                 axis.configure();
+1135:             }
+1136:         }
+1137:     }
+
+[49] org.jfree.chart.axis.Axis#Axis  (lines 272-302)
+272:     protected Axis(String label) {
+273: 
+274:         this.label = label;
+275:         this.visible = DEFAULT_AXIS_VISIBLE;
+276:         this.labelFont = DEFAULT_AXIS_LABEL_FONT;
+277:         this.labelPaint = DEFAULT_AXIS_LABEL_PAINT;
+278:         this.labelInsets = DEFAULT_AXIS_LABEL_INSETS;
+279:         this.labelAngle = 0.0;
+280:         this.labelToolTip = null;
+281:         this.labelURL = null;
+282:         
+283:         this.axisLineVisible = true;
+284:         this.axisLinePaint = DEFAULT_AXIS_LINE_PAINT;
+285:         this.axisLineStroke = DEFAULT_AXIS_LINE_STROKE;
+286:         
+287:         this.tickLabelsVisible = DEFAULT_TICK_LABELS_VISIBLE;
+288:         this.tickLabelFont = DEFAULT_TICK_LABEL_FONT;
+289:         this.tickLabelPaint = DEFAULT_TICK_LABEL_PAINT;
+290:         this.tickLabelInsets = DEFAULT_TICK_LABEL_INSETS;
+291:         
+292:         this.tickMarksVisible = DEFAULT_TICK_MARKS_VISIBLE;
+293:         this.tickMarkStroke = DEFAULT_TICK_MARK_STROKE;
+294:         this.tickMarkPaint = DEFAULT_TICK_MARK_PAINT;
+295:         this.tickMarkInsideLength = DEFAULT_TICK_MARK_INSIDE_LENGTH;
+296:         this.tickMarkOutsideLength = DEFAULT_TICK_MARK_OUTSIDE_LENGTH;
+297: 
+298:         this.plot = null;
+299: 
+300:         this.listenerList = new EventListenerList();
+301: 
+302:     }
+
+[50] org.jfree.chart.plot.CategoryPlot#setRangeAxis  (lines 913-915)
+913:     public void setRangeAxis(int index, ValueAxis axis) {
+914:         setRangeAxis(index, axis, true);
+915:     }

@@ -1,0 +1,1957 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.CheckGlobalThisTest::testPropertyOfMethod
+junit.framework.AssertionFailedError: There should be one error.  expected:<1> but was:<0>
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:817)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:372)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:301)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:270)
+	at com.google.javascript.jscomp.CheckGlobalThisTest.testFailure(CheckGlobalThisTest.java:36)
+	at com.google.javascript.jscomp.CheckGlobalThisTest.testPropertyOfMethod(CheckGlobalThisTest.java:158)
+--- com.google.javascript.jscomp.CheckGlobalThisTest::testMethod4
+junit.framework.AssertionFailedError: Unexpected error(s): JSC_USED_GLOBAL_THIS. dangerous use of the global this object at testcode line 1 : 39 expected:<0> but was:<1>
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:712)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:372)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:301)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:270)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:258)
+	at com.google.javascript.jscomp.CompilerTestCase.testSame(CompilerTestCase.java:486)
+	at com.google.javascript.jscomp.CheckGlobalThisTest.testMethod4(CheckGlobalThisTest.java:154)
+--- com.google.javascript.jscomp.CheckGlobalThisTest::testInterface1
+junit.framework.AssertionFailedError: Unexpected error(s): JSC_USED_GLOBAL_THIS. dangerous use of the global this object at testcode line 1 : 54 expected:<0> but was:<1>
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:712)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:372)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:301)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:270)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:258)
+	at com.google.javascript.jscomp.CompilerTestCase.testSame(CompilerTestCase.java:486)
+	at com.google.javascript.jscomp.CheckGlobalThisTest.testInterface1(CheckGlobalThisTest.java:112)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.rhino.Node#getQualifiedName  (lines 1695-1709)
+1695:   public String getQualifiedName() {
+1696:     if (type == Token.NAME) {
+1697:       return getString();
+1698:     } else if (type == Token.GETPROP) {
+1699:       String left = getFirstChild().getQualifiedName();
+1700:       if (left == null) {
+1701:         return null;
+1702:       }
+1703:       return left + "." + getLastChild().getString();
+1704:     } else if (type == Token.THIS) {
+1705:       return "this";
+1706:     } else {
+1707:       return null;
+1708:     }
+1709:   }
+
+[2] com.google.javascript.jscomp.NodeTraversal#pushScope  (lines 535-542)
+535:   private void pushScope(Node node) {
+536:     Preconditions.checkState(curNode != null);
+537:     scopeRoots.push(node);
+538:     cfgs.push(null);
+539:     if (scopeCallback != null) {
+540:       scopeCallback.enterScope(this);
+541:     }
+542:   }
+
+[3] com.google.javascript.jscomp.parsing.IRFactory#processAstRoot  (lines 345-353)
+345:     @Override
+346:     Node processAstRoot(AstRoot rootNode) {
+347:       Node node = new Node(Token.SCRIPT);
+348:       for (com.google.javascript.jscomp.mozilla.rhino.Node child : rootNode) {
+349:         node.addChildToBack(transform((AstNode)child));
+350:       }
+351:       parseDirectives(node);
+352:       return node;
+353:     }
+
+[4] com.google.javascript.jscomp.CombinedCompilerPass#shouldTraverse  (lines 141-152)
+141:   @Override
+142:   public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
+143:     for (CallbackWrapper callback : callbacks) {
+144:       callback.shouldTraverseIfActive(t, n, parent);
+145:     }
+146:     // Note that this method could return false if all callbacks are inactive.
+147:     // This apparent optimization would make this method more expensive
+148:     // in the typical case where not all nodes are inactive. It is
+149:     // very unlikely that many all callbacks would be inactive at the same
+150:     // time (indeed, there are several checking passes that never return false).
+151:     return true;
+152:   }
+
+[5] com.google.javascript.jscomp.Compiler#parseInputs  (lines 995-1122)
+995:   Node parseInputs() {
+996:     boolean devMode = options.devMode != DevMode.OFF;
+997: 
+998:     // If old roots exist (we are parsing a second time), detach each of the
+999:     // individual file parse trees.
+1000:     if (externsRoot != null) {
+1001:       externsRoot.detachChildren();
+1002:     }
+1003:     if (jsRoot != null) {
+1004:       jsRoot.detachChildren();
+1005:     }
+1006: 
+1007:     // Parse main js sources.
+1008:     jsRoot = new Node(Token.BLOCK);
+1009:     jsRoot.setIsSyntheticBlock(true);
+1010: 
+1011:     if (options.tracer.isOn()) {
+1012:       tracker = new PerformanceTracker(jsRoot,
+1013:           options.tracer == TracerMode.ALL);
+1014:       addChangeHandler(tracker.getCodeChangeHandler());
+1015:     }
+1016: 
+1017:     Tracer tracer = newTracer("parseInputs");
+1018: 
+1019:     try {
+1020:       // Parse externs sources.
+1021:       externsRoot = new Node(Token.BLOCK);
+1022:       externsRoot.setIsSyntheticBlock(true);
+1023:       for (CompilerInput input : externs) {
+1024:         Node n = input.getAstRoot(this);
+1025:         if (hasErrors()) {
+1026:           return null;
+1027:         }
+1028:         externsRoot.addChildToBack(n);
+1029:       }
+1030: 
+1031:       // Check if the sources need to be re-ordered.
+1032:       if (options.manageClosureDependencies) {
+1033:         for (CompilerInput input : inputs) {
+1034:           input.setCompiler(this);
+1035: 
+1036:           // Forward-declare all the provided types, so that they
+1037:           // are not flagged even if they are dropped from the process.
+1038:           for (String provide : input.getProvides()) {
+1039:             getTypeRegistry().forwardDeclareType(provide);
+1040:           }
+1041:         }
+1042: 
+1043:         try {
+1044:           inputs =
+1045:               (moduleGraph == null ? new JSModuleGraph(modules) : moduleGraph)
+1046:               .manageDependencies(inputs);
+1047:         } catch (CircularDependencyException e) {
+1048:           report(JSError.make(
+1049:               JSModule.CIRCULAR_DEPENDENCY_ERROR, e.getMessage()));
+1050:           return null;
+1051:         }
+1052:       }
+1053: 
+1054:       // Check if externs files need to be lifted.
+1055:       boolean liftedExterns = false;
+1056:       for (CompilerInput input : inputs) {
+1057:         Node n = input.getAstRoot(this);
+1058:         if (hasErrors()) {
+1059:           return null;
+1060:         }
+1061: 
+1062:         // Inputs can have a null AST during initial parse.
+1063:         if (n == null) {
+1064:           continue;
+1065:         }
+1066: 
+1067:         if (n.getJSDocInfo() != null && n.getJSDocInfo().isExterns()) {
+1068:           // If the input file is explicitly marked as an externs file, then
+1069:           // assume the programmer made a mistake and throw it into
+1070:           // the externs pile anyways.
+1071:           externsRoot.addChildToBack(n);
+1072:           input.setIsExtern(true);
+1073: 
+1074:           // TODO(nicksantos): We need a better mechanism to make sure
+1075:           // changes to the inputs array get reflected in JSModules.
+1076:           input.getModule().remove(input);
+1077: 
+1078:           externs.add(input);
+1079:           liftedExterns = true;
+1080:         }
+1081:       }
+1082: 
+1083:       if (liftedExterns) {
+1084:         fillEmptyModules(modules);
+1085:         rebuildInputsFromModules();
+1086:       }
+1087: 
+1088:       // Build the AST.
+1089:       for (CompilerInput input : inputs) {
+1090:         Node n = input.getAstRoot(this);
+1091:         if (n == null) {
+1092:           continue;
+1093:         }
+1094: 
+1095:         if (devMode) {
+1096:           runSanityCheck();
+1097:           if (hasErrors()) {
+1098:             return null;
+1099:           }
+1100:         }
+1101: 
+1102:         if (options.sourceMapOutputPath != null ||
+1103:             options.nameReferenceReportPath != null) {
+1104: 
+1105:           // Annotate the nodes in the tree with information from the
+1106:           // input file. This information is used to construct the SourceMap.
+1107:           SourceInformationAnnotator sia =
+1108:               new SourceInformationAnnotator(input.getName());
+1109:           NodeTraversal.traverse(this, n, sia);
+1110:         }
+1111: 
+1112:         jsRoot.addChildToBack(n);
+1113:       }
+1114: 
+1115:       externAndJsRoot = new Node(Token.BLOCK, externsRoot, jsRoot);
+1116:       externAndJsRoot.setIsSyntheticBlock(true);
+1117: 
+1118:       return externAndJsRoot;
+1119:     } finally {
+1120:       stopTracer(tracer, "parseInputs");
+1121:     }
+1122:   }
+
+[6] com.google.javascript.jscomp.NodeTraversal#traverse  (lines 248-258)
+248:   public void traverse(Node root) {
+249:     try {
+250:       sourceName = "";
+251:       curNode = root;
+252:       pushScope(root);
+253:       traverseBranch(root, null);
+254:       popScope();
+255:     } catch (Exception unexpectedException) {
+256:       throwUnexpectedException(unexpectedException);
+257:     }
+258:   }
+
+[7] com.google.javascript.jscomp.CheckGlobalThis#shouldTraverse  (lines 84-136)
+84:   public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
+85: 
+86:     if (n.getType() == Token.FUNCTION) {
+87:       // Don't traverse functions that are constructors or have the @this
+88:       // or @override annotation.
+89:       JSDocInfo jsDoc = getFunctionJsDocInfo(n);
+90:       if (jsDoc != null &&
+91:           (jsDoc.isConstructor() ||
+92:            jsDoc.hasThisType() ||
+93:            jsDoc.isOverride())) {
+94:         return false;
+95:       }
+96: 
+97:       // Don't traverse functions unless they would normally
+98:       // be able to have a @this annotation associated with them. e.g.,
+99:       // var a = function() { }; // or
+100:       // function a() {} // or
+101:       // a.x = function() {};
+102:       int pType = parent.getType();
+103:       if (!(pType == Token.BLOCK ||
+104:             pType == Token.SCRIPT ||
+105:             pType == Token.NAME ||
+106:             pType == Token.ASSIGN)) {
+107:         return false;
+108:       }
+109:     }
+110: 
+111:     if (parent != null && parent.getType() == Token.ASSIGN) {
+112:       Node lhs = parent.getFirstChild();
+113:       Node rhs = lhs.getNext();
+114:       
+115:       if (n == lhs) {
+116:         // Always traverse the left side of the assignment. To handle
+117:         // nested assignments properly (e.g., (a = this).property = c;),
+118:         // assignLhsChild should not be overridden.
+119:         if (assignLhsChild == null) {
+120:           assignLhsChild = lhs;
+121:         }
+122:       } else {
+123:         // Only traverse the right side if it's not an assignment to a prototype
+124:         // property or subproperty.
+125:           if (lhs.getType() == Token.GETPROP &&
+126:               lhs.getLastChild().getString().equals("prototype")) {
+127:             return false;
+128:           }
+129:           if (lhs.getQualifiedName() != null && lhs.getQualifiedName().contains(".prototype.")) {
+130:             return false;
+131:           }
+132:       }
+133:     }
+134: 
+135:     return true;
+136:   }
+
+[8] com.google.javascript.jscomp.Compiler#report  (lines 1549-1563)
+1549:   @Override
+1550:   public void report(JSError error) {
+1551:     CheckLevel level = error.level;
+1552:     WarningsGuard guard = options.getWarningsGuard();
+1553:     if (guard != null) {
+1554:       CheckLevel newLevel = guard.level(error);
+1555:       if (newLevel != null) {
+1556:         level = newLevel;
+1557:       }
+1558:     }
+1559: 
+1560:     if (level.isOn()) {
+1561:       errorManager.report(level, error);
+1562:     }
+1563:   }
+
+[9] com.google.javascript.jscomp.parsing.ParserRunner#parse  (lines 80-114)
+80:   public static Node parse(String sourceName,
+81:                            String sourceString,
+82:                            Config config,
+83:                            ErrorReporter errorReporter,
+84:                            Logger logger) throws IOException {
+85:     Context cx = Context.enter();
+86:     cx.setErrorReporter(errorReporter);
+87:     cx.setLanguageVersion(Context.VERSION_1_5);
+88:     CompilerEnvirons compilerEnv = new CompilerEnvirons();
+89:     compilerEnv.initFromContext(cx);
+90:     compilerEnv.setRecordingComments(true);
+91:     compilerEnv.setRecordingLocalJsDocComments(true);
+92:     compilerEnv.setWarnTrailingComma(true);
+93:     if (config.isIdeMode) {
+94:       compilerEnv.setReservedKeywordAsIdentifier(true);
+95:       compilerEnv.setAllowMemberExprAsFunctionName(true);
+96:     }
+97: 
+98:     Parser p = new Parser(compilerEnv, errorReporter);
+99:     AstRoot astRoot = null;
+100:     try {
+101:       astRoot = p.parse(sourceString, sourceName, 1);
+102:     } catch (EvaluatorException e) {
+103:       logger.info("Error parsing " + sourceName + ": " + e.getMessage());
+104:     } finally {
+105:       Context.exit();
+106:     }
+107:     Node root = null;
+108:     if (astRoot != null) {
+109:       root = IRFactory.transformTree(
+110:           astRoot, sourceString, config, errorReporter);
+111:       root.setIsSyntheticBlock(true);
+112:     }
+113:     return root;
+114:   }
+
+[10] com.google.javascript.jscomp.NodeTraversal#traverseBranch  (lines 441-478)
+441:   @SuppressWarnings("fallthrough")
+442:   private void traverseBranch(Node n, Node parent) {
+443:     int type = n.getType();
+444:     if (type == Token.SCRIPT) {
+445:       sourceName = getSourceName(n);
+446:     }
+447: 
+448:     curNode = n;
+449:     if (!callback.shouldTraverse(this, n, parent)) return;
+450: 
+451:     switch (type) {
+452:       case Token.CATCH:
+453:         Preconditions.checkState(n.getChildCount() == 3);
+454:         Preconditions.checkState(n.getFirstChild().getType() == Token.NAME);
+455:         // the first child is the catch var and the third child
+456:         // is the code block
+457:         traverseBranch(n.getFirstChild(), n);
+458:         traverseBranch(n.getFirstChild().getNext().getNext(), n);
+459:         break;
+460: 
+461:       case Token.FUNCTION:
+462:         traverseFunction(n, parent);
+463:         break;
+464: 
+465:       default:
+466:         for (Node child = n.getFirstChild(); child != null; ) {
+467:           // child could be replaced, in which case our child node
+468:           // would no longer point to the true next
+469:           Node next = child.getNext();
+470:           traverseBranch(child, n);
+471:           child = next;
+472:         }
+473:         break;
+474:     }
+475: 
+476:     curNode = n;
+477:     callback.visit(this, n, parent);
+478:   }
+
+[11] com.google.javascript.rhino.JSDocInfoBuilder#recordInterface  (lines 676-685)
+676:   public boolean recordInterface() {
+677:     if (!hasAnySingletonTypeTags() &&
+678:         !currentInfo.isConstructor() && !currentInfo.isInterface()) {
+679:       currentInfo.setInterface(true);
+680:       populated = true;
+681:       return true;
+682:     } else {
+683:       return false;
+684:     }
+685:   }
+
+[12] com.google.javascript.rhino.Node#Node  (lines 355-359)
+355:   public Node(int nodeType) {
+356:     type = nodeType;
+357:     parent = null;
+358:     sourcePosition = -1;
+359:   }
+
+[13] com.google.javascript.jscomp.BasicErrorManager#getErrorCount  (lines 74-76)
+74:   public int getErrorCount() {
+75:     return errorCount;
+76:   }
+
+[14] com.google.javascript.jscomp.BasicErrorManager#compare  (lines 122-172)
+122:     public int compare(ErrorWithLevel p1, ErrorWithLevel p2) {
+123:       // null is the smallest value
+124:       if (p2 == null) {
+125:         if (p1 == null) {
+126:           return 0;
+127:         } else {
+128:           return P1_GT_P2;
+129:         }
+130:       }
+131: 
+132:       // check level
+133:       if (p1.level != p2.level) {
+134:         return p2.level.compareTo(p1.level);
+135:       }
+136: 
+137:       // sourceName comparison
+138:       String source1 = p1.error.sourceName;
+139:       String source2 = p2.error.sourceName;
+140:       if (source1 != null && source2 != null) {
+141:         int sourceCompare = source1.compareTo(source2);
+142:         if (sourceCompare != 0) {
+143:           return sourceCompare;
+144:         }
+145:       } else if (source1 == null && source2 != null) {
+146:         return P1_LT_P2;
+147:       } else if (source1 != null && source2 == null) {
+148:         return P1_GT_P2;
+149:       }
+150:       // lineno comparison
+151:       int lineno1 = p1.error.lineNumber;
+152:       int lineno2 = p2.error.lineNumber;
+153:       if (lineno1 != lineno2) {
+154:         return lineno1 - lineno2;
+155:       } else if (lineno1 < 0 && 0 <= lineno2) {
+156:         return P1_LT_P2;
+157:       } else if (0 <= lineno1 && lineno2 < 0) {
+158:         return P1_GT_P2;
+159:       }
+160:       // charno comparison
+161:       int charno1 = p1.error.getCharno();
+162:       int charno2 = p2.error.getCharno();
+163:       if (charno1 != charno2) {
+164:         return charno1 - charno2;
+165:       } else if (charno1 < 0 && 0 <= charno2) {
+166:         return P1_LT_P2;
+167:       } else if (0 <= charno1 && charno2 < 0) {
+168:         return P1_GT_P2;
+169:       }
+170:       // description
+171:       return p1.error.description.compareTo(p2.error.description);
+172:     }
+
+[15] com.google.javascript.jscomp.NodeTraversal#makeError  (lines 638-642)
+638:   public JSError makeError(Node n, CheckLevel level, DiagnosticType type,
+639:       String... arguments) {
+640:     return JSError.make(getSourceName(), n.getLineno(), n.getCharno(), level,
+641:         type, arguments);
+642:   }
+
+[16] com.google.javascript.jscomp.DiagnosticType#DiagnosticType  (lines 94-100)
+94:   private DiagnosticType(String key, CheckLevel level, MessageFormat format) {
+95:     this.key = key;
+96:     this.defaultLevel = level;
+97:     this.format = format;
+98: 
+99:     this.level = this.defaultLevel;
+100:   }
+
+[17] com.google.javascript.rhino.Node#extractCharno  (lines 1141-1147)
+1141:   protected static int extractCharno(int lineCharNo) {
+1142:     if (lineCharNo == -1) {
+1143:       return -1;
+1144:     } else {
+1145:       return lineCharNo & COLUMN_MASK;
+1146:     }
+1147:   }
+
+[18] com.google.javascript.rhino.JSDocInfo#setInterface  (lines 275-277)
+275:   void setInterface(boolean value) {
+276:     setFlag(value, MASK_INTERFACE);
+277:   }
+
+[19] com.google.javascript.jscomp.parsing.TypeSafeDispatcher#process  (lines 119-282)
+119:   public T process(AstNode node) {
+120:     switch (node.getType()) {
+121:       case Token.ADD:
+122:       case Token.AND:
+123:       case Token.BITAND:
+124:       case Token.BITOR:
+125:       case Token.BITXOR:
+126:       case Token.COMMA:
+127:       case Token.DIV:
+128:       case Token.EQ:
+129:       case Token.GE:
+130:       case Token.GT:
+131:       case Token.IN:
+132:       case Token.INSTANCEOF:
+133:       case Token.LE:
+134:       case Token.LSH:
+135:       case Token.LT:
+136:       case Token.MOD:
+137:       case Token.MUL:
+138:       case Token.NE:
+139:       case Token.OR:
+140:       case Token.RSH:
+141:       case Token.SHEQ:
+142:       case Token.SHNE:
+143:       case Token.SUB:
+144:       case Token.URSH:
+145:         return processInfixExpression((InfixExpression) node);
+146:       case Token.ARRAYLIT:
+147:         return processArrayLiteral((ArrayLiteral) node);
+148:       case Token.ASSIGN:
+149:       case Token.ASSIGN_ADD:
+150:       case Token.ASSIGN_BITAND:
+151:       case Token.ASSIGN_BITOR:
+152:       case Token.ASSIGN_BITXOR:
+153:       case Token.ASSIGN_DIV:
+154:       case Token.ASSIGN_LSH:
+155:       case Token.ASSIGN_MOD:
+156:       case Token.ASSIGN_MUL:
+157:       case Token.ASSIGN_RSH:
+158:       case Token.ASSIGN_SUB:
+159:       case Token.ASSIGN_URSH:
+160:         return processAssignment((Assignment) node);
+161:       case Token.BITNOT:
+162:       case Token.DEC:
+163:       case Token.DELPROP:
+164:       case Token.INC:
+165:       case Token.NEG:
+166:       case Token.NOT:
+167:       case Token.POS:
+168:       case Token.TYPEOF:
+169:       case Token.VOID:
+170:         return processUnaryExpression((UnaryExpression) node);
+171:       case Token.BLOCK:
+172:         if (node instanceof Block) {
+173:           return processBlock((Block) node);
+174:         } else  if (node instanceof Scope) {
+175:           return processScope((Scope) node);
+176:         } else {
+177:           throw new IllegalStateException("Unexpected node type.  class: " +
+178:                                           node.getClass() +
+179:                                           " type: " +
+180:                                           Token.typeToName(node.getType()));
+181:         }
+182:       case Token.BREAK:
+183:         return processBreakStatement((BreakStatement) node);
+184:       case Token.CALL:
+185:         return processFunctionCall((FunctionCall) node);
+186:       case Token.CASE:
+187:       case Token.DEFAULT:
+188:         return processSwitchCase((SwitchCase) node);
+189:       case Token.CATCH:
+190:       case Token.FINALLY:
+191:         return processCatchClause((CatchClause) node);
+192:       case Token.COLON:
+193:         return processObjectProperty((ObjectProperty) node);
+194:       case Token.CONTINUE:
+195:         return processContinueStatement((ContinueStatement) node);
+196:       case Token.DO:
+197:         return processDoLoop((DoLoop) node);
+198:       case Token.EMPTY:
+199:         return processEmptyExpression((EmptyExpression) node);
+200:       case Token.EXPR_RESULT:
+201:       case Token.EXPR_VOID:
+202:         if (node instanceof ExpressionStatement) {
+203:           return processExpressionStatement((ExpressionStatement) node);
+204:         } else  if (node instanceof LabeledStatement) {
+205:           return processLabeledStatement((LabeledStatement) node);
+206:         } else {
+207:           throw new IllegalStateException("Unexpected node type.  class: " +
+208:                                           node.getClass() +
+209:                                           " type: " +
+210:                                           Token.typeToName(node.getType()));
+211:         }
+212:       case Token.DEBUGGER:
+213:       case Token.FALSE:
+214:       case Token.NULL:
+215:       case Token.THIS:
+216:       case Token.TRUE:
+217:         return processKeywordLiteral((KeywordLiteral) node);
+218:       case Token.FOR:
+219:         if (node instanceof ForInLoop) {
+220:           return processForInLoop((ForInLoop) node);
+221:         } else  if (node instanceof ForLoop) {
+222:           return processForLoop((ForLoop) node);
+223:         } else {
+224:           throw new IllegalStateException("Unexpected node type.  class: " +
+225:                                           node.getClass() +
+226:                                           " type: " +
+227:                                           Token.typeToName(node.getType()));
+228:         }
+229:       case Token.FUNCTION:
+230:         return processFunctionNode((FunctionNode) node);
+231:       case Token.GETELEM:
+232:         return processElementGet((ElementGet) node);
+233:       case Token.GETPROP:
+234:         return processPropertyGet((PropertyGet) node);
+235:       case Token.HOOK:
+236:         return processConditionalExpression((ConditionalExpression) node);
+237:       case Token.IF:
+238:         return processIfStatement((IfStatement) node);
+239:       case Token.LABEL:
+240:         return processLabel((Label) node);
+241:       case Token.LP:
+242:         return processParenthesizedExpression((ParenthesizedExpression) node);
+243:       case Token.NAME:
+244:         return processName((Name) node);
+245:       case Token.NEW:
+246:         return processNewExpression((NewExpression) node);
+247:       case Token.NUMBER:
+248:         return processNumberLiteral((NumberLiteral) node);
+249:       case Token.OBJECTLIT:
+250:         return processObjectLiteral((ObjectLiteral) node);
+251:       case Token.REGEXP:
+252:         return processRegExpLiteral((RegExpLiteral) node);
+253:       case Token.RETURN:
+254:         return processReturnStatement((ReturnStatement) node);
+255:       case Token.SCRIPT:
+256:         return processAstRoot((AstRoot) node);
+257:       case Token.STRING:
+258:         return processStringLiteral((StringLiteral) node);
+259:       case Token.SWITCH:
+260:         return processSwitchStatement((SwitchStatement) node);
+261:       case Token.THROW:
+262:         return processThrowStatement((ThrowStatement) node);
+263:       case Token.TRY:
+264:         return processTryStatement((TryStatement) node);
+265:       case Token.VAR:
+266:         if (node instanceof VariableDeclaration) {
+267:           return processVariableDeclaration((VariableDeclaration) node);
+268:         } else  if (node instanceof VariableInitializer) {
+269:           return processVariableInitializer((VariableInitializer) node);
+270:         } else {
+271:           throw new IllegalStateException("Unexpected node type.  class: " +
+272:                                           node.getClass() +
+273:                                           " type: " +
+274:                                           Token.typeToName(node.getType()));
+275:         }
+276:       case Token.WHILE:
+277:         return processWhileLoop((WhileLoop) node);
+278:       case Token.WITH:
+279:         return processWithStatement((WithStatement) node);
+280:     }
+281:     return processIllegalToken(node);
+282:   }
+
+[20] com.google.javascript.jscomp.JsAst#parse  (lines 85-107)
+85:   private void parse(AbstractCompiler compiler, String sourceName,
+86:       String sourceStr) {
+87:     try {
+88:       logger_.fine("Parsing: " + sourceName);
+89:       root = ParserRunner.parse(sourceName, sourceStr,
+90:           compiler.getParserConfig(),
+91:           compiler.getDefaultErrorReporter(),
+92:           logger_);
+93:     } catch (IOException e) {
+94:       compiler.report(JSError.make(AbstractCompiler.READ_ERROR, sourceName));
+95:     }
+96: 
+97:     if (root == null || compiler.hasHaltingErrors()) {
+98:       // There was a parse error or IOException, so use a dummy block.
+99:       root = new Node(Token.BLOCK);
+100:     } else {
+101:       compiler.prepareAst(root);
+102:     }
+103: 
+104:     // Set the source name so that the compiler passes can track
+105:     // the source file and module.
+106:     root.putProp(Node.SOURCENAME_PROP, sourceName);
+107:   }
+
+[21] com.google.javascript.jscomp.NodeTraversal#traverseFunction  (lines 483-518)
+483:   private void traverseFunction(Node n, Node parent) {
+484:     Preconditions.checkState(n.getChildCount() == 3);
+485:     Preconditions.checkState(n.getType() == Token.FUNCTION);
+486: 
+487:     final Node fnName = n.getFirstChild();
+488: 
+489:     boolean isFunctionExpression = (parent != null)
+490:         && NodeUtil.isFunctionExpression(n);
+491: 
+492:     if (!isFunctionExpression) {
+493:       // Functions declarations are in the scope containing the declaration.
+494:       traverseBranch(fnName, n);
+495:     }
+496: 
+497:     curNode = n;
+498:     pushScope(n);
+499: 
+500:     if (isFunctionExpression) {
+501:       // Function expression names are only accessible within the function
+502:       // scope.
+503:       traverseBranch(fnName, n);
+504:     }
+505: 
+506:     final Node args = fnName.getNext();
+507:     final Node body = args.getNext();
+508: 
+509:     // Args
+510:     traverseBranch(args, n);
+511: 
+512:     // Body
+513:     Preconditions.checkState(body.getNext() == null &&
+514:             body.getType() == Token.BLOCK);
+515:     traverseBranch(body, n);
+516: 
+517:     popScope();
+518:   }
+
+[22] com.google.javascript.jscomp.CheckGlobalThis#visit  (lines 138-145)
+138:   public void visit(NodeTraversal t, Node n, Node parent) {
+139:     if (n.getType() == Token.THIS && shouldReportThis(n, parent)) {
+140:       compiler.report(t.makeError(n, level, GLOBAL_THIS));
+141:     }
+142:     if (n == assignLhsChild) {
+143:       assignLhsChild = null;
+144:     }
+145:   }
+
+[23] com.google.javascript.jscomp.SourceFile#fromCode  (lines 251-253)
+251:   public static SourceFile fromCode(String fileName, String code) {
+252:     return new Preloaded(fileName, code);
+253:   }
+
+[24] com.google.javascript.jscomp.CheckGlobalThis#shouldReportThis  (lines 147-155)
+147:   private boolean shouldReportThis(Node n, Node parent) {
+148:     if (assignLhsChild != null) {
+149:       // Always report a THIS on the left side of an assign.
+150:       return true;
+151:     }
+152: 
+153:     // Also report a THIS with a property access.
+154:     return parent != null && NodeUtil.isGet(parent);
+155:   }
+
+[25] com.google.javascript.jscomp.NodeTraversal#traverse  (lines 423-427)
+423:   public static void traverse(
+424:       AbstractCompiler compiler, Node root, Callback cb) {
+425:     NodeTraversal t = new NodeTraversal(compiler, cb);
+426:     t.traverse(root);
+427:   }
+
+[26] com.google.javascript.jscomp.JSModule#add  (lines 92-94)
+92:   public void add(JSSourceFile file) {
+93:     add(new CompilerInput(file));
+94:   }
+
+[27] com.google.javascript.jscomp.LineNumberCheck#visit  (lines 66-78)
+66:   public void visit(NodeTraversal t, Node n, Node parent) {
+67:     if (n.getType() == Token.SCRIPT) {
+68:       requiresLineNumbers = false;
+69:     } else if (requiresLineNumbers) {
+70:       if (n.getLineno() == -1) {
+71:         // The tree version of the node is really the best diagnostic
+72:         // info we have to offer here.
+73:         compiler.report(
+74:             t.makeError(n, MISSING_LINE_INFO,
+75:                 n.toStringTree()));
+76:       }
+77:     }
+78:   }
+
+[28] com.google.javascript.jscomp.CombinedCompilerPass#isActive  (lines 131-133)
+131:     boolean isActive() {
+132:       return waiting == null;
+133:     }
+
+[29] com.google.javascript.jscomp.CombinedCompilerPass#process  (lines 136-139)
+136:   @Override
+137:   public final void process(Node externs, Node root) {
+138:     NodeTraversal.traverse(compiler, root, this);
+139:   }
+
+[30] com.google.javascript.jscomp.Compiler#initOptions  (lines 212-225)
+212:   public void initOptions(CompilerOptions options) {
+213:     this.options = options;
+214:     if (errorManager == null) {
+215:       if (outStream == null) {
+216:         setErrorManager(
+217:             new LoggerErrorManager(createMessageFormatter(), logger));
+218:       } else {
+219:         PrintStreamErrorManager printer =
+220:             new PrintStreamErrorManager(createMessageFormatter(), outStream);
+221:         printer.setSummaryDetailLevel(options.summaryDetailLevel);
+222:         setErrorManager(printer);
+223:       }
+224:     }
+225:   }
+
+[31] com.google.javascript.jscomp.parsing.IRFactory#processGeneric  (lines 279-286)
+279:     private Node processGeneric(
+280:         com.google.javascript.jscomp.mozilla.rhino.Node n) {
+281:       Node node = new Node(transformTokenType(n.getType()));
+282:       for (com.google.javascript.jscomp.mozilla.rhino.Node child : n) {
+283:         node.addChildToBack(transform((AstNode)child));
+284:       }
+285:       return node;
+286:     }
+
+[32] com.google.javascript.jscomp.Compiler#getAllInputsFromModules  (lines 368-384)
+368:   private static List<CompilerInput> getAllInputsFromModules(
+369:       List<JSModule> modules) {
+370:     List<CompilerInput> inputs = Lists.newArrayList();
+371:     Map<String, JSModule> inputMap = Maps.newHashMap();
+372:     for (JSModule module : modules) {
+373:       for (CompilerInput input : module.getInputs()) {
+374:         String inputName = input.getName();
+375: 
+376:         // NOTE(nicksantos): If an input is in more than one module,
+377:         // it will show up twice in the inputs list, and then we
+378:         // will get an error down the line.
+379:         inputs.add(input);
+380:         inputMap.put(inputName, module);
+381:       }
+382:     }
+383:     return inputs;
+384:   }
+
+[33] com.google.javascript.jscomp.CombinedCompilerPass#visit  (lines 154-159)
+154:   @Override
+155:   public void visit(NodeTraversal t, Node n, Node parent) {
+156:     for (CallbackWrapper callback : callbacks) {
+157:       callback.visitOrMaybeActivate(t, n, parent);
+158:     }
+159:   }
+
+[34] com.google.javascript.jscomp.NodeTraversal#getSourceName  (lines 396-398)
+396:   public String getSourceName() {
+397:     return sourceName;
+398:   }
+
+[35] com.google.javascript.rhino.Node#getCharno  (lines 831-833)
+831:   public int getCharno() {
+832:     return extractCharno(sourcePosition);
+833:   }
+
+[36] com.google.javascript.rhino.Node#mergeLineCharNo  (lines 1115-1123)
+1115:   protected static int mergeLineCharNo(int lineno, int charno) {
+1116:     if (lineno < 0 || charno < 0) {
+1117:       return -1;
+1118:     } else if ((charno & ~COLUMN_MASK) != 0) {
+1119:       return lineno << COLUMN_BITS | COLUMN_MASK;
+1120:     } else {
+1121:       return lineno << COLUMN_BITS | (charno & COLUMN_MASK);
+1122:     }
+1123:   }
+
+[37] com.google.javascript.jscomp.parsing.IRFactory#transformTokenType  (lines 866-1177)
+866:   private static int transformTokenType(int token) {
+867:     switch (token) {
+868:       case com.google.javascript.jscomp.mozilla.rhino.Token.ERROR:
+869:         return Token.ERROR;
+870:       case com.google.javascript.jscomp.mozilla.rhino.Token.EOF:
+871:         return Token.EOF;
+872:       case com.google.javascript.jscomp.mozilla.rhino.Token.EOL:
+873:         return Token.EOL;
+874:       case com.google.javascript.jscomp.mozilla.rhino.Token.ENTERWITH:
+875:         return Token.ENTERWITH;
+876:       case com.google.javascript.jscomp.mozilla.rhino.Token.LEAVEWITH:
+877:         return Token.LEAVEWITH;
+878:       case com.google.javascript.jscomp.mozilla.rhino.Token.RETURN:
+879:         return Token.RETURN;
+880:       case com.google.javascript.jscomp.mozilla.rhino.Token.GOTO:
+881:         return Token.GOTO;
+882:       case com.google.javascript.jscomp.mozilla.rhino.Token.IFEQ:
+883:         return Token.IFEQ;
+884:       case com.google.javascript.jscomp.mozilla.rhino.Token.IFNE:
+885:         return Token.IFNE;
+886:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETNAME:
+887:         return Token.SETNAME;
+888:       case com.google.javascript.jscomp.mozilla.rhino.Token.BITOR:
+889:         return Token.BITOR;
+890:       case com.google.javascript.jscomp.mozilla.rhino.Token.BITXOR:
+891:         return Token.BITXOR;
+892:       case com.google.javascript.jscomp.mozilla.rhino.Token.BITAND:
+893:         return Token.BITAND;
+894:       case com.google.javascript.jscomp.mozilla.rhino.Token.EQ:
+895:         return Token.EQ;
+896:       case com.google.javascript.jscomp.mozilla.rhino.Token.NE:
+897:         return Token.NE;
+898:       case com.google.javascript.jscomp.mozilla.rhino.Token.LT:
+899:         return Token.LT;
+900:       case com.google.javascript.jscomp.mozilla.rhino.Token.LE:
+901:         return Token.LE;
+902:       case com.google.javascript.jscomp.mozilla.rhino.Token.GT:
+903:         return Token.GT;
+904:       case com.google.javascript.jscomp.mozilla.rhino.Token.GE:
+905:         return Token.GE;
+906:       case com.google.javascript.jscomp.mozilla.rhino.Token.LSH:
+907:         return Token.LSH;
+908:       case com.google.javascript.jscomp.mozilla.rhino.Token.RSH:
+909:         return Token.RSH;
+910:       case com.google.javascript.jscomp.mozilla.rhino.Token.URSH:
+911:         return Token.URSH;
+912:       case com.google.javascript.jscomp.mozilla.rhino.Token.ADD:
+913:         return Token.ADD;
+914:       case com.google.javascript.jscomp.mozilla.rhino.Token.SUB:
+915:         return Token.SUB;
+916:       case com.google.javascript.jscomp.mozilla.rhino.Token.MUL:
+917:         return Token.MUL;
+918:       case com.google.javascript.jscomp.mozilla.rhino.Token.DIV:
+919:         return Token.DIV;
+920:       case com.google.javascript.jscomp.mozilla.rhino.Token.MOD:
+921:         return Token.MOD;
+922:       case com.google.javascript.jscomp.mozilla.rhino.Token.NOT:
+923:         return Token.NOT;
+924:       case com.google.javascript.jscomp.mozilla.rhino.Token.BITNOT:
+925:         return Token.BITNOT;
+926:       case com.google.javascript.jscomp.mozilla.rhino.Token.POS:
+927:         return Token.POS;
+928:       case com.google.javascript.jscomp.mozilla.rhino.Token.NEG:
+929:         return Token.NEG;
+930:       case com.google.javascript.jscomp.mozilla.rhino.Token.NEW:
+931:         return Token.NEW;
+932:       case com.google.javascript.jscomp.mozilla.rhino.Token.DELPROP:
+933:         return Token.DELPROP;
+934:       case com.google.javascript.jscomp.mozilla.rhino.Token.TYPEOF:
+935:         return Token.TYPEOF;
+936:       case com.google.javascript.jscomp.mozilla.rhino.Token.GETPROP:
+937:         return Token.GETPROP;
+938:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETPROP:
+939:         return Token.SETPROP;
+940:       case com.google.javascript.jscomp.mozilla.rhino.Token.GETELEM:
+941:         return Token.GETELEM;
+942:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETELEM:
+943:         return Token.SETELEM;
+944:       case com.google.javascript.jscomp.mozilla.rhino.Token.CALL:
+945:         return Token.CALL;
+946:       case com.google.javascript.jscomp.mozilla.rhino.Token.NAME:
+947:         return Token.NAME;
+948:       case com.google.javascript.jscomp.mozilla.rhino.Token.NUMBER:
+949:         return Token.NUMBER;
+950:       case com.google.javascript.jscomp.mozilla.rhino.Token.STRING:
+951:         return Token.STRING;
+952:       case com.google.javascript.jscomp.mozilla.rhino.Token.NULL:
+953:         return Token.NULL;
+954:       case com.google.javascript.jscomp.mozilla.rhino.Token.THIS:
+955:         return Token.THIS;
+956:       case com.google.javascript.jscomp.mozilla.rhino.Token.FALSE:
+957:         return Token.FALSE;
+958:       case com.google.javascript.jscomp.mozilla.rhino.Token.TRUE:
+959:         return Token.TRUE;
+960:       case com.google.javascript.jscomp.mozilla.rhino.Token.SHEQ:
+961:         return Token.SHEQ;
+962:       case com.google.javascript.jscomp.mozilla.rhino.Token.SHNE:
+963:         return Token.SHNE;
+964:       case com.google.javascript.jscomp.mozilla.rhino.Token.REGEXP:
+965:         return Token.REGEXP;
+966:       case com.google.javascript.jscomp.mozilla.rhino.Token.BINDNAME:
+967:         return Token.BINDNAME;
+968:       case com.google.javascript.jscomp.mozilla.rhino.Token.THROW:
+969:         return Token.THROW;
+970:       case com.google.javascript.jscomp.mozilla.rhino.Token.RETHROW:
+971:         return Token.RETHROW;
+972:       case com.google.javascript.jscomp.mozilla.rhino.Token.IN:
+973:         return Token.IN;
+974:       case com.google.javascript.jscomp.mozilla.rhino.Token.INSTANCEOF:
+975:         return Token.INSTANCEOF;
+976:       case com.google.javascript.jscomp.mozilla.rhino.Token.LOCAL_LOAD:
+977:         return Token.LOCAL_LOAD;
+978:       case com.google.javascript.jscomp.mozilla.rhino.Token.GETVAR:
+979:         return Token.GETVAR;
+980:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETVAR:
+981:         return Token.SETVAR;
+982:       case com.google.javascript.jscomp.mozilla.rhino.Token.CATCH_SCOPE:
+983:         return Token.CATCH_SCOPE;
+984:       case com.google.javascript.jscomp.mozilla.rhino.Token.ENUM_INIT_KEYS:
+985:         return Token.ENUM_INIT_KEYS;
+986:       case com.google.javascript.jscomp.mozilla.rhino.Token.ENUM_INIT_VALUES:
+987:         return Token.ENUM_INIT_VALUES;
+988:       case com.google.javascript.jscomp.mozilla.rhino.Token.ENUM_NEXT:
+989:         return Token.ENUM_NEXT;
+990:       case com.google.javascript.jscomp.mozilla.rhino.Token.ENUM_ID:
+991:         return Token.ENUM_ID;
+992:       case com.google.javascript.jscomp.mozilla.rhino.Token.THISFN:
+993:         return Token.THISFN;
+994:       case com.google.javascript.jscomp.mozilla.rhino.Token.RETURN_RESULT:
+995:         return Token.RETURN_RESULT;
+996:       case com.google.javascript.jscomp.mozilla.rhino.Token.ARRAYLIT:
+997:         return Token.ARRAYLIT;
+998:       case com.google.javascript.jscomp.mozilla.rhino.Token.OBJECTLIT:
+999:         return Token.OBJECTLIT;
+1000:       case com.google.javascript.jscomp.mozilla.rhino.Token.GET_REF:
+1001:         return Token.GET_REF;
+1002:       case com.google.javascript.jscomp.mozilla.rhino.Token.SET_REF:
+1003:         return Token.SET_REF;
+1004:       case com.google.javascript.jscomp.mozilla.rhino.Token.DEL_REF:
+1005:         return Token.DEL_REF;
+1006:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_CALL:
+1007:         return Token.REF_CALL;
+1008:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_SPECIAL:
+1009:         return Token.REF_SPECIAL;
+1010:       case com.google.javascript.jscomp.mozilla.rhino.Token.DEFAULTNAMESPACE:
+1011:         return Token.DEFAULTNAMESPACE;
+1012:       case com.google.javascript.jscomp.mozilla.rhino.Token.ESCXMLTEXT:
+1013:         return Token.ESCXMLTEXT;
+1014:       case com.google.javascript.jscomp.mozilla.rhino.Token.ESCXMLATTR:
+1015:         return Token.ESCXMLATTR;
+1016:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_MEMBER:
+1017:         return Token.REF_MEMBER;
+1018:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_NS_MEMBER:
+1019:         return Token.REF_NS_MEMBER;
+1020:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_NAME:
+1021:         return Token.REF_NAME;
+1022:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_NS_NAME:
+1023:         return Token.REF_NS_NAME;
+1024:       case com.google.javascript.jscomp.mozilla.rhino.Token.TRY:
+1025:         return Token.TRY;
+1026:       case com.google.javascript.jscomp.mozilla.rhino.Token.SEMI:
+1027:         return Token.SEMI;
+1028:       case com.google.javascript.jscomp.mozilla.rhino.Token.LB:
+1029:         return Token.LB;
+1030:       case com.google.javascript.jscomp.mozilla.rhino.Token.RB:
+1031:         return Token.RB;
+1032:       case com.google.javascript.jscomp.mozilla.rhino.Token.LC:
+1033:         return Token.LC;
+1034:       case com.google.javascript.jscomp.mozilla.rhino.Token.RC:
+1035:         return Token.RC;
+1036:       case com.google.javascript.jscomp.mozilla.rhino.Token.LP:
+1037:         return Token.LP;
+1038:       case com.google.javascript.jscomp.mozilla.rhino.Token.RP:
+1039:         return Token.RP;
+1040:       case com.google.javascript.jscomp.mozilla.rhino.Token.COMMA:
+1041:         return Token.COMMA;
+1042:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN:
+1043:         return Token.ASSIGN;
+1044:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_BITOR:
+1045:         return Token.ASSIGN_BITOR;
+1046:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_BITXOR:
+1047:         return Token.ASSIGN_BITXOR;
+1048:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_BITAND:
+1049:         return Token.ASSIGN_BITAND;
+1050:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_LSH:
+1051:         return Token.ASSIGN_LSH;
+1052:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_RSH:
+1053:         return Token.ASSIGN_RSH;
+1054:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_URSH:
+1055:         return Token.ASSIGN_URSH;
+1056:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_ADD:
+1057:         return Token.ASSIGN_ADD;
+1058:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_SUB:
+1059:         return Token.ASSIGN_SUB;
+1060:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_MUL:
+1061:         return Token.ASSIGN_MUL;
+1062:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_DIV:
+1063:         return Token.ASSIGN_DIV;
+1064:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_MOD:
+1065:         return Token.ASSIGN_MOD;
+1066:       case com.google.javascript.jscomp.mozilla.rhino.Token.HOOK:
+1067:         return Token.HOOK;
+1068:       case com.google.javascript.jscomp.mozilla.rhino.Token.COLON:
+1069:         return Token.COLON;
+1070:       case com.google.javascript.jscomp.mozilla.rhino.Token.OR:
+1071:         return Token.OR;
+1072:       case com.google.javascript.jscomp.mozilla.rhino.Token.AND:
+1073:         return Token.AND;
+1074:       case com.google.javascript.jscomp.mozilla.rhino.Token.INC:
+1075:         return Token.INC;
+1076:       case com.google.javascript.jscomp.mozilla.rhino.Token.DEC:
+1077:         return Token.DEC;
+1078:       case com.google.javascript.jscomp.mozilla.rhino.Token.DOT:
+1079:         return Token.DOT;
+1080:       case com.google.javascript.jscomp.mozilla.rhino.Token.FUNCTION:
+1081:         return Token.FUNCTION;
+1082:       case com.google.javascript.jscomp.mozilla.rhino.Token.EXPORT:
+1083:         return Token.EXPORT;
+1084:       case com.google.javascript.jscomp.mozilla.rhino.Token.IMPORT:
+1085:         return Token.IMPORT;
+1086:       case com.google.javascript.jscomp.mozilla.rhino.Token.IF:
+1087:         return Token.IF;
+1088:       case com.google.javascript.jscomp.mozilla.rhino.Token.ELSE:
+1089:         return Token.ELSE;
+1090:       case com.google.javascript.jscomp.mozilla.rhino.Token.SWITCH:
+1091:         return Token.SWITCH;
+1092:       case com.google.javascript.jscomp.mozilla.rhino.Token.CASE:
+1093:         return Token.CASE;
+1094:       case com.google.javascript.jscomp.mozilla.rhino.Token.DEFAULT:
+1095:         return Token.DEFAULT;
+1096:       case com.google.javascript.jscomp.mozilla.rhino.Token.WHILE:
+1097:         return Token.WHILE;
+1098:       case com.google.javascript.jscomp.mozilla.rhino.Token.DO:
+1099:         return Token.DO;
+1100:       case com.google.javascript.jscomp.mozilla.rhino.Token.FOR:
+1101:         return Token.FOR;
+1102:       case com.google.javascript.jscomp.mozilla.rhino.Token.BREAK:
+1103:         return Token.BREAK;
+1104:       case com.google.javascript.jscomp.mozilla.rhino.Token.CONTINUE:
+1105:         return Token.CONTINUE;
+1106:       case com.google.javascript.jscomp.mozilla.rhino.Token.VAR:
+1107:         return Token.VAR;
+1108:       case com.google.javascript.jscomp.mozilla.rhino.Token.WITH:
+1109:         return Token.WITH;
+1110:       case com.google.javascript.jscomp.mozilla.rhino.Token.CATCH:
+1111:         return Token.CATCH;
+1112:       case com.google.javascript.jscomp.mozilla.rhino.Token.FINALLY:
+1113:         return Token.FINALLY;
+1114:       case com.google.javascript.jscomp.mozilla.rhino.Token.VOID:
+1115:         return Token.VOID;
+1116:       case com.google.javascript.jscomp.mozilla.rhino.Token.RESERVED:
+1117:         return Token.RESERVED;
+1118:       case com.google.javascript.jscomp.mozilla.rhino.Token.EMPTY:
+1119:         return Token.EMPTY;
+1120:       case com.google.javascript.jscomp.mozilla.rhino.Token.BLOCK:
+1121:         return Token.BLOCK;
+1122:       case com.google.javascript.jscomp.mozilla.rhino.Token.LABEL:
+1123:         return Token.LABEL;
+1124:       case com.google.javascript.jscomp.mozilla.rhino.Token.TARGET:
+1125:         return Token.TARGET;
+1126:       case com.google.javascript.jscomp.mozilla.rhino.Token.LOOP:
+1127:         return Token.LOOP;
+1128:       case com.google.javascript.jscomp.mozilla.rhino.Token.EXPR_VOID:
+1129:       case com.google.javascript.jscomp.mozilla.rhino.Token.EXPR_RESULT:
+1130:         return Token.EXPR_RESULT;
+1131:       case com.google.javascript.jscomp.mozilla.rhino.Token.JSR:
+1132:         return Token.JSR;
+1133:       case com.google.javascript.jscomp.mozilla.rhino.Token.SCRIPT:
+1134:         return Token.SCRIPT;
+1135:       case com.google.javascript.jscomp.mozilla.rhino.Token.TYPEOFNAME:
+1136:         return Token.TYPEOFNAME;
+1137:       case com.google.javascript.jscomp.mozilla.rhino.Token.USE_STACK:
+1138:         return Token.USE_STACK;
+1139:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETPROP_OP:
+1140:         return Token.SETPROP_OP;
+1141:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETELEM_OP:
+1142:         return Token.SETELEM_OP;
+1143:       case com.google.javascript.jscomp.mozilla.rhino.Token.LOCAL_BLOCK:
+1144:         return Token.LOCAL_BLOCK;
+1145:       case com.google.javascript.jscomp.mozilla.rhino.Token.SET_REF_OP:
+1146:         return Token.SET_REF_OP;
+1147:       case com.google.javascript.jscomp.mozilla.rhino.Token.DOTDOT:
+1148:         return Token.DOTDOT;
+1149:       case com.google.javascript.jscomp.mozilla.rhino.Token.COLONCOLON:
+1150:         return Token.COLONCOLON;
+1151:       case com.google.javascript.jscomp.mozilla.rhino.Token.XML:
+1152:         return Token.XML;
+1153:       case com.google.javascript.jscomp.mozilla.rhino.Token.DOTQUERY:
+1154:         return Token.DOTQUERY;
+1155:       case com.google.javascript.jscomp.mozilla.rhino.Token.XMLATTR:
+1156:         return Token.XMLATTR;
+1157:       case com.google.javascript.jscomp.mozilla.rhino.Token.XMLEND:
+1158:         return Token.XMLEND;
+1159:       case com.google.javascript.jscomp.mozilla.rhino.Token.TO_OBJECT:
+1160:         return Token.TO_OBJECT;
+1161:       case com.google.javascript.jscomp.mozilla.rhino.Token.TO_DOUBLE:
+1162:         return Token.TO_DOUBLE;
+1163:       case com.google.javascript.jscomp.mozilla.rhino.Token.GET:
+1164:         return Token.GET;
+1165:       case com.google.javascript.jscomp.mozilla.rhino.Token.SET:
+1166:         return Token.SET;
+1167:       case com.google.javascript.jscomp.mozilla.rhino.Token.CONST:
+1168:         return Token.CONST;
+1169:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETCONST:
+1170:         return Token.SETCONST;
+1171:       case com.google.javascript.jscomp.mozilla.rhino.Token.DEBUGGER:
+1172:         return Token.DEBUGGER;
+1173:     }
+1174: 
+1175:     // Token without name
+1176:     throw new IllegalStateException(String.valueOf(token));
+1177:   }
+
+[38] com.google.javascript.jscomp.Compiler#getErrorCount  (lines 1585-1587)
+1585:   public int getErrorCount() {
+1586:     return errorManager.getErrorCount();
+1587:   }
+
+[39] com.google.javascript.jscomp.BasicErrorManager#report  (lines 46-54)
+46:   public void report(CheckLevel level, JSError error) {
+47:     if (messages.add(new ErrorWithLevel(error, level))) {
+48:       if (level == CheckLevel.ERROR) {
+49:         errorCount++;
+50:       } else if (level == CheckLevel.WARNING) {
+51:         warningCount++;
+52:       }
+53:     }
+54:   }
+
+[40] com.google.javascript.jscomp.Compiler#init  (lines 239-247)
+239:   public void init(List<JSSourceFile> externs, List<JSSourceFile> inputs,
+240:       CompilerOptions options) {
+241:     JSModule module = new JSModule("[singleton]");
+242:     for (JSSourceFile input : inputs) {
+243:       module.add(input);
+244:     }
+245: 
+246:     initModules(externs, Lists.newArrayList(module), options);
+247:   }
+
+[41] com.google.javascript.jscomp.JSModule#add  (lines 102-105)
+102:   public void add(CompilerInput input) {
+103:     inputs.add(input);
+104:     input.setModule(this);
+105:   }
+
+[42] com.google.javascript.jscomp.CombinedCompilerPass#shouldTraverseIfActive  (lines 113-117)
+113:     void shouldTraverseIfActive(NodeTraversal t, Node n, Node parent) {
+114:       if (isActive() && !callback.shouldTraverse(t, n, parent)) {
+115:         waiting = n;
+116:       }
+117:     }
+
+[43] com.google.javascript.jscomp.JSError#JSError  (lines 138-146)
+138:   private JSError(String sourceName, int lineno, int charno,
+139:       DiagnosticType type, CheckLevel level, String... arguments) {
+140:     this.type = type;
+141:     this.description = type.format.format(arguments);
+142:     this.lineNumber = lineno;
+143:     this.charno = charno;
+144:     this.sourceName = sourceName;
+145:     this.level = level == null ? type.level : level;
+146:   }
+
+[44] com.google.javascript.jscomp.parsing.JsDocInfoParser#parse  (lines 136-786)
+136:   boolean parse() {
+137:     int lineno;
+138:     int charno;
+139: 
+140:     // JSTypes are represented as Rhino AST nodes, and then resolved later.
+141:     JSTypeExpression type;
+142: 
+143:     state = State.SEARCHING_ANNOTATION;
+144:     JsDocToken token = next();
+145: 
+146:     ExtractionInfo blockInfo = extractBlockComment(token);
+147:     token = blockInfo.token;
+148: 
+149:     // If we have a block level comment, record it.
+150:     if (blockInfo.string.length() > 0) {
+151:       jsdocBuilder.recordBlockDescription(blockInfo.string);
+152:     }
+153: 
+154:     // Parse the actual JsDoc.
+155:     retry: for (;;) {
+156:       switch (token) {
+157:         case ANNOTATION:
+158:           if (state == State.SEARCHING_ANNOTATION) {
+159:             state = State.SEARCHING_NEWLINE;
+160:             lineno = stream.getLineno();
+161:             charno = stream.getCharno();
+162: 
+163:             String annotationName = stream.getString();
+164:             Annotation annotation = annotationNames.get(annotationName);
+165:             if (annotation == null) {
+166:               parser.addWarning("msg.bad.jsdoc.tag", annotationName,
+167:                   stream.getLineno(), stream.getCharno());
+168:             } else {
+169:               // Mark the beginning of the annotation.
+170:               jsdocBuilder.markAnnotation(annotationName, lineno, charno);
+171: 
+172:               switch (annotation) {
+173:                 case AUTHOR:
+174:                   ExtractionInfo authorInfo = extractSingleLineBlock();
+175:                   String author = authorInfo.string;
+176: 
+177:                   if (author.length() == 0) {
+178:                     parser.addWarning("msg.jsdoc.authormissing",
+179:                           stream.getLineno(), stream.getCharno());
+180:                   } else {
+181:                     jsdocBuilder.addAuthor(author);
+182:                   }
+183: 
+184:                   token = authorInfo.token;
+185:                   continue retry;
+186: 
+187:                 case CONSTANT:
+188:                   if (!jsdocBuilder.recordConstancy()) {
+189:                     parser.addWarning("msg.jsdoc.const",
+190:                         stream.getLineno(), stream.getCharno());
+191:                   }
+192:                   token = eatTokensUntilEOL();
+193:                   continue retry;
+194: 
+195:                 case CONSTRUCTOR:
+196:                   if (!jsdocBuilder.recordConstructor()) {
+197:                     if (jsdocBuilder.isInterfaceRecorded()) {
+198:                       parser.addWarning("msg.jsdoc.interface.constructor",
+199:                           stream.getLineno(), stream.getCharno());
+200:                     } else {
+201:                       parser.addWarning("msg.jsdoc.incompat.type",
+202:                           stream.getLineno(), stream.getCharno());
+203:                     }
+204:                   }
+205:                   token = eatTokensUntilEOL();
+206:                   continue retry;
+207: 
+208:                 case DEPRECATED:
+209:                   if (!jsdocBuilder.recordDeprecated()) {
+210:                     parser.addWarning("msg.jsdoc.deprecated",
+211:                         stream.getLineno(), stream.getCharno());
+212:                   }
+213: 
+214:                   // Find the reason/description, if any.
+215:                   ExtractionInfo reasonInfo =
+216:                       extractMultilineTextualBlock(token);
+217: 
+218:                   String reason = reasonInfo.string;
+219: 
+220:                   if (reason.length() > 0) {
+221:                     jsdocBuilder.recordDeprecationReason(reason);
+222:                   }
+223: 
+224:                   token = reasonInfo.token;
+225:                   continue retry;
+226: 
+227:                 case INTERFACE:
+228:                   if (!jsdocBuilder.recordInterface()) {
+229:                     if (jsdocBuilder.isConstructorRecorded()) {
+230:                       parser.addWarning("msg.jsdoc.interface.constructor",
+231:                           stream.getLineno(), stream.getCharno());
+232:                     } else {
+233:                       parser.addWarning("msg.jsdoc.incompat.type",
+234:                           stream.getLineno(), stream.getCharno());
+235:                     }
+236:                   }
+237:                   token = eatTokensUntilEOL();
+238:                   continue retry;
+239: 
+240:                 case DESC:
+241:                   if (jsdocBuilder.isDescriptionRecorded()) {
+242:                     parser.addWarning("msg.jsdoc.desc.extra",
+243:                         stream.getLineno(), stream.getCharno());
+244:                     token = eatTokensUntilEOL();
+245:                     continue retry;
+246:                   } else {
+247:                     ExtractionInfo descriptionInfo =
+248:                         extractMultilineTextualBlock(token);
+249: 
+250:                     String description = descriptionInfo.string;
+251: 
+252:                     jsdocBuilder.recordDescription(description);
+253:                     token = descriptionInfo.token;
+254:                     continue retry;
+255:                   }
+256: 
+257:                 case FILE_OVERVIEW:
+258:                   ExtractionInfo fileOverviewInfo =
+259:                       extractMultilineTextualBlock(token,
+260:                                                    WhitespaceOption.TRIM);
+261: 
+262:                   String fileOverview = fileOverviewInfo.string;
+263: 
+264:                   if (!jsdocBuilder.recordFileOverview(fileOverview) ||
+265:                       fileOverviewJSDocInfo != null) {
+266:                     parser.addWarning("msg.jsdoc.fileoverview.extra",
+267:                         stream.getLineno(), stream.getCharno());
+268:                   }
+269:                   token = fileOverviewInfo.token;
+270:                   continue retry;
+271: 
+272:                 case LICENSE:
+273:                 case PRESERVE:
+274:                   ExtractionInfo preserveInfo =
+275:                       extractMultilineTextualBlock(token,
+276:                                                    WhitespaceOption.PRESERVE);
+277: 
+278:                   String preserve = preserveInfo.string;
+279: 
+280:                   if (preserve.length() > 0) {
+281:                     if (fileLevelJsDocBuilder != null) {
+282:                       fileLevelJsDocBuilder.append(preserve);
+283:                     }
+284:                   }
+285: 
+286:                   token = preserveInfo.token;
+287:                   continue retry;
+288: 
+289:                 case ENUM:
+290:                   token = next();
+291:                   lineno = stream.getLineno();
+292:                   charno = stream.getCharno();
+293: 
+294:                   type = null;
+295:                   if (token != JsDocToken.EOL && token != JsDocToken.EOC) {
+296:                     type = createJSTypeExpression(
+297:                         parseAndRecordTypeNode(token));
+298:                   }
+299: 
+300:                   if (type == null) {
+301:                     type = createJSTypeExpression(newStringNode("number"));
+302:                   }
+303:                   if (!jsdocBuilder.recordEnumParameterType(type)) {
+304:                     parser.addWarning("msg.jsdoc.incompat.type", lineno, charno);
+305:                   }
+306:                   token = eatTokensUntilEOL(token);
+307:                   continue retry;
+308: 
+309:                 case EXPORT:
+310:                   if (!jsdocBuilder.recordExport()) {
+311:                     parser.addWarning("msg.jsdoc.export",
+312:                         stream.getLineno(), stream.getCharno());
+313:                   }
+314:                   token = eatTokensUntilEOL();
+315:                   continue retry;
+316: 
+317:                 case EXTERNS:
+318:                   if (!jsdocBuilder.recordExterns()) {
+319:                     parser.addWarning("msg.jsdoc.externs",
+320:                         stream.getLineno(), stream.getCharno());
+321:                   }
+322:                   token = eatTokensUntilEOL();
+323:                   continue retry;
+324: 
+325:                 case JAVA_DISPATCH:
+326:                   if (!jsdocBuilder.recordJavaDispatch()) {
+327:                     parser.addWarning("msg.jsdoc.javadispatch",
+328:                         stream.getLineno(), stream.getCharno());
+329:                   }
+330:                   token = eatTokensUntilEOL();
+331:                   continue retry;
+332: 
+333:                 case EXTENDS:
+334:                 case IMPLEMENTS:
+335:                   skipEOLs();
+336:                   token = next();
+337:                   lineno = stream.getLineno();
+338:                   charno = stream.getCharno();
+339:                   boolean matchingRc = false;
+340: 
+341:                   if (token == JsDocToken.LC) {
+342:                     token = next();
+343:                     matchingRc = true;
+344:                   }
+345: 
+346:                   if (token == JsDocToken.STRING) {
+347:                     Node typeNode = parseAndRecordTypeNameNode(
+348:                         token, lineno, charno, matchingRc);
+349: 
+350:                     lineno = stream.getLineno();
+351:                     charno = stream.getCharno();
+352: 
+353:                     typeNode = wrapNode(Token.BANG, typeNode);
+354:                     if (typeNode != null && !matchingRc) {
+355:                       typeNode.putBooleanProp(Node.BRACELESS_TYPE, true);
+356:                     }
+357:                     type = createJSTypeExpression(typeNode);
+358: 
+359:                     if (annotation == Annotation.EXTENDS) {
+360:                       if (!jsdocBuilder.recordBaseType(type)) {
+361:                         parser.addWarning(
+362:                             "msg.jsdoc.incompat.type", lineno, charno);
+363:                       }
+364:                     } else {
+365:                       Preconditions.checkState(
+366:                           annotation == Annotation.IMPLEMENTS);
+367:                       if (!jsdocBuilder.recordImplementedInterface(type)) {
+368:                         parser.addWarning("msg.jsdoc.implements.duplicate",
+369:                             lineno, charno);
+370:                       }
+371:                     }
+372:                     token = next();
+373:                     if (matchingRc) {
+374:                       if (token != JsDocToken.RC) {
+375:                         parser.addWarning("msg.jsdoc.missing.rc",
+376:                             stream.getLineno(), stream.getCharno());
+377:                       }
+378:                     } else if (token != JsDocToken.EOL &&
+379:                         token != JsDocToken.EOF && token != JsDocToken.EOC) {
+380:                       parser.addWarning("msg.end.annotation.expected",
+381:                           stream.getLineno(), stream.getCharno());
+382:                     }
+383:                   } else {
+384:                     parser.addWarning("msg.no.type.name", lineno, charno);
+385:                   }
+386:                   token = eatTokensUntilEOL(token);
+387:                   continue retry;
+388: 
+389:                 case HIDDEN:
+390:                   if (!jsdocBuilder.recordHiddenness()) {
+391:                     parser.addWarning("msg.jsdoc.hidden",
+392:                         stream.getLineno(), stream.getCharno());
+393:                   }
+394:                   token = eatTokensUntilEOL();
+395:                   continue retry;
+396: 
+397:                 case NO_ALIAS:
+398:                   if (!jsdocBuilder.recordNoAlias()) {
+399:                     parser.addWarning("msg.jsdoc.noalias",
+400:                         stream.getLineno(), stream.getCharno());
+401:                   }
+402:                   token = eatTokensUntilEOL();
+403:                   continue retry;
+404: 
+405:                 case NO_TYPE_CHECK:
+406:                   if (!jsdocBuilder.recordNoTypeCheck()) {
+407:                     parser.addWarning("msg.jsdoc.nocheck",
+408:                         stream.getLineno(), stream.getCharno());
+409:                   }
+410:                   token = eatTokensUntilEOL();
+411:                   continue retry;
+412: 
+413:                 case NOT_IMPLEMENTED:
+414:                   token = eatTokensUntilEOL();
+415:                   continue retry;
+416: 
+417:                 case INHERIT_DOC:
+418:                 case OVERRIDE:
+419:                   if (!jsdocBuilder.recordOverride()) {
+420:                     parser.addWarning("msg.jsdoc.override",
+421:                         stream.getLineno(), stream.getCharno());
+422:                   }
+423:                   token = eatTokensUntilEOL();
+424:                   continue retry;
+425: 
+426:                 case THROWS:
+427:                   skipEOLs();
+428:                   token = next();
+429:                   lineno = stream.getLineno();
+430:                   charno = stream.getCharno();
+431:                   type = null;
+432: 
+433:                   if (token == JsDocToken.LC) {
+434:                     type = createJSTypeExpression(
+435:                         parseAndRecordTypeNode(token));
+436: 
+437:                     if (type == null) {
+438:                       // parsing error reported during recursive descent
+439:                       // recovering parsing
+440:                       token = eatTokensUntilEOL();
+441:                       continue retry;
+442:                     }
+443:                   }
+444: 
+445:                   // *Update* the token to that after the type annotation.
+446:                   token = current();
+447: 
+448:                   // Save the throw type.
+449:                   jsdocBuilder.recordThrowType(type);
+450: 
+451:                   // Find the throw's description (if applicable).
+452:                   ExtractionInfo descriptionInfo =
+453:                       extractMultilineTextualBlock(token);
+454: 
+455:                   String description = descriptionInfo.string;
+456: 
+457:                   if (description.length() > 0) {
+458:                     jsdocBuilder.recordThrowDescription(type, description);
+459:                   }
+460: 
+461:                   token = descriptionInfo.token;
+462:                   continue retry;
+463: 
+464:                 case PARAM:
+465:                   skipEOLs();
+466:                   token = next();
+467:                   lineno = stream.getLineno();
+468:                   charno = stream.getCharno();
+469:                   type = null;
+470: 
+471:                   if (token == JsDocToken.LC) {
+472:                     type = createJSTypeExpression(
+473:                         parseAndRecordParamTypeNode(token));
+474: 
+475:                     if (type == null) {
+476:                       // parsing error reported during recursive descent
+477:                       // recovering parsing
+478:                       token = eatTokensUntilEOL();
+479:                       continue retry;
+480:                     }
+481:                     skipEOLs();
+482:                     token = next();
+483:                     lineno = stream.getLineno();
+484:                     charno = stream.getCharno();
+485:                   }
+486: 
+487:                   String name = null;
+488:                   boolean isBracketedParam = JsDocToken.LB == token;
+489:                   if (isBracketedParam) {
+490:                     token = next();
+491:                   }
+492: 
+493:                   if (JsDocToken.STRING != token) {
+494:                     parser.addWarning("msg.missing.variable.name",
+495:                         lineno, charno);
+496:                   } else {
+497:                     name = stream.getString();
+498: 
+499:                     if (isBracketedParam) {
+500:                       token = next();
+501: 
+502:                       // Throw out JsDocToolkit's "default" parameter annotation.
+503:                       // It makes no sense under our type system.
+504:                       if (JsDocToken.EQUALS == token) {
+505:                         token = next();
+506:                         if (JsDocToken.STRING == token) {
+507:                           token = next();
+508:                         }
+509:                       }
+510: 
+511:                       if (JsDocToken.RB != token) {
+512:                         reportTypeSyntaxWarning("msg.jsdoc.missing.rb");
+513:                       } else if (type != null) {
+514:                         // Make the type expression optional, if it isn't
+515:                         // already.
+516:                         type = JSTypeExpression.makeOptionalArg(type);
+517:                       }
+518:                     }
+519: 
+520:                     // If the param name has a DOT in it, just throw it out
+521:                     // quietly. We do not handle the JsDocToolkit method
+522:                     // for handling properties of params.
+523:                     if (name.indexOf('.') > -1) {
+524:                       name = null;
+525:                     } else if (!jsdocBuilder.recordParameter(name, type)) {
+526:                       if (jsdocBuilder.hasParameter(name)) {
+527:                         parser.addWarning("msg.dup.variable.name", name,
+528:                             lineno, charno);
+529:                       } else {
+530:                         parser.addWarning("msg.jsdoc.incompat.type", name,
+531:                             lineno, charno);
+532:                       }
+533:                     }
+534:                   }
+535: 
+536:                   if (name == null) {
+537:                     token = eatTokensUntilEOL(token);
+538:                     continue retry;
+539:                   }
+540: 
+541:                   jsdocBuilder.markName(name, lineno, charno);
+542: 
+543:                   // Find the parameter's description (if applicable).
+544:                   ExtractionInfo paramDescriptionInfo =
+545:                       extractMultilineTextualBlock(token);
+546: 
+547:                   String paramDescription = paramDescriptionInfo.string;
+548: 
+549:                   if (paramDescription.length() > 0) {
+550:                     jsdocBuilder.recordParameterDescription(name,
+551:                                                             paramDescription);
+552:                   }
+553: 
+554:                   token = paramDescriptionInfo.token;
+555:                   continue retry;
+556: 
+557:                 case PRESERVE_TRY:
+558:                   if (!jsdocBuilder.recordPreserveTry()) {
+559:                     parser.addWarning("msg.jsdoc.preservertry",
+560:                         stream.getLineno(), stream.getCharno());
+561:                   }
+562:                   token = eatTokensUntilEOL();
+563:                   continue retry;
+564: 
+565:                 case PRIVATE:
+566:                   if (!jsdocBuilder.recordVisibility(Visibility.PRIVATE)) {
+567:                     parser.addWarning("msg.jsdoc.visibility.private",
+568:                         stream.getLineno(), stream.getCharno());
+569:                   }
+570:                   token = eatTokensUntilEOL();
+571:                   continue retry;
+572: 
+573:                 case PROTECTED:
+574:                   if (!jsdocBuilder.recordVisibility(Visibility.PROTECTED)) {
+575:                     parser.addWarning("msg.jsdoc.visibility.protected",
+576:                         stream.getLineno(), stream.getCharno());
+577:                   }
+578:                   token = eatTokensUntilEOL();
+579:                   continue retry;
+580: 
+581:                 case PUBLIC:
+582:                   if (!jsdocBuilder.recordVisibility(Visibility.PUBLIC)) {
+583:                     parser.addWarning("msg.jsdoc.visibility.public",
+584:                         stream.getLineno(), stream.getCharno());
+585:                   }
+586:                   token = eatTokensUntilEOL();
+587:                   continue retry;
+588: 
+589:                 case NO_SHADOW:
+590:                   if (!jsdocBuilder.recordNoShadow()) {
+591:                     parser.addWarning("msg.jsdoc.noshadow",
+592:                         stream.getLineno(), stream.getCharno());
+593:                   }
+594:                   token = eatTokensUntilEOL();
+595:                   continue retry;
+596: 
+597:                 case NO_SIDE_EFFECTS:
+598:                   if (!jsdocBuilder.recordNoSideEffects()) {
+599:                     parser.addWarning("msg.jsdoc.nosideeffects",
+600:                         stream.getLineno(), stream.getCharno());
+601:                   }
+602:                   token = eatTokensUntilEOL();
+603:                   continue retry;
+604: 
+605:                 case IMPLICIT_CAST:
+606:                   if (!jsdocBuilder.recordImplicitCast()) {
+607:                     parser.addWarning("msg.jsdoc.implicitcast",
+608:                         stream.getLineno(), stream.getCharno());
+609:                   }
+610:                   token = eatTokensUntilEOL();
+611:                   continue retry;
+612: 
+613:                 case SEE:
+614:                   ExtractionInfo referenceInfo = extractSingleLineBlock();
+615:                   String reference = referenceInfo.string;
+616: 
+617:                   if (reference.length() == 0) {
+618:                     parser.addWarning("msg.jsdoc.seemissing",
+619:                           stream.getLineno(), stream.getCharno());
+620:                   } else {
+621:                     jsdocBuilder.addReference(reference);
+622:                   }
+623: 
+624:                   token = referenceInfo.token;
+625:                   continue retry;
+626: 
+627:                 case SUPPRESS:
+628:                   token = parseSuppressTag(next());
+629:                   continue retry;
+630: 
+631:                 case TEMPLATE:
+632:                   ExtractionInfo templateInfo = extractSingleLineBlock();
+633:                   String templateTypeName = templateInfo.string;
+634: 
+635:                   if (templateTypeName.length() == 0) {
+636:                     parser.addWarning("msg.jsdoc.templatemissing",
+637:                           stream.getLineno(), stream.getCharno());
+638:                   } else if (!jsdocBuilder.recordTemplateTypeName(
+639:                       templateTypeName)) {
+640:                     parser.addWarning("msg.jsdoc.template.at.most.once",
+641:                         stream.getLineno(), stream.getCharno());
+642:                   }
+643: 
+644:                   token = templateInfo.token;
+645:                   continue retry;
+646: 
+647:                 case VERSION:
+648:                   ExtractionInfo versionInfo = extractSingleLineBlock();
+649:                   String version = versionInfo.string;
+650: 
+651:                   if (version.length() == 0) {
+652:                     parser.addWarning("msg.jsdoc.versionmissing",
+653:                           stream.getLineno(), stream.getCharno());
+654:                   } else {
+655:                     if (!jsdocBuilder.recordVersion(version)) {
+656:                        parser.addWarning("msg.jsdoc.extraversion",
+657:                           stream.getLineno(), stream.getCharno());
+658:                     }
+659:                   }
+660: 
+661:                   token = versionInfo.token;
+662:                   continue retry;
+663: 
+664:                 case DEFINE:
+665:                 case RETURN:
+666:                 case THIS:
+667:                 case TYPE:
+668:                 case TYPEDEF:
+669:                   skipEOLs();
+670:                   lineno = stream.getLineno();
+671:                   charno = stream.getCharno();
+672: 
+673:                   token = next();
+674: 
+675:                   Node typeNode = parseAndRecordTypeNode(token, lineno, charno);
+676: 
+677:                   if (annotation == Annotation.THIS) {
+678:                     typeNode = wrapNode(Token.BANG, typeNode);
+679:                     if (typeNode != null && token != JsDocToken.LC) {
+680:                       typeNode.putBooleanProp(Node.BRACELESS_TYPE, true);
+681:                     }
+682:                   }
+683:                   type = createJSTypeExpression(typeNode);
+684: 
+685:                   if (type == null) {
+686:                     // error reported during recursive descent
+687:                     // recovering parsing
+688:                   } else {
+689:                     switch (annotation) {
+690:                       case DEFINE:
+691:                         if (!jsdocBuilder.recordDefineType(type)) {
+692:                           parser.addWarning("msg.jsdoc.define",
+693:                               lineno, charno);
+694:                         }
+695:                         break;
+696: 
+697:                       case RETURN:
+698:                         if (!jsdocBuilder.recordReturnType(type)) {
+699:                           parser.addWarning(
+700:                               "msg.jsdoc.incompat.type", lineno, charno);
+701:                           break;
+702:                         }
+703: 
+704:                         // *Update* the token to that after the type annotation.
+705:                         token = current();
+706: 
+707:                         // Find the return's description (if applicable).
+708:                         ExtractionInfo returnDescriptionInfo =
+709:                             extractMultilineTextualBlock(token);
+710: 
+711:                         String returnDescription = returnDescriptionInfo.string;
+712: 
+713:                         if (returnDescription.length() > 0) {
+714:                           jsdocBuilder.recordReturnDescription(
+715:                               returnDescription);
+716:                         }
+717: 
+718:                         token = returnDescriptionInfo.token;
+719:                         continue retry;
+720: 
+721:                       case THIS:
+722:                         if (!jsdocBuilder.recordThisType(type)) {
+723:                           parser.addWarning(
+724:                               "msg.jsdoc.incompat.type", lineno, charno);
+725:                         }
+726:                         break;
+727: 
+728:                       case TYPE:
+729:                         if (!jsdocBuilder.recordType(type)) {
+730:                           parser.addWarning(
+731:                               "msg.jsdoc.incompat.type", lineno, charno);
+732:                         }
+733:                         break;
+734: 
+735:                       case TYPEDEF:
+736:                         if (!jsdocBuilder.recordTypedef(type)) {
+737:                           parser.addWarning(
+738:                               "msg.jsdoc.incompat.type", lineno, charno);
+739:                         }
+740:                         break;
+741:                     }
+742: 
+743:                     token = eatTokensUntilEOL();
+744:                   }
+745:                   continue retry;
+746:               }
+747:             }
+748:           }
+749:           break;
+750: 
+751:         case EOC:
+752:           if (hasParsedFileOverviewDocInfo()) {
+753:             fileOverviewJSDocInfo = retrieveAndResetParsedJSDocInfo();
+754:           }
+755: 
+756:           return true;
+757: 
+758:         case EOF:
+759:           // discard any accumulated information
+760:           jsdocBuilder.build(null);
+761:           parser.addWarning("msg.unexpected.eof",
+762:               stream.getLineno(), stream.getCharno());
+763:           return false;
+764: 
+765:         case EOL:
+766:           if (state == State.SEARCHING_NEWLINE) {
+767:             state = State.SEARCHING_ANNOTATION;
+768:           }
+769:           token = next();
+770:           continue retry;
+771: 
+772:         default:
+773:           if (token == JsDocToken.STAR && state == State.SEARCHING_ANNOTATION) {
+774:             token = next();
+775:             continue retry;
+776:           } else {
+777:             state = State.SEARCHING_NEWLINE;
+778:             token = eatTokensUntilEOL();
+779:             continue retry;
+780:           }
+781:       }
+782: 
+783:       // next token
+784:       token = next();
+785:     }
+786:   }
+
+[45] com.google.javascript.rhino.Node#extractLineno  (lines 1129-1135)
+1129:   protected static int extractLineno(int lineCharNo) {
+1130:     if (lineCharNo == -1) {
+1131:       return -1;
+1132:     } else {
+1133:       return lineCharNo >>> COLUMN_BITS;
+1134:     }
+1135:   }
+
+[46] com.google.javascript.jscomp.CombinedCompilerPass#visitOrMaybeActivate  (lines 105-111)
+105:     void visitOrMaybeActivate(NodeTraversal t, Node n, Node parent) {
+106:       if (isActive()) {
+107:         callback.visit(t, n, parent);
+108:       } else if (waiting == n) {
+109:         waiting = null;
+110:       }
+111:     }
+
+[47] com.google.javascript.jscomp.parsing.IRFactory#transform  (lines 184-214)
+184:   private Node transform(AstNode node) {
+185:     String jsDoc = node.getJsDoc();
+186:     NodeWithJsDoc nodeWithJsDoc = null;
+187:     if (jsDoc != null) {
+188:       nodeWithJsDoc = new NodeWithJsDoc();
+189:       nodesWithJsDoc.put(jsDoc, nodeWithJsDoc);
+190:     }
+191: 
+192:     Node irNode = justTransform(node);
+193:     if (nodeWithJsDoc != null) {
+194:       nodeWithJsDoc.node = irNode;
+195:     }
+196: 
+197:     // If we have a named function, set the position to that of the name.
+198:     if (irNode.getType() == Token.FUNCTION &&
+199:         irNode.getFirstChild().getLineno() != -1) {
+200:       irNode.setLineno(irNode.getFirstChild().getLineno());
+201:       irNode.setCharno(irNode.getFirstChild().getCharno());
+202:     } else {
+203:       if (irNode.getLineno() == -1) {
+204:         // If we didn't already set the line, then set it now.  This avoids
+205:         // cases like ParenthesizedExpression where we just return a previous
+206:         // node, but don't want the new node to get its parent's line number.
+207:         int lineno = node.getLineno();
+208:         irNode.setLineno(lineno);
+209:         int charno = position2charno(node.getAbsolutePosition());
+210:         irNode.setCharno(charno);
+211:       }
+212:     }
+213:     return irNode;
+214:   }
+
+[48] com.google.javascript.jscomp.CheckGlobalThis#getFunctionJsDocInfo  (lines 167-183)
+167:   private JSDocInfo getFunctionJsDocInfo(Node n) {
+168:     JSDocInfo jsDoc = n.getJSDocInfo();
+169:     Node parent = n.getParent();
+170:     if (jsDoc == null) {
+171:       int parentType = parent.getType();
+172:       if (parentType == Token.NAME || parentType == Token.ASSIGN) {
+173:         jsDoc = parent.getJSDocInfo();
+174:         if (jsDoc == null && parentType == Token.NAME) {
+175:           Node gramps = parent.getParent();
+176:           if (gramps.getType() == Token.VAR) {
+177:             jsDoc = gramps.getJSDocInfo();
+178:           }
+179:         }
+180:       }
+181:     }
+182:     return jsDoc;
+183:   }
+
+[49] com.google.javascript.rhino.Node#getLineno  (lines 827-829)
+827:   public int getLineno() {
+828:     return extractLineno(sourcePosition);
+829:   }
+
+[50] com.google.javascript.jscomp.NodeTraversal#NodeTraversal  (lines 207-216)
+207:   public NodeTraversal(AbstractCompiler compiler, Callback cb,
+208:       ScopeCreator scopeCreator) {
+209:     this.callback = cb;
+210:     if (cb instanceof ScopedCallback) {
+211:       this.scopeCallback = (ScopedCallback) cb;
+212:     }
+213:     this.compiler = compiler;
+214:     this.sourceName = "";
+215:     this.scopeCreator = scopeCreator;
+216:   }

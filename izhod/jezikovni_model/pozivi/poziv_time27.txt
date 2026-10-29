@@ -1,0 +1,985 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.joda.time.format.TestPeriodFormatterBuilder::testBug2495455
+java.lang.IllegalArgumentException: Invalid format: "PT1003199059S" is malformed at "1003199059S"
+	at org.joda.time.format.PeriodFormatter.parseMutablePeriod(PeriodFormatter.java:326)
+	at org.joda.time.format.PeriodFormatter.parsePeriod(PeriodFormatter.java:304)
+	at org.joda.time.format.TestPeriodFormatterBuilder.testBug2495455(TestPeriodFormatterBuilder.java:869)
+
+=== CANDIDATE METHODS ===
+
+[1] org.joda.time.base.BasePeriod#setFieldInto  (lines 476-486)
+476:     protected void setFieldInto(int[] values, DurationFieldType field, int value) {
+477:         int index = indexOf(field);
+478:         if (index == -1) {
+479:             if (value != 0 || field == null) {
+480:                 throw new IllegalArgumentException(
+481:                     "Period does not support field '" + field + "'");
+482:             }
+483:         } else {
+484:             values[index] = value;
+485:         }
+486:     }
+
+[2] org.joda.time.base.BasePeriod#BasePeriod  (lines 241-254)
+241:     protected BasePeriod(Object period, PeriodType type, Chronology chrono) {
+242:         super();
+243:         PeriodConverter converter = ConverterManager.getInstance().getPeriodConverter(period);
+244:         type = (type == null ? converter.getPeriodType(period) : type);
+245:         type = checkPeriodType(type);
+246:         iType = type;
+247:         if (this instanceof ReadWritablePeriod) {
+248:             iValues = new int[size()];
+249:             chrono = DateTimeUtils.getChronology(chrono);
+250:             converter.setInto((ReadWritablePeriod) this, period, chrono);
+251:         } else {
+252:             iValues = new MutablePeriod(period, type, chrono).getValues();
+253:         }
+254:     }
+
+[3] org.joda.time.format.PeriodFormatterBuilder#scan  (lines 882-902)
+882:         public int scan(String periodStr, final int position) {
+883:             String text = iText;
+884:             int textLength = text.length();
+885:             int sourceLength = periodStr.length();
+886:             search:
+887:             for (int pos = position; pos < sourceLength; pos++) {
+888:                 if (periodStr.regionMatches(true, pos, text, 0, textLength)) {
+889:                     return pos;
+890:                 }
+891:                 // Only allow number characters to be skipped in search of suffix.
+892:                 switch (periodStr.charAt(pos)) {
+893:                 case '0': case '1': case '2': case '3': case '4':
+894:                 case '5': case '6': case '7': case '8': case '9':
+895:                 case '.': case ',': case '+': case '-':
+896:                     break;
+897:                 default:
+898:                     break search;
+899:                 }
+900:             }
+901:             return ~position;
+902:         }
+
+[4] org.joda.time.format.PeriodFormatterBuilder#finish  (lines 1747-1751)
+1747:         Separator finish(PeriodPrinter afterPrinter, PeriodParser afterParser) {
+1748:             iAfterPrinter = afterPrinter;
+1749:             iAfterParser = afterParser;
+1750:             return this;
+1751:         }
+
+[5] org.joda.time.format.PeriodFormatterBuilder#appendLiteral  (lines 227-235)
+227:     public PeriodFormatterBuilder appendLiteral(String text) {
+228:         if (text == null) {
+229:             throw new IllegalArgumentException("Literal must not be null");
+230:         }
+231:         clearPrefix();
+232:         Literal literal = new Literal(text);
+233:         append0(literal, literal);
+234:         return this;
+235:     }
+
+[6] org.joda.time.format.PeriodFormatter#getParser  (lines 145-147)
+145:     public PeriodParser getParser() {
+146:         return iParser;
+147:     }
+
+[7] org.joda.time.format.PeriodFormatterBuilder#append0  (lines 785-791)
+785:     private PeriodFormatterBuilder append0(PeriodPrinter printer, PeriodParser parser) {
+786:         iElementPairs.add(printer);
+787:         iElementPairs.add(parser);
+788:         iNotPrinter |= (printer == null);
+789:         iNotParser |= (parser == null);
+790:         return this;
+791:     }
+
+[8] org.joda.time.convert.ConverterSet#selectSlow  (lines 242-316)
+242:     private static Converter selectSlow(ConverterSet set, Class<?> type) {
+243:         Converter[] converters = set.iConverters;
+244:         int length = converters.length;
+245:         Converter converter;
+246: 
+247:         for (int i=length; --i>=0; ) {
+248:             converter = converters[i];
+249:             Class<?> supportedType = converter.getSupportedType();
+250: 
+251:             if (supportedType == type) {
+252:                 // Exact match.
+253:                 return converter;
+254:             }
+255: 
+256:             if (supportedType == null || (type != null && !supportedType.isAssignableFrom(type))) {
+257:                 // Eliminate the impossible.
+258:                 set = set.remove(i, null);
+259:                 converters = set.iConverters;
+260:                 length = converters.length;
+261:             }
+262:         }
+263: 
+264:         // Haven't found exact match, so check what remains in the set.
+265: 
+266:         if (type == null || length == 0) {
+267:             return null;
+268:         }
+269:         if (length == 1) {
+270:             // Found the one best match.
+271:             return converters[0];
+272:         }
+273: 
+274:         // At this point, there exist multiple potential converters.
+275: 
+276:         // Eliminate supertypes.
+277:         for (int i=length; --i>=0; ) {
+278:             converter = converters[i];
+279:             Class<?> supportedType = converter.getSupportedType();
+280:             for (int j=length; --j>=0; ) {
+281:                 if (j != i && converters[j].getSupportedType().isAssignableFrom(supportedType)) {
+282:                     // Eliminate supertype.
+283:                     set = set.remove(j, null);
+284:                     converters = set.iConverters;
+285:                     length = converters.length;
+286:                     i = length - 1;
+287:                 }
+288:             }
+289:         }        
+290:         
+291:         // Check what remains in the set.
+292: 
+293:         if (length == 1) {
+294:             // Found the one best match.
+295:             return converters[0];
+296:         }
+297: 
+298:         // Class c implements a, b {}
+299:         // Converters exist only for a and b. Which is better? Neither.
+300: 
+301:         StringBuffer msg = new StringBuffer();
+302:         msg.append("Unable to find best converter for type \"");
+303:         msg.append(type.getName());
+304:         msg.append("\" from remaining set: ");
+305:         for (int i=0; i<length; i++) {
+306:             converter = converters[i];
+307:             Class<?> supportedType = converter.getSupportedType();
+308: 
+309:             msg.append(converter.getClass().getName());
+310:             msg.append('[');
+311:             msg.append(supportedType == null ? null : supportedType.getName());
+312:             msg.append("], ");
+313:         }
+314: 
+315:         throw new IllegalStateException(msg.toString());
+316:     }
+
+[9] org.joda.time.format.PeriodFormatterBuilder#appendHours  (lines 449-452)
+449:     public PeriodFormatterBuilder appendHours() {
+450:         appendField(HOURS);
+451:         return this;
+452:     }
+
+[10] org.joda.time.convert.ReadablePeriodConverter#getPeriodType  (lines 69-72)
+69:     public PeriodType getPeriodType(Object object) {
+70:         ReadablePeriod period = (ReadablePeriod) object;
+71:         return period.getPeriodType();
+72:     }
+
+[11] org.joda.time.format.PeriodFormatterBuilder#append  (lines 191-198)
+191:     public PeriodFormatterBuilder append(PeriodFormatter formatter) {
+192:         if (formatter == null) {
+193:             throw new IllegalArgumentException("No formatter supplied");
+194:         }
+195:         clearPrefix();
+196:         append0(formatter.getPrinter(), formatter.getParser());
+197:         return this;
+198:     }
+
+[12] org.joda.time.format.PeriodFormatter#parsePeriod  (lines 301-305)
+301:     public Period parsePeriod(String text) {
+302:         checkParser();
+303:         
+304:         return parseMutablePeriod(text).toPeriod();
+305:     }
+
+[13] org.joda.time.format.ISOPeriodFormat#standard  (lines 64-86)
+64:     public static PeriodFormatter standard() {
+65:         if (cStandard == null) {
+66:             cStandard = new PeriodFormatterBuilder()
+67:                 .appendLiteral("P")
+68:                 .appendYears()
+69:                 .appendSuffix("Y")
+70:                 .appendMonths()
+71:                 .appendSuffix("M")
+72:                 .appendWeeks()
+73:                 .appendSuffix("W")
+74:                 .appendDays()
+75:                 .appendSuffix("D")
+76:                 .appendSeparatorIfFieldsAfter("T")
+77:                 .appendHours()
+78:                 .appendSuffix("H")
+79:                 .appendMinutes()
+80:                 .appendSuffix("M")
+81:                 .appendSecondsWithOptionalMillis()
+82:                 .appendSuffix("S")
+83:                 .toFormatter();
+84:         }
+85:         return cStandard;
+86:     }
+
+[14] org.joda.time.base.BasePeriod#setPeriodInternal  (lines 411-419)
+411:     private void setPeriodInternal(ReadablePeriod period) {
+412:         int[] newValues = new int[size()];
+413:         for (int i = 0, isize = period.size(); i < isize; i++) {
+414:             DurationFieldType type = period.getFieldType(i);
+415:             int value = period.getValue(i);
+416:             checkAndUpdate(type, newValues, value);
+417:         }
+418:         iValues = newValues;
+419:     }
+
+[15] org.joda.time.format.PeriodFormatterBuilder#appendWeeks  (lines 423-426)
+423:     public PeriodFormatterBuilder appendWeeks() {
+424:         appendField(WEEKS);
+425:         return this;
+426:     }
+
+[16] org.joda.time.format.PeriodFormatterBuilder#parseInto  (lines 1180-1340)
+1180:         public int parseInto(
+1181:                 ReadWritablePeriod period, String text, 
+1182:                 int position, Locale locale) {
+1183: 
+1184:             boolean mustParse = (iPrintZeroSetting == PRINT_ZERO_ALWAYS);
+1185: 
+1186:             // Shortcut test.
+1187:             if (position >= text.length()) {
+1188:                 return mustParse ? ~position : position;
+1189:             }
+1190: 
+1191:             if (iPrefix != null) {
+1192:                 position = iPrefix.parse(text, position);
+1193:                 if (position >= 0) {
+1194:                     // If prefix is found, then the parse must finish.
+1195:                     mustParse = true;
+1196:                 } else {
+1197:                     // Prefix not found, so bail.
+1198:                     if (!mustParse) {
+1199:                         // It's okay because parsing of this field is not
+1200:                         // required. Don't return an error. Fields down the
+1201:                         // chain can continue on, trying to parse.
+1202:                         return ~position;
+1203:                     }
+1204:                     return position;
+1205:                 }
+1206:             }
+1207: 
+1208:             int suffixPos = -1;
+1209:             if (iSuffix != null && !mustParse) {
+1210:                 // Pre-scan the suffix, to help determine if this field must be
+1211:                 // parsed.
+1212:                 suffixPos = iSuffix.scan(text, position);
+1213:                 if (suffixPos >= 0) {
+1214:                     // If suffix is found, then parse must finish.
+1215:                     mustParse = true;
+1216:                 } else {
+1217:                     // Suffix not found, so bail.
+1218:                     if (!mustParse) {
+1219:                         // It's okay because parsing of this field is not
+1220:                         // required. Don't return an error. Fields down the
+1221:                         // chain can continue on, trying to parse.
+1222:                         return ~suffixPos;
+1223:                     }
+1224:                     return suffixPos;
+1225:                 }
+1226:             }
+1227: 
+1228:             if (!mustParse && !isSupported(period.getPeriodType(), iFieldType)) {
+1229:                 // If parsing is not required and the field is not supported,
+1230:                 // exit gracefully so that another parser can continue on.
+1231:                 return position;
+1232:             }
+1233: 
+1234:             int limit;
+1235:             if (suffixPos > 0) {
+1236:                 limit = Math.min(iMaxParsedDigits, suffixPos - position);
+1237:             } else {
+1238:                 limit = Math.min(iMaxParsedDigits, text.length() - position);
+1239:             }
+1240: 
+1241:             // validate input number
+1242:             int length = 0;
+1243:             int fractPos = -1;
+1244:             boolean hasDigits = false;
+1245:             while (length < limit) {
+1246:                 char c = text.charAt(position + length);
+1247:                 // leading sign
+1248:                 if (length == 0 && (c == '-' || c == '+') && !iRejectSignedValues) {
+1249:                     boolean negative = c == '-';
+1250: 
+1251:                     // Next character must be a digit.
+1252:                     if (length + 1 >= limit || 
+1253:                         (c = text.charAt(position + length + 1)) < '0' || c > '9')
+1254:                     {
+1255:                         break;
+1256:                     }
+1257: 
+1258:                     if (negative) {
+1259:                         length++;
+1260:                     } else {
+1261:                         // Skip the '+' for parseInt to succeed.
+1262:                         position++;
+1263:                     }
+1264:                     // Expand the limit to disregard the sign character.
+1265:                     limit = Math.min(limit + 1, text.length() - position);
+1266:                     continue;
+1267:                 }
+1268:                 // main number
+1269:                 if (c >= '0' && c <= '9') {
+1270:                     hasDigits = true;
+1271:                 } else {
+1272:                     if ((c == '.' || c == ',')
+1273:                          && (iFieldType == SECONDS_MILLIS || iFieldType == SECONDS_OPTIONAL_MILLIS)) {
+1274:                         if (fractPos >= 0) {
+1275:                             // can't have two decimals
+1276:                             break;
+1277:                         }
+1278:                         fractPos = position + length + 1;
+1279:                         // Expand the limit to disregard the decimal point.
+1280:                         limit = Math.min(limit + 1, text.length() - position);
+1281:                     } else {
+1282:                         break;
+1283:                     }
+1284:                 }
+1285:                 length++;
+1286:             }
+1287: 
+1288:             if (!hasDigits) {
+1289:                 return ~position;
+1290:             }
+1291: 
+1292:             if (suffixPos >= 0 && position + length != suffixPos) {
+1293:                 // If there are additional non-digit characters before the
+1294:                 // suffix is reached, then assume that the suffix found belongs
+1295:                 // to a field not yet reached. Return original position so that
+1296:                 // another parser can continue on.
+1297:                 return position;
+1298:             }
+1299: 
+1300:             if (iFieldType != SECONDS_MILLIS && iFieldType != SECONDS_OPTIONAL_MILLIS) {
+1301:                 // Handle common case.
+1302:                 setFieldValue(period, iFieldType, parseInt(text, position, length));
+1303:             } else if (fractPos < 0) {
+1304:                 setFieldValue(period, SECONDS, parseInt(text, position, length));
+1305:                 setFieldValue(period, MILLIS, 0);
+1306:             } else {
+1307:                 int wholeValue = parseInt(text, position, fractPos - position - 1);
+1308:                 setFieldValue(period, SECONDS, wholeValue);
+1309: 
+1310:                 int fractLen = position + length - fractPos;
+1311:                 int fractValue;
+1312:                 if (fractLen <= 0) {
+1313:                     fractValue = 0;
+1314:                 } else {
+1315:                     if (fractLen >= 3) {
+1316:                         fractValue = parseInt(text, fractPos, 3);
+1317:                     } else {
+1318:                         fractValue = parseInt(text, fractPos, fractLen);
+1319:                         if (fractLen == 1) {
+1320:                             fractValue *= 100;
+1321:                         } else {
+1322:                             fractValue *= 10;
+1323:                         }
+1324:                     }
+1325:                     if (wholeValue < 0) {
+1326:                         fractValue = -fractValue;
+1327:                     }
+1328:                 }
+1329: 
+1330:                 setFieldValue(period, MILLIS, fractValue);
+1331:             }
+1332:                 
+1333:             position += length;
+1334: 
+1335:             if (position >= 0 && iSuffix != null) {
+1336:                 position = iSuffix.parse(text, position);
+1337:             }
+1338:                 
+1339:             return position;
+1340:         }
+
+[17] org.joda.time.convert.ConverterSet#Entry  (lines 322-325)
+322:         Entry(Class<?> type, Converter converter) {
+323:             iType = type;
+324:             iConverter = converter;
+325:         }
+
+[18] org.joda.time.format.PeriodFormatterBuilder#appendSeparator  (lines 727-775)
+727:     private PeriodFormatterBuilder appendSeparator(String text, String finalText,
+728:                                                    String[] variants,
+729:                                                    boolean useBefore, boolean useAfter) {
+730:         if (text == null || finalText == null) {
+731:             throw new IllegalArgumentException();
+732:         }
+733: 
+734:         clearPrefix();
+735:         
+736:         // optimise zero formatter case
+737:         List<Object> pairs = iElementPairs;
+738:         if (pairs.size() == 0) {
+739:             if (useAfter && useBefore == false) {
+740:                 Separator separator = new Separator(
+741:                         text, finalText, variants,
+742:                         Literal.EMPTY, Literal.EMPTY, useBefore, useAfter);
+743:                 append0(separator, separator);
+744:             }
+745:             return this;
+746:         }
+747:         
+748:         // find the last separator added
+749:         int i;
+750:         Separator lastSeparator = null;
+751:         for (i=pairs.size(); --i>=0; ) {
+752:             if (pairs.get(i) instanceof Separator) {
+753:                 lastSeparator = (Separator) pairs.get(i);
+754:                 pairs = pairs.subList(i + 1, pairs.size());
+755:                 break;
+756:             }
+757:             i--;  // element pairs
+758:         }
+759:         
+760:         // merge formatters
+761:         if (lastSeparator != null && pairs.size() == 0) {
+762:             throw new IllegalStateException("Cannot have two adjacent separators");
+763:         } else {
+764:             Object[] comp = createComposite(pairs);
+765:             pairs.clear();
+766:             Separator separator = new Separator(
+767:                     text, finalText, variants,
+768:                     (PeriodPrinter) comp[0], (PeriodParser) comp[1],
+769:                     useBefore, useAfter);
+770:             pairs.add(separator);
+771:             pairs.add(separator);
+772:         }
+773:         
+774:         return this;
+775:     }
+
+[19] org.joda.time.format.PeriodFormatterBuilder#parseInto  (lines 1699-1745)
+1699:         public int parseInto(
+1700:                 ReadWritablePeriod period, String periodStr,
+1701:                 int position, Locale locale) {
+1702:             int oldPos = position;
+1703:             position = iBeforeParser.parseInto(period, periodStr, position, locale);
+1704: 
+1705:             if (position < 0) {
+1706:                 return position;
+1707:             }
+1708: 
+1709:             boolean found = false;
+1710:             if (position > oldPos) {
+1711:                 // Consume this separator.
+1712:                 String[] parsedForms = iParsedForms;
+1713:                 int length = parsedForms.length;
+1714:                 for (int i=0; i < length; i++) {
+1715:                     String parsedForm = parsedForms[i];
+1716:                     if ((parsedForm == null || parsedForm.length() == 0) ||
+1717:                         periodStr.regionMatches
+1718:                         (true, position, parsedForm, 0, parsedForm.length())) {
+1719:                         
+1720:                         position += parsedForm.length();
+1721:                         found = true;
+1722:                         break;
+1723:                     }
+1724:                 }
+1725:             }
+1726: 
+1727:             oldPos = position;
+1728:             position = iAfterParser.parseInto(period, periodStr, position, locale);
+1729: 
+1730:             if (position < 0) {
+1731:                 return position;
+1732:             }
+1733: 
+1734:             if (found && position == oldPos) {
+1735:                 // Separator should not have been supplied.
+1736:                 return ~oldPos;
+1737:             }
+1738: 
+1739:             if (position > oldPos && !found && !iUseBefore) {
+1740:                 // Separator was required.
+1741:                 return ~oldPos;
+1742:             }
+1743: 
+1744:             return position;
+1745:         }
+
+[20] org.joda.time.format.PeriodFormatterBuilder#appendMonths  (lines 410-413)
+410:     public PeriodFormatterBuilder appendMonths() {
+411:         appendField(MONTHS);
+412:         return this;
+413:     }
+
+[21] org.joda.time.format.PeriodFormatterBuilder#parseInto  (lines 1819-1832)
+1819:         public int parseInto(
+1820:                 ReadWritablePeriod period, String periodStr,
+1821:                 int position, Locale locale) {
+1822:             PeriodParser[] parsers = iParsers;
+1823:             if (parsers == null) {
+1824:                 throw new UnsupportedOperationException();
+1825:             }
+1826: 
+1827:             int len = parsers.length;
+1828:             for (int i=0; i<len && position >= 0; i++) {
+1829:                 position = parsers[i].parseInto(period, periodStr, position, locale);
+1830:             }
+1831:             return position;
+1832:         }
+
+[22] org.joda.time.convert.ConverterManager#ConverterManager  (lines 104-147)
+104:     protected ConverterManager() {
+105:         super();
+106: 
+107:         iInstantConverters = new ConverterSet(new Converter[] {
+108:             ReadableInstantConverter.INSTANCE,
+109:             StringConverter.INSTANCE,
+110:             CalendarConverter.INSTANCE,
+111:             DateConverter.INSTANCE,
+112:             LongConverter.INSTANCE,
+113:             NullConverter.INSTANCE,
+114:         });
+115: 
+116:         iPartialConverters = new ConverterSet(new Converter[] {
+117:             ReadablePartialConverter.INSTANCE,
+118:             ReadableInstantConverter.INSTANCE,
+119:             StringConverter.INSTANCE,
+120:             CalendarConverter.INSTANCE,
+121:             DateConverter.INSTANCE,
+122:             LongConverter.INSTANCE,
+123:             NullConverter.INSTANCE,
+124:         });
+125: 
+126:         iDurationConverters = new ConverterSet(new Converter[] {
+127:             ReadableDurationConverter.INSTANCE,
+128:             ReadableIntervalConverter.INSTANCE,
+129:             StringConverter.INSTANCE,
+130:             LongConverter.INSTANCE,
+131:             NullConverter.INSTANCE,
+132:         });
+133: 
+134:         iPeriodConverters = new ConverterSet(new Converter[] {
+135:             ReadableDurationConverter.INSTANCE,
+136:             ReadablePeriodConverter.INSTANCE,
+137:             ReadableIntervalConverter.INSTANCE,
+138:             StringConverter.INSTANCE,
+139:             NullConverter.INSTANCE,
+140:         });
+141: 
+142:         iIntervalConverters = new ConverterSet(new Converter[] {
+143:             ReadableIntervalConverter.INSTANCE,
+144:             StringConverter.INSTANCE,
+145:             NullConverter.INSTANCE,
+146:         });
+147:     }
+
+[23] org.joda.time.format.PeriodFormatterBuilder#PeriodFormatterBuilder  (lines 101-103)
+101:     public PeriodFormatterBuilder() {
+102:         clear();
+103:     }
+
+[24] org.joda.time.format.PeriodFormatterBuilder#parseInto  (lines 1562-1569)
+1562:         public int parseInto(
+1563:                 ReadWritablePeriod period, String periodStr,
+1564:                 int position, Locale locale) {
+1565:             if (periodStr.regionMatches(true, position, iText, 0, iText.length())) {
+1566:                 return position + iText.length();
+1567:             }
+1568:             return ~position;
+1569:         }
+
+[25] org.joda.time.format.PeriodFormatterBuilder#appendSeparatorIfFieldsAfter  (lines 651-653)
+651:     public PeriodFormatterBuilder appendSeparatorIfFieldsAfter(String text) {
+652:         return appendSeparator(text, text, null, false, true);
+653:     }
+
+[26] org.joda.time.format.PeriodFormatterBuilder#appendSuffix  (lines 551-556)
+551:     public PeriodFormatterBuilder appendSuffix(String text) {
+552:         if (text == null) {
+553:             throw new IllegalArgumentException();
+554:         }
+555:         return appendSuffix(new SimpleAffix(text));
+556:     }
+
+[27] org.joda.time.format.PeriodFormatterBuilder#parseInt  (lines 1348-1373)
+1348:         private int parseInt(String text, int position, int length) {
+1349:             if (length >= 10) {
+1350:                 // Since value may exceed max, use stock parser which checks for this.
+1351:                 return Integer.parseInt(text.substring(position, position + length));
+1352:             }
+1353:             if (length <= 0) {
+1354:                 return 0;
+1355:             }
+1356:             int value = text.charAt(position++);
+1357:             length--;
+1358:             boolean negative;
+1359:             if (value == '-') {
+1360:                 if (--length < 0) {
+1361:                     return 0;
+1362:                 }
+1363:                 negative = true;
+1364:                 value = text.charAt(position++);
+1365:             } else {
+1366:                 negative = false;
+1367:             }
+1368:             value -= '0';
+1369:             while (length-- > 0) {
+1370:                 value = ((value << 3) + (value << 1)) + text.charAt(position++) - '0';
+1371:             }
+1372:             return negative ? -value : value;
+1373:         }
+
+[28] org.joda.time.format.PeriodFormatterBuilder#appendDays  (lines 436-439)
+436:     public PeriodFormatterBuilder appendDays() {
+437:         appendField(DAYS);
+438:         return this;
+439:     }
+
+[29] org.joda.time.format.PeriodFormatterBuilder#setFieldValue  (lines 1497-1526)
+1497:         void setFieldValue(ReadWritablePeriod period, int field, int value) {
+1498:             switch (field) {
+1499:             default:
+1500:                 break;
+1501:             case YEARS:
+1502:                 period.setYears(value);
+1503:                 break;
+1504:             case MONTHS:
+1505:                 period.setMonths(value);
+1506:                 break;
+1507:             case WEEKS:
+1508:                 period.setWeeks(value);
+1509:                 break;
+1510:             case DAYS:
+1511:                 period.setDays(value);
+1512:                 break;
+1513:             case HOURS:
+1514:                 period.setHours(value);
+1515:                 break;
+1516:             case MINUTES:
+1517:                 period.setMinutes(value);
+1518:                 break;
+1519:             case SECONDS:
+1520:                 period.setSeconds(value);
+1521:                 break;
+1522:             case MILLIS:
+1523:                 period.setMillis(value);
+1524:                 break;
+1525:             }
+1526:         }
+
+[30] org.joda.time.format.PeriodFormatterBuilder#createComposite  (lines 815-825)
+815:     private static Object[] createComposite(List<Object> elementPairs) {
+816:         switch (elementPairs.size()) {
+817:             case 0:
+818:                 return new Object[] {Literal.EMPTY, Literal.EMPTY};
+819:             case 1:
+820:                 return new Object[] {elementPairs.get(0), elementPairs.get(1)};
+821:             default:
+822:                 Composite comp = new Composite(elementPairs);
+823:                 return new Object[] {comp, comp};
+824:         }
+825:     }
+
+[31] org.joda.time.format.PeriodFormatterBuilder#toFormatter  (lines 122-126)
+122:     public PeriodFormatter toFormatter() {
+123:         PeriodFormatter formatter = toFormatter(iElementPairs, iNotPrinter, iNotParser);
+124:         iFieldFormatters = (FieldFormatter[]) iFieldFormatters.clone();
+125:         return formatter;
+126:     }
+
+[32] org.joda.time.convert.ConverterSet#remove  (lines 215-236)
+215:     ConverterSet remove(final int index, Converter[] removed) {
+216:         Converter[] converters = iConverters;
+217:         int length = converters.length;
+218:         if (index >= length) {
+219:             throw new IndexOutOfBoundsException();
+220:         }
+221: 
+222:         if (removed != null) {
+223:             removed[0] = converters[index];
+224:         }
+225: 
+226:         Converter[] copy = new Converter[length - 1];
+227:                 
+228:         int j = 0;
+229:         for (int i=0; i<length; i++) {
+230:             if (i != index) {
+231:                 copy[j++] = converters[i];
+232:             }
+233:         }
+234:         
+235:         return new ConverterSet(copy);
+236:     }
+
+[33] org.joda.time.format.PeriodFormatterBuilder#Separator  (lines 1591-1620)
+1591:         Separator(String text, String finalText, String[] variants,
+1592:                 PeriodPrinter beforePrinter, PeriodParser beforeParser,
+1593:                 boolean useBefore, boolean useAfter) {
+1594:             iText = text;
+1595:             iFinalText = finalText;
+1596: 
+1597:             if ((finalText == null || text.equals(finalText)) &&
+1598:                 (variants == null || variants.length == 0)) {
+1599: 
+1600:                 iParsedForms = new String[] {text};
+1601:             } else {
+1602:                 // Filter and reverse sort the parsed forms.
+1603:                 TreeSet<String> parsedSet = new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);
+1604:                 parsedSet.add(text);
+1605:                 parsedSet.add(finalText);
+1606:                 if (variants != null) {
+1607:                     for (int i=variants.length; --i>=0; ) {
+1608:                         parsedSet.add(variants[i]);
+1609:                     }
+1610:                 }
+1611:                 ArrayList<String> parsedList = new ArrayList<String>(parsedSet);
+1612:                 Collections.reverse(parsedList);
+1613:                 iParsedForms = parsedList.toArray(new String[parsedList.size()]);
+1614:             }
+1615: 
+1616:             iBeforePrinter = beforePrinter;
+1617:             iBeforeParser = beforeParser;
+1618:             iUseBefore = useBefore;
+1619:             iUseAfter = useAfter;
+1620:         }
+
+[34] org.joda.time.MutablePeriod#setMillis  (lines 946-948)
+946:     public void setMillis(int millis) {
+947:         super.setField(DurationFieldType.millis(), millis);
+948:     }
+
+[35] org.joda.time.format.PeriodFormatter#parseMutablePeriod  (lines 314-327)
+314:     public MutablePeriod parseMutablePeriod(String text) {
+315:         checkParser();
+316:         
+317:         MutablePeriod period = new MutablePeriod(0, iParseType);
+318:         int newPos = getParser().parseInto(period, text, 0, iLocale);
+319:         if (newPos >= 0) {
+320:             if (newPos >= text.length()) {
+321:                 return period;
+322:             }
+323:         } else {
+324:             newPos = ~newPos;
+325:         }
+326:         throw new IllegalArgumentException(FormatUtils.createErrorMessage(text, newPos));
+327:     }
+
+[36] org.joda.time.format.PeriodFormatterBuilder#appendSuffix  (lines 588-612)
+588:     private PeriodFormatterBuilder appendSuffix(PeriodFieldAffix suffix) {
+589:         final Object originalPrinter;
+590:         final Object originalParser;
+591:         if (iElementPairs.size() > 0) {
+592:             originalPrinter = iElementPairs.get(iElementPairs.size() - 2);
+593:             originalParser = iElementPairs.get(iElementPairs.size() - 1);
+594:         } else {
+595:             originalPrinter = null;
+596:             originalParser = null;
+597:         }
+598: 
+599:         if (originalPrinter == null || originalParser == null ||
+600:                 originalPrinter != originalParser ||
+601:                 !(originalPrinter instanceof FieldFormatter)) {
+602:             throw new IllegalStateException("No field to apply suffix to");
+603:         }
+604: 
+605:         clearPrefix();
+606:         FieldFormatter newField = new FieldFormatter((FieldFormatter) originalPrinter, suffix);
+607:         iElementPairs.set(iElementPairs.size() - 2, newField);
+608:         iElementPairs.set(iElementPairs.size() - 1, newField);
+609:         iFieldFormatters[newField.getFieldType()] = newField;
+610:         
+611:         return this;
+612:     }
+
+[37] org.joda.time.format.PeriodFormatterBuilder#appendField  (lines 529-531)
+529:     private void appendField(int type) {
+530:         appendField(type, iMinPrintedDigits);
+531:     }
+
+[38] org.joda.time.format.PeriodFormatter#PeriodFormatter  (lines 85-92)
+85:     public PeriodFormatter(
+86:             PeriodPrinter printer, PeriodParser parser) {
+87:         super();
+88:         iPrinter = printer;
+89:         iParser = parser;
+90:         iLocale = null;
+91:         iParseType = null;
+92:     }
+
+[39] org.joda.time.format.PeriodFormatterBuilder#parse  (lines 873-880)
+873:         public int parse(String periodStr, int position) {
+874:             String text = iText;
+875:             int textLength = text.length();
+876:             if (periodStr.regionMatches(true, position, text, 0, textLength)) {
+877:                 return position + textLength;
+878:             }
+879:             return ~position;
+880:         }
+
+[40] org.joda.time.format.PeriodFormatterBuilder#appendYears  (lines 397-400)
+397:     public PeriodFormatterBuilder appendYears() {
+398:         appendField(YEARS);
+399:         return this;
+400:     }
+
+[41] org.joda.time.format.PeriodFormatterBuilder#toFormatter  (lines 794-813)
+794:     private static PeriodFormatter toFormatter(List<Object> elementPairs, boolean notPrinter, boolean notParser) {
+795:         if (notPrinter && notParser) {
+796:             throw new IllegalStateException("Builder has created neither a printer nor a parser");
+797:         }
+798:         int size = elementPairs.size();
+799:         if (size >= 2 && elementPairs.get(0) instanceof Separator) {
+800:             Separator sep = (Separator) elementPairs.get(0);
+801:                 PeriodFormatter f = toFormatter(elementPairs.subList(2, size), notPrinter, notParser);
+802:                 sep = sep.finish(f.getPrinter(), f.getParser());
+803:                 return new PeriodFormatter(sep, sep);
+804:         }
+805:         Object[] comp = createComposite(elementPairs);
+806:         if (notPrinter) {
+807:             return new PeriodFormatter(null, (PeriodParser) comp[1]);
+808:         } else if (notParser) {
+809:             return new PeriodFormatter((PeriodPrinter) comp[0], null);
+810:         } else {
+811:             return new PeriodFormatter((PeriodPrinter) comp[0], (PeriodParser) comp[1]);
+812:         }
+813:     }
+
+[42] org.joda.time.MutablePeriod#setSeconds  (lines 924-926)
+924:     public void setSeconds(int seconds) {
+925:         super.setField(DurationFieldType.seconds(), seconds);
+926:     }
+
+[43] org.joda.time.format.PeriodFormatterBuilder#appendSecondsWithOptionalMillis  (lines 499-502)
+499:     public PeriodFormatterBuilder appendSecondsWithOptionalMillis() {
+500:         appendField(SECONDS_OPTIONAL_MILLIS);
+501:         return this;
+502:     }
+
+[44] org.joda.time.format.PeriodFormatter#getPrinter  (lines 127-129)
+127:     public PeriodPrinter getPrinter() {
+128:         return iPrinter;
+129:     }
+
+[45] org.joda.time.convert.ConverterManager#getPeriodConverter  (lines 420-428)
+420:     public PeriodConverter getPeriodConverter(Object object) {
+421:         PeriodConverter converter =
+422:             (PeriodConverter)iPeriodConverters.select(object == null ? null : object.getClass());
+423:         if (converter != null) {
+424:             return converter;
+425:         }
+426:         throw new IllegalArgumentException("No period converter found for type: " +
+427:             (object == null ? "null" : object.getClass().getName()));
+428:     }
+
+[46] org.joda.time.format.PeriodFormatterBuilder#clear  (lines 170-184)
+170:     public void clear() {
+171:         iMinPrintedDigits = 1;
+172:         iPrintZeroSetting = PRINT_ZERO_RARELY_LAST;
+173:         iMaxParsedDigits = 10;
+174:         iRejectSignedValues = false;
+175:         iPrefix = null;
+176:         if (iElementPairs == null) {
+177:             iElementPairs = new ArrayList<Object>();
+178:         } else {
+179:             iElementPairs.clear();
+180:         }
+181:         iNotPrinter = false;
+182:         iNotParser = false;
+183:         iFieldFormatters = new FieldFormatter[10];
+184:     }
+
+[47] org.joda.time.convert.ReadablePeriodConverter#getSupportedType  (lines 80-82)
+80:     public Class<?> getSupportedType() {
+81:         return ReadablePeriod.class;
+82:     }
+
+[48] org.joda.time.format.PeriodFormatterBuilder#appendField  (lines 533-539)
+533:     private void appendField(int type, int minPrinted) {
+534:         FieldFormatter field = new FieldFormatter(minPrinted, iPrintZeroSetting,
+535:             iMaxParsedDigits, iRejectSignedValues, type, iFieldFormatters, iPrefix, null);
+536:         append0(field, field);
+537:         iFieldFormatters[type] = field;
+538:         iPrefix = null;
+539:     }
+
+[49] org.joda.time.format.PeriodFormatterBuilder#appendMinutes  (lines 462-465)
+462:     public PeriodFormatterBuilder appendMinutes() {
+463:         appendField(MINUTES);
+464:         return this;
+465:     }
+
+[50] org.joda.time.convert.ConverterSet#select  (lines 47-112)
+47:     Converter select(Class<?> type) throws IllegalStateException {
+48:         // Check the hashtable first.
+49:         Entry[] entries = iSelectEntries;
+50:         int length = entries.length;
+51:         int index = type == null ? 0 : type.hashCode() & (length - 1);
+52: 
+53:         Entry e;
+54:         // This loop depends on there being at least one null slot.
+55:         while ((e = entries[index]) != null) {
+56:             if (e.iType == type) {
+57:                 return e.iConverter;
+58:             }
+59:             if (++index >= length) {
+60:                 index = 0;
+61:             }
+62:         }
+63: 
+64:         // Not found in the hashtable, so do actual work.
+65: 
+66:         Converter converter = selectSlow(this, type);
+67:         e = new Entry(type, converter);
+68: 
+69:         // Save the entry for future selects. This class must be threadsafe,
+70:         // but there is no synchronization. Since the hashtable is being used
+71:         // as a cache, it is okay to destroy existing entries. This isn't
+72:         // likely to occur unless there is a high amount of concurrency. As
+73:         // time goes on, cache updates will occur less often, and the cache
+74:         // will fill with all the necessary entries.
+75: 
+76:         // Do all updates on a copy: slots in iSelectEntries must not be
+77:         // updated by multiple threads as this can allow all null slots to be
+78:         // consumed.
+79:         entries = (Entry[])entries.clone();
+80: 
+81:         // Add new entry.
+82:         entries[index] = e;
+83: 
+84:         // Verify that at least one null slot exists!
+85:         for (int i=0; i<length; i++) {
+86:             if (entries[i] == null) {
+87:                 // Found a null slot, swap in new hashtable.
+88:                 iSelectEntries = entries;
+89:                 return converter;
+90:             }
+91:         }
+92: 
+93:         // Double capacity and re-hash.
+94: 
+95:         int newLength = length << 1;
+96:         Entry[] newEntries = new Entry[newLength];
+97:         for (int i=0; i<length; i++) {
+98:             e = entries[i];
+99:             type = e.iType;
+100:             index = type == null ? 0 : type.hashCode() & (newLength - 1);
+101:             while (newEntries[index] != null) {
+102:                 if (++index >= newLength) {
+103:                     index = 0;
+104:                 }
+105:             }
+106:             newEntries[index] = e;
+107:         }
+108: 
+109:         // Swap in new hashtable.
+110:         iSelectEntries = newEntries;
+111:         return converter;
+112:     }

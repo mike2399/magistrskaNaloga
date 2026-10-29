@@ -1,0 +1,217 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math.complex.ComplexFormatTest::testForgottenImaginaryCharacter
+java.lang.StringIndexOutOfBoundsException: String index out of range: 6
+	at java.lang.String.substring(String.java:1963)
+	at org.apache.commons.math.complex.ComplexFormat.parse(ComplexFormat.java:377)
+	at org.apache.commons.math.complex.ComplexFormatAbstractTest.testForgottenImaginaryCharacter(ComplexFormatAbstractTest.java:355)
+--- org.apache.commons.math.complex.FrenchComplexFormatTest::testForgottenImaginaryCharacter
+java.lang.StringIndexOutOfBoundsException: String index out of range: 6
+	at java.lang.String.substring(String.java:1963)
+	at org.apache.commons.math.complex.ComplexFormat.parse(ComplexFormat.java:377)
+	at org.apache.commons.math.complex.ComplexFormatAbstractTest.testForgottenImaginaryCharacter(ComplexFormatAbstractTest.java:355)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math.complex.ComplexFormat#ComplexFormat  (lines 108-114)
+108:     public ComplexFormat(String imaginaryCharacter, NumberFormat realFormat,
+109:             NumberFormat imaginaryFormat) {
+110:         super();
+111:         setImaginaryCharacter(imaginaryCharacter);
+112:         setImaginaryFormat(imaginaryFormat);
+113:         setRealFormat(realFormat);
+114:     }
+
+[2] org.apache.commons.math.complex.ComplexFormat#ComplexFormat  (lines 66-68)
+66:     public ComplexFormat(NumberFormat format) {
+67:         this(DEFAULT_IMAGINARY_CHARACTER, format);
+68:     }
+
+[3] org.apache.commons.math.complex.ComplexFormat#parseNextCharacter  (lines 410-428)
+410:     private char parseNextCharacter(String source, ParsePosition pos) {
+411:          int index = pos.getIndex();
+412:          int n = source.length();
+413:          char ret = 0;
+414: 
+415:          if (index < n) {
+416:              char c;
+417:              do {
+418:                  c = source.charAt(index++);
+419:              } while (Character.isWhitespace(c) && index < n);
+420:              pos.setIndex(index);
+421:          
+422:              if (index < n) {
+423:                  ret = c;
+424:              }
+425:          }
+426:          
+427:          return ret;
+428:     }
+
+[4] org.apache.commons.math.complex.ComplexFormat#setImaginaryCharacter  (lines 507-513)
+507:     public void setImaginaryCharacter(String imaginaryCharacter) {
+508:         if (imaginaryCharacter == null || imaginaryCharacter.length() == 0) {
+509:             throw new IllegalArgumentException(
+510:                 "imaginaryCharacter must be a non-empty string.");
+511:         }
+512:         this.imaginaryCharacter = imaginaryCharacter;
+513:     }
+
+[5] org.apache.commons.math.complex.ComplexFormat#parse  (lines 320-389)
+320:     public Complex parse(String source, ParsePosition pos) {
+321:         int initialIndex = pos.getIndex();
+322: 
+323:         // parse whitespace
+324:         parseAndIgnoreWhitespace(source, pos);
+325: 
+326:         // parse real
+327:         Number re = parseNumber(source, getRealFormat(), pos);
+328:         if (re == null) {
+329:             // invalid real number
+330:             // set index back to initial, error index should already be set
+331:             // character examined.
+332:             pos.setIndex(initialIndex);
+333:             return null;
+334:         }
+335: 
+336:         // parse sign
+337:         int startIndex = pos.getIndex();
+338:         char c = parseNextCharacter(source, pos);
+339:         int sign = 0;
+340:         switch (c) {
+341:         case 0 :
+342:             // no sign
+343:             // return real only complex number
+344:             return new Complex(re.doubleValue(), 0.0);
+345:         case '-' :
+346:             sign = -1;
+347:             break;
+348:         case '+' :
+349:             sign = 1;
+350:             break;
+351:         default :
+352:             // invalid sign
+353:             // set index back to initial, error index should be the last
+354:             // character examined.
+355:             pos.setIndex(initialIndex);
+356:             pos.setErrorIndex(startIndex);
+357:             return null;
+358:         }
+359: 
+360:         // parse whitespace
+361:         parseAndIgnoreWhitespace(source, pos);
+362: 
+363:         // parse imaginary
+364:         Number im = parseNumber(source, getRealFormat(), pos);
+365:         if (im == null) {
+366:             // invalid imaginary number
+367:             // set index back to initial, error index should already be set
+368:             // character examined.
+369:             pos.setIndex(initialIndex);
+370:             return null;
+371:         }
+372: 
+373:         // parse imaginary character
+374:         int n = getImaginaryCharacter().length();
+375:         startIndex = pos.getIndex();
+376:         int endIndex = startIndex + n;
+377:         if (
+378:             source.substring(startIndex, endIndex).compareTo(
+379:             getImaginaryCharacter()) != 0) {
+380:             // set index back to initial, error index should be the start index
+381:             // character examined.
+382:             pos.setIndex(initialIndex);
+383:             pos.setErrorIndex(startIndex);
+384:             return null;
+385:         }
+386:         pos.setIndex(endIndex);
+387: 
+388:         return new Complex(re.doubleValue(), im.doubleValue() * sign);
+389:     }
+
+[6] org.apache.commons.math.complex.ComplexFormat#ComplexFormat  (lines 57-59)
+57:     public ComplexFormat() {
+58:         this(DEFAULT_IMAGINARY_CHARACTER, getDefaultNumberFormat());
+59:     }
+
+[7] org.apache.commons.math.complex.ComplexFormat#parseNumber  (lines 470-488)
+470:     private Number parseNumber(String source, NumberFormat format, ParsePosition pos) {
+471:         int startIndex = pos.getIndex();
+472:         Number number = format.parse(source, pos);
+473:         int endIndex = pos.getIndex();
+474:         
+475:         // check for error parsing number
+476:         if (startIndex == endIndex) {
+477:             // try parsing special numbers
+478:             double[] special = {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY};
+479:             for (int i = 0; i < special.length; ++i) {
+480:                 number = parseNumber(source, special[i], pos);
+481:                 if (number != null) {
+482:                     break;
+483:                 }
+484:             }
+485:         }
+486:         
+487:         return number;
+488:     }
+
+[8] org.apache.commons.math.complex.ComplexFormat#getImaginaryCharacter  (lines 257-259)
+257:     public String getImaginaryCharacter() {
+258:         return imaginaryCharacter;
+259:     }
+
+[9] org.apache.commons.math.complex.ComplexFormat#getRealFormat  (lines 291-293)
+291:     public NumberFormat getRealFormat() {
+292:         return realFormat;
+293:     }
+
+[10] org.apache.commons.math.complex.ComplexFormat#getDefaultNumberFormat  (lines 236-238)
+236:     private static NumberFormat getDefaultNumberFormat() {
+237:         return getDefaultNumberFormat(Locale.getDefault());
+238:     }
+
+[11] org.apache.commons.math.complex.ComplexFormat#setRealFormat  (lines 535-541)
+535:     public void setRealFormat(NumberFormat realFormat) {
+536:         if (realFormat == null) {
+537:             throw new IllegalArgumentException(
+538:                 "realFormat can not be null.");
+539:         }
+540:         this.realFormat = realFormat;
+541:     }
+
+[12] org.apache.commons.math.complex.ComplexFormat#parseAndIgnoreWhitespace  (lines 398-401)
+398:     private void parseAndIgnoreWhitespace(String source, ParsePosition pos) {
+399:         parseNextCharacter(source, pos);
+400:         pos.setIndex(pos.getIndex() - 1);
+401:     }
+
+[13] org.apache.commons.math.complex.ComplexFormat#ComplexFormat  (lines 96-98)
+96:     public ComplexFormat(String imaginaryCharacter, NumberFormat format) {
+97:         this(imaginaryCharacter, format, (NumberFormat)format.clone());
+98:     }
+
+[14] org.apache.commons.math.complex.ComplexFormat#getDefaultNumberFormat  (lines 247-251)
+247:     private static NumberFormat getDefaultNumberFormat(Locale locale) {
+248:         NumberFormat nf = NumberFormat.getInstance(locale);
+249:         nf.setMaximumFractionDigits(2);
+250:         return nf;
+251:     }
+
+[15] org.apache.commons.math.complex.ComplexFormat#getInstance  (lines 282-285)
+282:     public static ComplexFormat getInstance(Locale locale) {
+283:         NumberFormat f = getDefaultNumberFormat(locale);
+284:         return new ComplexFormat(f);
+285:     }
+
+[16] org.apache.commons.math.complex.ComplexFormat#setImaginaryFormat  (lines 521-527)
+521:     public void setImaginaryFormat(NumberFormat imaginaryFormat) {
+522:         if (imaginaryFormat == null) {
+523:             throw new IllegalArgumentException(
+524:                 "imaginaryFormat can not be null.");
+525:         }
+526:         this.imaginaryFormat = imaginaryFormat;
+527:     }

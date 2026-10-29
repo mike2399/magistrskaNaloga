@@ -1,0 +1,1577 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.CommandLineRunnerTest::testCheckGlobalThisOff
+junit.framework.AssertionFailedError: Expected no warnings or errors
+Errors: 
+Warnings: 
+JSC_USED_GLOBAL_THIS. dangerous use of the global this object at input0 line 1 : 15 expected:<0> but was:<1>
+	at com.google.javascript.jscomp.CommandLineRunnerTest.test(CommandLineRunnerTest.java:861)
+	at com.google.javascript.jscomp.CommandLineRunnerTest.test(CommandLineRunnerTest.java:847)
+	at com.google.javascript.jscomp.CommandLineRunnerTest.testSame(CommandLineRunnerTest.java:835)
+	at com.google.javascript.jscomp.CommandLineRunnerTest.testSame(CommandLineRunnerTest.java:831)
+	at com.google.javascript.jscomp.CommandLineRunnerTest.testCheckGlobalThisOff(CommandLineRunnerTest.java:160)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.CommandLineRunner#initConfigFromFlags  (lines 545-612)
+545:   private void initConfigFromFlags(String[] args, PrintStream err) {
+546: 
+547:     List<String> processedArgs = processArgs(args);
+548: 
+549:     CmdLineParser parser = new CmdLineParser(flags);
+550:     Flags.warningGuardSpec.clear();
+551:     isConfigValid = true;
+552:     try {
+553:       parser.parseArgument(processedArgs.toArray(new String[] {}));
+554:       // For contains --flagfile flag
+555:       if (!flags.flag_file.equals("")) {
+556:         processFlagFile(err);
+557:       }
+558:     } catch (CmdLineException e) {
+559:       err.println(e.getMessage());
+560:       isConfigValid = false;
+561:     } catch (IOException ioErr) {
+562:       err.println("ERROR - " + flags.flag_file + " read error.");
+563:       isConfigValid = false;
+564:     }
+565: 
+566:     if (flags.version) {
+567:       ResourceBundle config = ResourceBundle.getBundle(configResource);
+568:       err.println(
+569:           "Closure Compiler (http://code.google.com/closure/compiler)\n" +
+570:           "Version: " + config.getString("compiler.version") + "\n" +
+571:           "Built on: " + config.getString("compiler.date"));
+572:       err.flush();
+573:     }
+574: 
+575:     if (!isConfigValid || flags.display_help) {
+576:       isConfigValid = false;
+577:       parser.printUsage(err);
+578:     } else {
+579:       getCommandLineConfig()
+580:           .setPrintTree(flags.print_tree)
+581:           .setPrintAst(flags.print_ast)
+582:           .setPrintPassGraph(flags.print_pass_graph)
+583:           .setJscompDevMode(flags.jscomp_dev_mode)
+584:           .setLoggingLevel(flags.logging_level)
+585:           .setExterns(flags.externs)
+586:           .setJs(flags.js)
+587:           .setJsOutputFile(flags.js_output_file)
+588:           .setModule(flags.module)
+589:           .setVariableMapInputFile(flags.variable_map_input_file)
+590:           .setPropertyMapInputFile(flags.property_map_input_file)
+591:           .setVariableMapOutputFile(flags.variable_map_output_file)
+592:           .setCreateNameMapFiles(flags.create_name_map_files)
+593:           .setPropertyMapOutputFile(flags.property_map_output_file)
+594:           .setCodingConvention(flags.third_party ?
+595:                new DefaultCodingConvention() :
+596:                new ClosureCodingConvention())
+597:           .setSummaryDetailLevel(flags.summary_detail_level)
+598:           .setOutputWrapper(flags.output_wrapper)
+599:           .setModuleWrapper(flags.module_wrapper)
+600:           .setModuleOutputPathPrefix(flags.module_output_path_prefix)
+601:           .setCreateSourceMap(flags.create_source_map)
+602:           .setSourceMapFormat(flags.source_map_format)
+603:           .setWarningGuardSpec(Flags.warningGuardSpec)
+604:           .setDefine(flags.define)
+605:           .setCharset(flags.charset)
+606:           .setManageClosureDependencies(flags.manage_closure_dependencies)
+607:           .setClosureEntryPoints(flags.closure_entry_point)
+608:           .setOutputManifest(ImmutableList.of(flags.output_manifest))
+609:           .setAcceptConstKeyword(flags.accept_const_keyword)
+610:           .setLanguageIn(flags.language_in);
+611:     }
+612:   }
+
+[2] com.google.javascript.jscomp.DefaultPassConfig#combineChecks  (lines 1119-1124)
+1119:   private static HotSwapCompilerPass combineChecks(AbstractCompiler compiler,
+1120:       List<Callback> callbacks) {
+1121:     Preconditions.checkArgument(callbacks.size() > 0);
+1122:     Callback[] array = callbacks.toArray(new Callback[callbacks.size()]);
+1123:     return new CombinedCompilerPass(compiler, array);
+1124:   }
+
+[3] com.google.javascript.jscomp.CombinedCompilerPass#visit  (lines 175-180)
+175:   @Override
+176:   public void visit(NodeTraversal t, Node n, Node parent) {
+177:     for (CallbackWrapper callback : callbacks) {
+178:       callback.visitOrMaybeActivate(t, n, parent);
+179:     }
+180:   }
+
+[4] com.google.javascript.jscomp.CombinedCompilerPass#visitOrMaybeActivate  (lines 121-127)
+121:     void visitOrMaybeActivate(NodeTraversal t, Node n, Node parent) {
+122:       if (isActive()) {
+123:         callback.visit(t, n, parent);
+124:       } else if (waiting == n) {
+125:         waiting = null;
+126:       }
+127:     }
+
+[5] com.google.javascript.jscomp.ExploitAssigns#collapseAssignEqualTo  (lines 108-199)
+108:   private boolean collapseAssignEqualTo(Node expr, Node exprParent,
+109:       Node value) {
+110:     Node assign = expr.getFirstChild();
+111:     Node parent = exprParent;
+112:     Node next = expr.getNext();
+113:     while (next != null) {
+114:       switch (next.getType()) {
+115:         case Token.AND:
+116:         case Token.OR:
+117:         case Token.HOOK:
+118:         case Token.IF:
+119:         case Token.RETURN:
+120:         case Token.EXPR_RESULT:
+121:           // Dive down the left side
+122:           parent = next;
+123:           next = next.getFirstChild();
+124:           break;
+125: 
+126:         case Token.VAR:
+127:           if (next.getFirstChild().hasChildren()) {
+128:             parent = next.getFirstChild();
+129:             next = parent.getFirstChild();
+130:             break;
+131:           }
+132:           return false;
+133: 
+134:         case Token.GETPROP:
+135:         case Token.NAME:
+136:           if (next.isQualifiedName()) {
+137:             String nextName = next.getQualifiedName();
+138:             if (value.isQualifiedName() &&
+139:                 nextName.equals(value.getQualifiedName())) {
+140:               // If the previous expression evaluates to value of a
+141:               // qualified name, and that qualified name is used again
+142:               // shortly, then we can exploit the assign here.
+143: 
+144:               // Verify the assignment doesn't change its own value.
+145:               if (!isSafeReplacement(next, assign)) {
+146:                 return false;
+147:               }
+148: 
+149:               exprParent.removeChild(expr);
+150:               expr.removeChild(assign);
+151:               parent.replaceChild(next, assign);
+152:               return true;
+153:             }
+154:           }
+155:           return false;
+156: 
+157:         case Token.ASSIGN:
+158:           // Assigns are really tricky. In lots of cases, we want to inline
+159:           // into the right side of the assign. But the left side of the
+160:           // assign is evaluated first, and it may have convoluted logic:
+161:           //   a = null;
+162:           //   (a = b).c = null;
+163:           // We don't want to exploit the first assign. Similarly:
+164:           //   a.b = null;
+165:           //   a.b.c = null;
+166:           // We don't want to exploit the first assign either.
+167:           //
+168:           // To protect against this, we simply only inline when the left side
+169:           // is guaranteed to evaluate to the same L-value no matter what.
+170:           Node leftSide = next.getFirstChild();
+171:           if (leftSide.getType() == Token.NAME ||
+172:               leftSide.getType() == Token.GETPROP &&
+173:               leftSide.getFirstChild().getType() == Token.THIS) {
+174:             // Dive down the right side of the assign.
+175:             parent = next;
+176:             next = leftSide.getNext();
+177:             break;
+178:           } else {
+179:             return false;
+180:           }
+181: 
+182:         default:
+183:           if (NodeUtil.isImmutableValue(next)
+184:               && next.isEquivalentTo(value)) {
+185:             // If the r-value of the expr assign is an immutable value,
+186:             // and the value is used again shortly, then we can exploit
+187:             // the assign here.
+188:             exprParent.removeChild(expr);
+189:             expr.removeChild(assign);
+190:             parent.replaceChild(next, assign);
+191:             return true;
+192:           }
+193:           // Return without inlining a thing
+194:           return false;
+195:       }
+196:     }
+197: 
+198:     return false;
+199:   }
+
+[6] com.google.javascript.jscomp.RenameVars#RenameVars  (lines 139-162)
+139:   RenameVars(AbstractCompiler compiler, String prefix,
+140:       boolean localRenamingOnly, boolean preserveFunctionExpressionNames,
+141:       boolean generatePseudoNames, boolean shouldShadow,
+142:       VariableMap prevUsedRenameMap,
+143:       @Nullable char[] reservedCharacters,
+144:       @Nullable Set<String> reservedNames) {
+145:     this.compiler = compiler;
+146:     this.prefix = prefix == null ? "" : prefix;
+147:     this.localRenamingOnly = localRenamingOnly;
+148:     this.preserveFunctionExpressionNames = preserveFunctionExpressionNames;
+149:     if (generatePseudoNames) {
+150:       this.pseudoNameMap = Maps.newHashMap();
+151:     } else {
+152:       this.pseudoNameMap = null;
+153:     }
+154:     this.prevUsedRenameMap = prevUsedRenameMap;
+155:     this.reservedCharacters = reservedCharacters;
+156:     this.shouldShadow = shouldShadow;
+157:     if (reservedNames == null) {
+158:       this.reservedNames = Sets.newHashSet();
+159:     } else {
+160:       this.reservedNames = Sets.newHashSet(reservedNames);
+161:     }
+162:   }
+
+[7] com.google.javascript.jscomp.CheckGlobalThis#getFunctionJsDocInfo  (lines 182-198)
+182:   private JSDocInfo getFunctionJsDocInfo(Node n) {
+183:     JSDocInfo jsDoc = n.getJSDocInfo();
+184:     Node parent = n.getParent();
+185:     if (jsDoc == null) {
+186:       int parentType = parent.getType();
+187:       if (parentType == Token.NAME || parentType == Token.ASSIGN) {
+188:         jsDoc = parent.getJSDocInfo();
+189:         if (jsDoc == null && parentType == Token.NAME) {
+190:           Node gramps = parent.getParent();
+191:           if (gramps.getType() == Token.VAR) {
+192:             jsDoc = gramps.getJSDocInfo();
+193:           }
+194:         }
+195:       }
+196:     }
+197:     return jsDoc;
+198:   }
+
+[8] com.google.javascript.jscomp.CommandLineRunner#createOptions  (lines 614-636)
+614:   @Override
+615:   protected CompilerOptions createOptions() {
+616:     CompilerOptions options = new CompilerOptions();
+617:     options.setCodingConvention(new ClosureCodingConvention());
+618:     CompilationLevel level = flags.compilation_level;
+619:     level.setOptionsForCompilationLevel(options);
+620:     if (flags.debug) {
+621:       level.setDebugOptionsForCompilationLevel(options);
+622:     }
+623: 
+624:     if(flags.generate_exports) {
+625:       options.setGenerateExports(flags.generate_exports);
+626:     }
+627: 
+628:     WarningLevel wLevel = flags.warning_level;
+629:     wLevel.setOptionsForWarningLevel(options);
+630:     for (FormattingOption formattingOption : flags.formatting) {
+631:       formattingOption.applyToOptions(options);
+632:     }
+633: 
+634:     options.closurePass = flags.process_closure_primitives;
+635:     return options;
+636:   }
+
+[9] com.google.javascript.jscomp.PrintStreamErrorManager#printSummary  (lines 65-78)
+65:   @Override
+66:   public void printSummary() {
+67:     if (summaryDetailLevel >= 3 ||
+68:         (summaryDetailLevel >= 1 && getErrorCount() + getWarningCount() > 0) ||
+69:         (summaryDetailLevel >= 2 && getTypedPercent() > 0.0)) {
+70:       if (getTypedPercent() > 0.0) {
+71:         stream.format("%d error(s), %d warning(s), %.1f%% typed%n",
+72:             getErrorCount(), getWarningCount(), getTypedPercent());
+73:       } else {
+74:         stream.format("%d error(s), %d warning(s)%n", getErrorCount(),
+75:             getWarningCount());
+76:       }
+77:     }
+78:   }
+
+[10] com.google.javascript.jscomp.BasicErrorManager#toArray  (lines 96-104)
+96:   private JSError[] toArray(CheckLevel level) {
+97:     List<JSError> errors = new ArrayList<JSError>(messages.size());
+98:     for (ErrorWithLevel p : messages) {
+99:       if (p.level == level) {
+100:         errors.add(p.error);
+101:       }
+102:     }
+103:     return errors.toArray(new JSError[errors.size()]);
+104:   }
+
+[11] com.google.javascript.jscomp.DefaultPassConfig#getChecks  (lines 166-309)
+166:   @Override
+167:   protected List<PassFactory> getChecks() {
+168:     List<PassFactory> checks = Lists.newArrayList();
+169: 
+170:     if (options.closurePass) {
+171:       checks.add(closureGoogScopeAliases);
+172:     }
+173: 
+174:     if (options.nameAnonymousFunctionsOnly) {
+175:       if (options.anonymousFunctionNaming ==
+176:           AnonymousFunctionNamingPolicy.MAPPED) {
+177:         checks.add(nameMappedAnonymousFunctions);
+178:       } else if (options.anonymousFunctionNaming ==
+179:           AnonymousFunctionNamingPolicy.UNMAPPED) {
+180:         checks.add(nameUnmappedAnonymousFunctions);
+181:       }
+182:       return checks;
+183:     }
+184: 
+185:     if (options.checkSuspiciousCode ||
+186:         options.enables(DiagnosticGroups.GLOBAL_THIS)) {
+187:       checks.add(suspiciousCode);
+188:     }
+189: 
+190:     if (options.checkControlStructures)  {
+191:       checks.add(checkControlStructures);
+192:     }
+193: 
+194:     if (options.checkRequires.isOn()) {
+195:       checks.add(checkRequires);
+196:     }
+197: 
+198:     if (options.checkProvides.isOn()) {
+199:       checks.add(checkProvides);
+200:     }
+201: 
+202:     // The following passes are more like "preprocessor" passes.
+203:     // It's important that they run before most checking passes.
+204:     // Perhaps this method should be renamed?
+205:     if (options.generateExports) {
+206:       checks.add(generateExports);
+207:     }
+208: 
+209:     if (options.exportTestFunctions) {
+210:       checks.add(exportTestFunctions);
+211:     }
+212: 
+213:     if (options.closurePass) {
+214:       checks.add(closurePrimitives.makeOneTimePass());
+215:     }
+216: 
+217:     if (options.closurePass && options.checkMissingGetCssNameLevel.isOn()) {
+218:       checks.add(closureCheckGetCssName);
+219:     }
+220: 
+221:     if (options.syntheticBlockStartMarker != null) {
+222:       // This pass must run before the first fold constants pass.
+223:       checks.add(createSyntheticBlocks);
+224:     }
+225: 
+226:     checks.add(checkVars);
+227:     if (options.computeFunctionSideEffects) {
+228:       checks.add(checkRegExp);
+229:     }
+230: 
+231:     if (options.checkShadowVars.isOn()) {
+232:       checks.add(checkShadowVars);
+233:     }
+234: 
+235:     if (options.aggressiveVarCheck.isOn()) {
+236:       checks.add(checkVariableReferences);
+237:     }
+238: 
+239:     // This pass should run before types are assigned.
+240:     if (options.processObjectPropertyString) {
+241:       checks.add(objectPropertyStringPreprocess);
+242:     }
+243: 
+244:     if (options.checkTypes || options.inferTypes) {
+245:       checks.add(resolveTypes.makeOneTimePass());
+246:       checks.add(inferTypes.makeOneTimePass());
+247:       if (options.checkTypes) {
+248:         checks.add(checkTypes.makeOneTimePass());
+249:       } else {
+250:         checks.add(inferJsDocInfo.makeOneTimePass());
+251:       }
+252:     }
+253: 
+254:     if (options.checkUnreachableCode.isOn() ||
+255:         (options.checkTypes && options.checkMissingReturn.isOn())) {
+256:       checks.add(checkControlFlow);
+257:     }
+258: 
+259:     // CheckAccessControls only works if check types is on.
+260:     if (options.checkTypes &&
+261:         (options.enables(DiagnosticGroups.ACCESS_CONTROLS)
+262:          || options.enables(DiagnosticGroups.CONSTANT_PROPERTY))) {
+263:       checks.add(checkAccessControls);
+264:     }
+265: 
+266:     if (options.checkGlobalNamesLevel.isOn()) {
+267:       checks.add(checkGlobalNames);
+268:     }
+269: 
+270:     checks.add(checkStrictMode);
+271: 
+272:     // Replace 'goog.getCssName' before processing defines but after the
+273:     // other checks have been done.
+274:     if (options.closurePass) {
+275:       checks.add(closureReplaceGetCssName);
+276:     }
+277: 
+278:     // i18n
+279:     // If you want to customize the compiler to use a different i18n pass,
+280:     // you can create a PassConfig that calls replacePassFactory
+281:     // to replace this.
+282:     checks.add(options.messageBundle != null ?
+283:         replaceMessages : createEmptyPass("replaceMessages"));
+284: 
+285:     if (options.getTweakProcessing().isOn()) {
+286:       checks.add(processTweaks);
+287:     }
+288: 
+289:     // Defines in code always need to be processed.
+290:     checks.add(processDefines);
+291: 
+292:     if (options.instrumentationTemplate != null ||
+293:         options.recordFunctionInformation) {
+294:       checks.add(computeFunctionNames);
+295:     }
+296: 
+297:     if (options.nameReferenceGraphPath != null &&
+298:         !options.nameReferenceGraphPath.isEmpty()) {
+299:       checks.add(printNameReferenceGraph);
+300:     }
+301: 
+302:     if (options.nameReferenceReportPath != null &&
+303:         !options.nameReferenceReportPath.isEmpty()) {
+304:       checks.add(printNameReferenceReport);
+305:     }
+306: 
+307:     assertAllOneTimePasses(checks);
+308:     return checks;
+309:   }
+
+[12] com.google.javascript.jscomp.CombinedCompilerPass#CallbackWrapper  (lines 108-115)
+108:     private CallbackWrapper(Callback callback) {
+109:       this.callback = callback;
+110:       if (callback instanceof ScopedCallback) {
+111:         scopedCallback = (ScopedCallback) callback;
+112:       } else {
+113:         scopedCallback = null;
+114:       }
+115:     }
+
+[13] com.google.javascript.jscomp.ShadowVariables#enterScope  (lines 175-226)
+175:     @Override
+176:     public void enterScope(NodeTraversal t) {
+177:       Scope s = t.getScope();
+178:       if (!s.isLocal()) {
+179:         return;
+180:       }
+181: 
+182:       // Since we don't shadow global, there is nothing to be done in the
+183:       // first immediate local scope as well.
+184:       if (s.getParent().isGlobal()) {
+185:         return;
+186:       }
+187: 
+188:       for (Iterator<Var> vars = s.getVars(); vars.hasNext();) {
+189:         Var var = vars.next();
+190: 
+191:         // Don't shadow variables that is bleed-out to fix an IE bug.
+192:         if (var.isBleedingFunction()) {
+193:           continue;
+194:         }
+195: 
+196:         // Don't shadow an exported local.
+197:         if (compiler.getCodingConvention().isExported(var.name, s.isLocal())) {
+198:           continue;
+199:         }
+200: 
+201:         // Try to look for the best shadow for the current candidate.
+202:         Assignment bestShadow = findBestShadow(s, var);
+203:         if (bestShadow == null) {
+204:           continue;
+205:         }
+206: 
+207:         // The name assignment being shadowed.
+208:         Assignment localAssignment = assignments.get(var.getName());
+209: 
+210:         // Only shadow if this increases the number of occurrences of the
+211:         // shadowed variable.
+212:         if (bestShadow.count < localAssignment.count) {
+213:           continue; // Hope the next local variable would have a smaller count.
+214:         }
+215: 
+216:         doShadow(localAssignment, bestShadow, var);
+217: 
+218:         if (oldPseudoNameMap != null) {
+219:           String targetPseudoName =
+220:             oldPseudoNameMap.get(s.getVar(bestShadow.oldName).nameNode);
+221:           for (Node use : varToNameUsage.get(var)) {
+222:             deltaPseudoNameMap.put(use, targetPseudoName);
+223:           }
+224:         }
+225:       }
+226:     }
+
+[14] com.google.javascript.jscomp.RenameVars#process  (lines 324-384)
+324:   @Override
+325:   public void process(Node externs, Node root) {
+326:     assignmentLog = new StringBuilder();
+327: 
+328:     // Do variable reference counting.
+329:     NodeTraversal.traverse(compiler, externs, new ProcessVars(true));
+330:     NodeTraversal.traverse(compiler, root, new ProcessVars(false));
+331: 
+332:     // Make sure that new names don't overlap with extern names.
+333:     reservedNames.addAll(externNames);
+334: 
+335:     // Rename vars, sorted by frequency of occurrence to minimize code size.
+336:     SortedSet<Assignment> varsByFrequency =
+337:         new TreeSet<Assignment>(FREQUENCY_COMPARATOR);
+338:     varsByFrequency.addAll(assignments.values());
+339: 
+340:     if (shouldShadow) {
+341:       new ShadowVariables(
+342:           compiler, assignments, varsByFrequency, pseudoNameMap).process(
+343:               externs, root);
+344:     }
+345: 
+346:     // First try to reuse names from an earlier compilation.
+347:     if (prevUsedRenameMap != null) {
+348:       reusePreviouslyUsedVariableMap();
+349:     }
+350: 
+351:     // Assign names, sorted by descending frequency to minimize code size.
+352:     assignNames(varsByFrequency);
+353: 
+354:     boolean changed = false;
+355: 
+356:     // Rename the globals!
+357:     for (Node n : globalNameNodes) {
+358:       String newName = getNewGlobalName(n);
+359:       // Note: if newName is null, then oldName is an extern.
+360:       if (newName != null) {
+361:         n.setString(newName);
+362:         changed = true;
+363:       }
+364:     }
+365: 
+366:     // Rename the locals!
+367:     int count = 0;
+368:     for (Node n : localNameNodes) {
+369:       String newName = getNewLocalName(n);
+370:       if (newName != null) {
+371:         n.setString(newName);
+372:         changed = true;
+373:       }
+374:       count++;
+375:     }
+376: 
+377:     if (changed) {
+378:       compiler.reportCodeChange();
+379:     }
+380: 
+381:     // Lastly, write the name assignments to the debug log.
+382:     compiler.addToDebugLog("JS var assignments:\n" + assignmentLog);
+383:     assignmentLog = null;
+384:   }
+
+[15] com.google.javascript.jscomp.ScopedAliases#hotSwapScript  (lines 97-136)
+97:   @Override
+98:   public void hotSwapScript(Node root) {
+99:     Traversal traversal = new Traversal();
+100:     NodeTraversal.traverse(compiler, root, traversal);
+101: 
+102:     if (!traversal.hasErrors()) {
+103: 
+104:       // Apply the aliases.
+105:       for (AliasUsage aliasUsage : traversal.getAliasUsages()) {
+106:         aliasUsage.applyAlias();
+107:       }
+108: 
+109:       // Remove the alias definitions.
+110:       for (Node aliasDefinition : traversal.getAliasDefinitions()) {
+111:         if (aliasDefinition.getParent().getType() == Token.VAR &&
+112:             aliasDefinition.getParent().hasOneChild()) {
+113:           aliasDefinition.getParent().detachFromParent();
+114:         } else {
+115:           aliasDefinition.detachFromParent();
+116:         }
+117:       }
+118: 
+119:       // Collapse the scopes.
+120:       for (Node scopeCall : traversal.getScopeCalls()) {
+121:         Node expressionWithScopeCall = scopeCall.getParent();
+122:         Node scopeClosureBlock = scopeCall.getLastChild().getLastChild();
+123:         scopeClosureBlock.detachFromParent();
+124:         expressionWithScopeCall.getParent().replaceChild(
+125:             expressionWithScopeCall,
+126:             scopeClosureBlock);
+127:         NodeUtil.tryMergeBlock(scopeClosureBlock);
+128:       }
+129: 
+130:       if (traversal.getAliasUsages().size() > 0 ||
+131:           traversal.getAliasDefinitions().size() > 0 ||
+132:           traversal.getScopeCalls().size() > 0) {
+133:         compiler.reportCodeChange();
+134:       }
+135:     }
+136:   }
+
+[16] com.google.javascript.jscomp.CheckGlobalThis#visit  (lines 153-160)
+153:   public void visit(NodeTraversal t, Node n, Node parent) {
+154:     if (n.getType() == Token.THIS && shouldReportThis(n, parent)) {
+155:       compiler.report(t.makeError(n, GLOBAL_THIS));
+156:     }
+157:     if (n == assignLhsChild) {
+158:       assignLhsChild = null;
+159:     }
+160:   }
+
+[17] com.google.javascript.jscomp.Compiler#compileInternal  (lines 632-672)
+632:   private void compileInternal() {
+633:     parse();
+634:     if (hasErrors()) {
+635:       return;
+636:     }
+637: 
+638:     if (!precheck()) {
+639:       return;
+640:     }
+641: 
+642:     if (options.nameAnonymousFunctionsOnly) {
+643:       // TODO(nicksantos): Move this into an instrument() phase maybe?
+644:       check();
+645:       return;
+646:     }
+647: 
+648:     if (!options.skipAllPasses) {
+649:       check();
+650:       if (hasErrors()) {
+651:         return;
+652:       }
+653: 
+654:       if (options.isExternExportsEnabled()
+655:           || options.externExportsPath != null) {
+656:         externExports();
+657:       }
+658: 
+659:       // IDE-mode is defined to stop here, before the heavy rewriting begins.
+660:       if (!options.ideMode) {
+661:         optimize();
+662:       }
+663:     }
+664: 
+665:     if (options.recordFunctionInformation) {
+666:       recordFunctionInformation();
+667:     }
+668: 
+669:     if (options.devMode == DevMode.START_AND_END) {
+670:       runSanityCheck();
+671:     }
+672:   }
+
+[18] com.google.javascript.jscomp.AstValidator#process  (lines 56-64)
+56:   @Override
+57:   public void process(Node externs, Node root) {
+58:     if (externs != null) {
+59:       validateCodeRoot(externs);
+60:     }
+61:     if (root != null) {
+62:       validateCodeRoot(root);
+63:     }
+64:   }
+
+[19] com.google.javascript.jscomp.AbstractCommandLineRunner#setRunOptions  (lines 196-274)
+196:   protected void setRunOptions(CompilerOptions options)
+197:       throws FlagUsageException, IOException {
+198:     DiagnosticGroups diagnosticGroups = getDiagnosticGroups();
+199: 
+200:     if (config.warningGuards != null) {
+201:       for (WarningGuardSpec.Entry entry : config.warningGuards.entries) {
+202:         diagnosticGroups.setWarningLevel(options, entry.groupName, entry.level);
+203:       }
+204:     }
+205: 
+206:     createDefineOrTweakReplacements(config.define, options, false);
+207: 
+208:     options.setTweakProcessing(config.tweakProcessing);
+209:     createDefineOrTweakReplacements(config.tweak, options, true);
+210: 
+211:     options.manageClosureDependencies = config.manageClosureDependencies;
+212:     if (config.closureEntryPoints.size() > 0) {
+213:       options.setManageClosureDependencies(config.closureEntryPoints);
+214:     }
+215:     options.devMode = config.jscompDevMode;
+216:     options.setCodingConvention(config.codingConvention);
+217:     options.setSummaryDetailLevel(config.summaryDetailLevel);
+218: 
+219:     outputCharset = options.outputCharset = getOutputCharset();
+220:     inputCharset = getInputCharset();
+221: 
+222:     if (config.jsOutputFile.length() > 0) {
+223:       if (config.skipNormalOutputs) {
+224:         throw new FlagUsageException("skip_normal_outputs and js_output_file"
+225:             + " cannot be used together.");
+226:       } else {
+227:         options.jsOutputFile = config.jsOutputFile;
+228:       }
+229:     }
+230: 
+231:     if (config.skipNormalOutputs && config.printAst) {
+232:       throw new FlagUsageException("skip_normal_outputs and print_ast cannot"
+233:           + " be used together.");
+234:     }
+235: 
+236:     if (config.skipNormalOutputs && config.printTree) {
+237:       throw new FlagUsageException("skip_normal_outputs and print_tree cannot"
+238:           + " be used together.");
+239:     }
+240: 
+241:     if (config.createSourceMap.length() > 0) {
+242:       options.sourceMapOutputPath = config.createSourceMap;
+243:     }
+244:     options.sourceMapDetailLevel = config.sourceMapDetailLevel;
+245:     options.sourceMapFormat = config.sourceMapFormat;
+246: 
+247:     if (!config.variableMapInputFile.equals("")) {
+248:       options.inputVariableMapSerialized =
+249:           VariableMap.load(config.variableMapInputFile).toBytes();
+250:     }
+251: 
+252:     if (!config.propertyMapInputFile.equals("")) {
+253:       options.inputPropertyMapSerialized =
+254:           VariableMap.load(config.propertyMapInputFile).toBytes();
+255:     }
+256: 
+257:     if (config.languageIn.length() > 0) {
+258:       if (config.languageIn.equals("ECMASCRIPT5_STRICT") ||
+259:           config.languageIn.equals("ES5_STRICT")) {
+260:         options.setLanguageIn(CompilerOptions.LanguageMode.ECMASCRIPT5_STRICT);
+261:       } else if (config.languageIn.equals("ECMASCRIPT5") ||
+262:           config.languageIn.equals("ES5")) {
+263:         options.setLanguageIn(CompilerOptions.LanguageMode.ECMASCRIPT5);
+264:       } else if (config.languageIn.equals("ECMASCRIPT3") ||
+265:                  config.languageIn.equals("ES3")) {
+266:         options.setLanguageIn(CompilerOptions.LanguageMode.ECMASCRIPT3);
+267:       } else {
+268:         throw new FlagUsageException("Unknown language `" + config.languageIn +
+269:                                      "' specified.");
+270:       }
+271:     }
+272: 
+273:     options.acceptConstKeyword = config.acceptConstKeyword;
+274:   }
+
+[20] com.google.javascript.jscomp.ScopedAliases#getScopeCalls  (lines 197-199)
+197:     List<Node> getScopeCalls() {
+198:       return scopeCalls;
+199:     }
+
+[21] com.google.javascript.jscomp.CollapseVariableDeclarations#canBeRedeclared  (lines 188-202)
+188:     private boolean canBeRedeclared(Node n, Scope s) {
+189:       if (!NodeUtil.isExprAssign(n)) {
+190:         return false;
+191:       }
+192:       Node assign = n.getFirstChild();
+193:       Node lhs = assign.getFirstChild();
+194: 
+195:       if (!NodeUtil.isName(lhs)) {
+196:         return false;
+197:       }
+198: 
+199:       Var var = s.getVar(lhs.getString());
+200:       return var != null &&
+201:           var.getScope() == s && !blacklistedVars.contains(var);
+202:     }
+
+[22] com.google.javascript.jscomp.PassFactory#makeOneTimePass  (lines 64-80)
+64:   PassFactory makeOneTimePass() {
+65:     if (isOneTimePass()) {
+66:       return this;
+67:     }
+68: 
+69:     final PassFactory self = this;
+70:     return new PassFactory(name, true /* one time pass */) {
+71:       @Override
+72:       protected CompilerPass createInternal(AbstractCompiler compiler) {
+73:         return self.createInternal(compiler);
+74:       }
+75:       @Override
+76:       HotSwapCompilerPass getHotSwapPass(AbstractCompiler compiler) {
+77:         return self.getHotSwapPass(compiler);
+78:       }
+79:     };
+80:   }
+
+[23] com.google.javascript.jscomp.CheckGlobalThis#shouldTraverse  (lines 79-151)
+79:   public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
+80: 
+81:     if (n.getType() == Token.FUNCTION) {
+82:       // Don't traverse functions that are constructors or have the @this
+83:       // or @override annotation.
+84:       JSDocInfo jsDoc = getFunctionJsDocInfo(n);
+85:       if (jsDoc != null &&
+86:           (jsDoc.isConstructor() ||
+87:            jsDoc.isInterface() ||
+88:            jsDoc.hasThisType() ||
+89:            jsDoc.isOverride())) {
+90:         return false;
+91:       }
+92: 
+93:       // Don't traverse functions unless they would normally
+94:       // be able to have a @this annotation associated with them. e.g.,
+95:       // var a = function() { }; // or
+96:       // function a() {} // or
+97:       // a.x = function() {}; // or
+98:       // var a = {x: function() {}};
+99:       int pType = parent.getType();
+100:       if (!(pType == Token.BLOCK ||
+101:             pType == Token.SCRIPT ||
+102:             pType == Token.NAME ||
+103:             pType == Token.ASSIGN ||
+104: 
+105:             // object literal keys
+106:             pType == Token.STRING)) {
+107:         return false;
+108:       }
+109: 
+110:       // Don't traverse functions that are getting lent to a prototype.
+111:       Node gramps = parent.getParent();
+112:       if (NodeUtil.isObjectLitKey(parent, gramps)) {
+113:         JSDocInfo maybeLends = gramps.getJSDocInfo();
+114:         if (maybeLends != null &&
+115:             maybeLends.getLendsName() != null &&
+116:             maybeLends.getLendsName().endsWith(".prototype")) {
+117:           return false;
+118:         }
+119:       }
+120:     }
+121: 
+122:     if (parent != null && parent.getType() == Token.ASSIGN) {
+123:       Node lhs = parent.getFirstChild();
+124:       Node rhs = lhs.getNext();
+125: 
+126:       if (n == lhs) {
+127:         // Always traverse the left side of the assignment. To handle
+128:         // nested assignments properly (e.g., (a = this).property = c;),
+129:         // assignLhsChild should not be overridden.
+130:         if (assignLhsChild == null) {
+131:           assignLhsChild = lhs;
+132:         }
+133:       } else {
+134:         // Only traverse the right side if it's not an assignment to a prototype
+135:         // property or subproperty.
+136:         if (NodeUtil.isGet(lhs)) {
+137:           if (lhs.getType() == Token.GETPROP &&
+138:               lhs.getLastChild().getString().equals("prototype")) {
+139:             return false;
+140:           }
+141:           Node llhs = lhs.getFirstChild();
+142:           if (llhs.getType() == Token.GETPROP &&
+143:               llhs.getLastChild().getString().equals("prototype")) {
+144:             return false;
+145:           }
+146:         }
+147:       }
+148:     }
+149: 
+150:     return true;
+151:   }
+
+[24] com.google.javascript.jscomp.DiagnosticGroups#setWarningLevel  (lines 204-209)
+204:   void setWarningLevel(CompilerOptions options,
+205:       String name, CheckLevel level) {
+206:     DiagnosticGroup group = forName(name);
+207:     Preconditions.checkNotNull(group, "No warning class for name: " + name);
+208:     options.setWarningLevel(group, level);
+209:   }
+
+[25] com.google.javascript.jscomp.MustBeReachingVariableDef#computeMustDef  (lines 222-315)
+222:   private void computeMustDef(
+223:       Node n, Node cfgNode, MustDef output, boolean conditional) {
+224:     switch (n.getType()) {
+225: 
+226:       case Token.BLOCK:
+227:       case Token.FUNCTION:
+228:         return;
+229: 
+230:       case Token.WHILE:
+231:       case Token.DO:
+232:       case Token.IF:
+233:         computeMustDef(
+234:             NodeUtil.getConditionExpression(n), cfgNode, output, conditional);
+235:         return;
+236: 
+237:       case Token.FOR:
+238:         if (!NodeUtil.isForIn(n)) {
+239:           computeMustDef(
+240:               NodeUtil.getConditionExpression(n), cfgNode, output, conditional);
+241:         } else {
+242:           // for(x in y) {...}
+243:           Node lhs = n.getFirstChild();
+244:           Node rhs = lhs.getNext();
+245:           if (NodeUtil.isVar(lhs)) {
+246:             lhs = lhs.getLastChild(); // for(var x in y) {...}
+247:           }
+248:           if (NodeUtil.isName(lhs)) {
+249:             addToDefIfLocal(lhs.getString(), cfgNode, rhs, output);
+250:           }
+251:         }
+252:         return;
+253: 
+254:       case Token.AND:
+255:       case Token.OR:
+256:         computeMustDef(n.getFirstChild(), cfgNode, output, conditional);
+257:         computeMustDef(n.getLastChild(), cfgNode, output, true);
+258:         return;
+259: 
+260:       case Token.HOOK:
+261:         computeMustDef(n.getFirstChild(), cfgNode, output, conditional);
+262:         computeMustDef(n.getFirstChild().getNext(), cfgNode, output, true);
+263:         computeMustDef(n.getLastChild(), cfgNode, output, true);
+264:         return;
+265: 
+266:       case Token.VAR:
+267:         for (Node c = n.getFirstChild(); c != null; c = c.getNext()) {
+268:           if (c.hasChildren()) {
+269:             computeMustDef(c.getFirstChild(), cfgNode, output, conditional);
+270:             addToDefIfLocal(c.getString(), conditional ? null : cfgNode,
+271:                 c.getFirstChild(), output);
+272:           }
+273:         }
+274:         return;
+275: 
+276:       default:
+277:         if (NodeUtil.isAssignmentOp(n)) {
+278:           if (NodeUtil.isName(n.getFirstChild())) {
+279:             Node name = n.getFirstChild();
+280:             computeMustDef(name.getNext(), cfgNode, output, conditional);
+281:             addToDefIfLocal(name.getString(), conditional ? null : cfgNode,
+282:               n.getLastChild(), output);
+283:             return;
+284:           } else if (NodeUtil.isGet(n.getFirstChild())) {
+285:             // Treat all assignments to arguments as redefining the
+286:             // parameters itself.
+287:             Node obj = n.getFirstChild().getFirstChild();
+288:             if (NodeUtil.isName(obj) && "arguments".equals(obj.getString())) {
+289:               // TODO(user): More accuracy can be introduced
+290:               // ie: We know exactly what arguments[x] is if x is a constant
+291:               // number.
+292:               escapeParameters(output);
+293:             }
+294:           }
+295:         }
+296: 
+297:         if (NodeUtil.isName(n) && "arguments".equals(n.getString())) {
+298:           escapeParameters(output);
+299:         }
+300: 
+301:         // DEC and INC actually defines the variable.
+302:         if (n.getType() == Token.DEC || n.getType() == Token.INC) {
+303:           Node target = n.getFirstChild();
+304:           if (NodeUtil.isName(target)) {
+305:             addToDefIfLocal(target.getString(),
+306:                 conditional ? null : cfgNode, null, output);
+307:             return;
+308:           }
+309:         }
+310: 
+311:         for (Node c = n.getFirstChild(); c != null; c = c.getNext()) {
+312:           computeMustDef(c, cfgNode, output, conditional);
+313:         }
+314:     }
+315:   }
+
+[26] com.google.javascript.jscomp.MakeDeclaredNamesUnique#enterScope  (lines 273-280)
+273:     public void enterScope(NodeTraversal t) {
+274:       if (t.inGlobalScope()) {
+275:         return;
+276:       }
+277: 
+278:       referenceStack.push(referencedNames);
+279:       referencedNames = Sets.newHashSet();
+280:     }
+
+[27] com.google.javascript.jscomp.WarningLevel#setOptionsForWarningLevel  (lines 33-47)
+33:   public void setOptionsForWarningLevel(CompilerOptions options) {
+34:     switch (this) {
+35:       case QUIET:
+36:         silenceAllWarnings(options);
+37:         break;
+38:       case DEFAULT:
+39:         addDefaultWarnings(options);
+40:         break;
+41:       case VERBOSE:
+42:         addVerboseWarnings(options);
+43:         break;
+44:       default:
+45:         throw new RuntimeException("Unknown warning level.");
+46:     }
+47:   }
+
+[28] com.google.javascript.jscomp.RenameVars#visit  (lines 213-284)
+213:     @Override
+214:     public void visit(NodeTraversal t, Node n, Node parent) {
+215:       if (n.getType() != Token.NAME) {
+216:         return;
+217:       }
+218: 
+219:       String name = n.getString();
+220: 
+221:       // Ignore anonymous functions
+222:       if (name.length() == 0) {
+223:         return;
+224:       }
+225: 
+226:       // Is this local or Global?
+227:       // Bleeding functions should be treated as part of their outer
+228:       // scope, because IE has bugs in how it handles bleeding
+229:       // functions.
+230:       Scope.Var var = t.getScope().getVar(name);
+231:       boolean local = (var != null) && var.isLocal() &&
+232:           (!var.scope.getParent().isGlobal() ||
+233:            !var.isBleedingFunction());
+234: 
+235:       // Are we renaming global variables?
+236:       if (!local && localRenamingOnly) {
+237:         reservedNames.add(name);
+238:         return;
+239:       }
+240: 
+241:       // Are we renaming function expression names?
+242:       if (preserveFunctionExpressionNames && var != null
+243:           && NodeUtil.isFunctionExpression(var.getParentNode())) {
+244:         reservedNames.add(name);
+245:         return;
+246:       }
+247: 
+248:       // Check if we can rename this.
+249:       if (!okToRenameVar(name, local)) {
+250:         if (local) {
+251:           // Blindly de-uniquify for the Prototype library for issue 103.
+252:           String newName = MakeDeclaredNamesUnique.ContextualRenameInverter
+253:               .getOrginalName(name);
+254:           if (!newName.equals(name)) {
+255:             n.setString(newName);
+256:           }
+257:         }
+258:         return;
+259:       }
+260: 
+261:       if (isExternsPass_) {
+262:         // Keep track of extern globals.
+263:         if (!local) {
+264:           externNames.add(name);
+265:         }
+266:         return;
+267:       }
+268: 
+269:       if (pseudoNameMap != null) {
+270:         recordPseudoName(n);
+271:       }
+272: 
+273:       if (local) {
+274:         // Local var: assign a new name
+275:         String tempName = LOCAL_VAR_PREFIX + getLocalVarIndex(var);
+276:         incCount(tempName);
+277:         localNameNodes.add(n);
+278:         n.setString(tempName);
+279:       } else if (var != null) { // Not an extern
+280:         // If it's global, increment global count
+281:         incCount(name);
+282:         globalNameNodes.add(n);
+283:       }
+284:     }
+
+[29] com.google.javascript.jscomp.Compiler#initOptions  (lines 226-288)
+226:   public void initOptions(CompilerOptions options) {
+227:     this.options = options;
+228:     if (errorManager == null) {
+229:       if (outStream == null) {
+230:         setErrorManager(
+231:             new LoggerErrorManager(createMessageFormatter(), logger));
+232:       } else {
+233:         PrintStreamErrorManager printer =
+234:             new PrintStreamErrorManager(createMessageFormatter(), outStream);
+235:         printer.setSummaryDetailLevel(options.summaryDetailLevel);
+236:         setErrorManager(printer);
+237:       }
+238:     }
+239: 
+240:     // DiagnosticGroups override the plain checkTypes option.
+241:     if (options.enables(DiagnosticGroups.CHECK_TYPES)) {
+242:       options.checkTypes = true;
+243:     } else if (options.disables(DiagnosticGroups.CHECK_TYPES)) {
+244:       options.checkTypes = false;
+245:     } else if (!options.checkTypes) {
+246:       // If DiagnosticGroups did not override the plain checkTypes
+247:       // option, and checkTypes is enabled, then turn off the
+248:       // parser type warnings.
+249:       options.setWarningLevel(
+250:           DiagnosticGroup.forType(
+251:               RhinoErrorReporter.TYPE_PARSE_ERROR),
+252:           CheckLevel.OFF);
+253:     }
+254: 
+255:     if (options.checkGlobalThisLevel.isOn()) {
+256:       options.setWarningLevel(
+257:           DiagnosticGroups.GLOBAL_THIS,
+258:           options.checkGlobalThisLevel);
+259:     }
+260: 
+261:     if (options.getLanguageIn() == LanguageMode.ECMASCRIPT5_STRICT) {
+262:       options.setWarningLevel(
+263:           DiagnosticGroups.ES5_STRICT,
+264:           CheckLevel.ERROR);
+265:     }
+266: 
+267:     // Initialize the warnings guard.
+268:     List<WarningsGuard> guards = Lists.newArrayList();
+269:     guards.add(
+270:         new SuppressDocWarningsGuard(
+271:             getDiagnosticGroups().getRegisteredGroups()));
+272:     guards.add(options.getWarningsGuard());
+273: 
+274:     ComposeWarningsGuard composedGuards = new ComposeWarningsGuard(guards);
+275: 
+276:     // All passes must run the variable check. This synthesizes
+277:     // variables later so that the compiler doesn't crash. It also
+278:     // checks the externs file for validity. If you don't want to warn
+279:     // about missing variable declarations, we shut that specific
+280:     // error off.
+281:     if (!options.checkSymbols &&
+282:         !composedGuards.enables(DiagnosticGroups.CHECK_VARIABLES)) {
+283:       composedGuards.addGuard(new DiagnosticGroupWarningsGuard(
+284:           DiagnosticGroups.CHECK_VARIABLES, CheckLevel.OFF));
+285:     }
+286: 
+287:     this.warningsGuard = composedGuards;
+288:   }
+
+[30] com.google.javascript.jscomp.RenameVars#enterScope  (lines 195-208)
+195:     @Override
+196:     public void enterScope(NodeTraversal t) {
+197:       if (t.inGlobalScope()) return;
+198: 
+199:       Iterator<Var> it = t.getScope().getVars();
+200:       while (it.hasNext()) {
+201:         Var current = it.next();
+202:         if (current.isBleedingFunction()) {
+203:           localBleedingFunctions.add(current);
+204:           localBleedingFunctionsPerScope.put(
+205:               t.getScope().getParent(), current);
+206:         }
+207:       }
+208:     }
+
+[31] com.google.javascript.jscomp.CheckGlobalThis#shouldReportThis  (lines 162-170)
+162:   private boolean shouldReportThis(Node n, Node parent) {
+163:     if (assignLhsChild != null) {
+164:       // Always report a THIS on the left side of an assign.
+165:       return true;
+166:     }
+167: 
+168:     // Also report a THIS with a property access.
+169:     return parent != null && NodeUtil.isGet(parent);
+170:   }
+
+[32] com.google.javascript.jscomp.PhaseOptimizer#consume  (lines 113-134)
+113:   void consume(List<PassFactory> factories) {
+114:     Loop currentLoop = new LoopInternal();
+115:     boolean isCurrentLoopPopulated = false;
+116:     for (PassFactory factory : factories) {
+117:       if (factory.isOneTimePass()) {
+118:         if (isCurrentLoopPopulated) {
+119:           passes.add(currentLoop);
+120: 
+121:           currentLoop = new LoopInternal();
+122:           isCurrentLoopPopulated = false;
+123:         }
+124:         addOneTimePass(factory);
+125:       } else {
+126:         currentLoop.addLoopedPass(factory);
+127:         isCurrentLoopPopulated = true;
+128:       }
+129:     }
+130: 
+131:     if (isCurrentLoopPopulated) {
+132:       passes.add(currentLoop);
+133:     }
+134:   }
+
+[33] com.google.javascript.jscomp.AbstractCommandLineRunner#Entry  (lines 1719-1722)
+1719:       private Entry(CheckLevel level, String groupName) {
+1720:         this.level = level;
+1721:         this.groupName = groupName;
+1722:       }
+
+[34] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 705-718)
+705:     @Override
+706:     protected HotSwapCompilerPass createInternal(final AbstractCompiler
+707:         compiler) {
+708:       List<Callback> sharedCallbacks = Lists.newArrayList();
+709:       if (options.checkSuspiciousCode) {
+710:         sharedCallbacks.add(new CheckAccidentalSemicolon(CheckLevel.WARNING));
+711:         sharedCallbacks.add(new CheckSideEffects(CheckLevel.WARNING));
+712:       }
+713: 
+714:       if (options.enables(DiagnosticGroups.GLOBAL_THIS)) {
+715:         sharedCallbacks.add(new CheckGlobalThis(compiler));
+716:       }
+717:       return combineChecks(compiler, sharedCallbacks);
+718:     }
+
+[35] com.google.javascript.jscomp.WarningLevel#addVerboseWarnings  (lines 74-95)
+74:   private static void addVerboseWarnings(CompilerOptions options) {
+75:     addDefaultWarnings(options);
+76: 
+77:     // checkSuspiciousCode needs to be enabled for CheckGlobalThis to get run.
+78:     options.checkSuspiciousCode = true;
+79:     options.checkGlobalThisLevel = CheckLevel.WARNING;
+80:     options.checkSymbols = true;
+81:     options.checkMissingReturn = CheckLevel.WARNING;
+82: 
+83:     // checkTypes has the side-effect of asserting that the
+84:     // correct number of arguments are passed to a function.
+85:     // Because the CodingConvention used with the web service does not provide a
+86:     // way for optional arguments to be specified, these warnings may result in
+87:     // false positives.
+88:     options.checkTypes = true;
+89:     options.checkGlobalNamesLevel = CheckLevel.WARNING;
+90:     options.aggressiveVarCheck = CheckLevel.WARNING;
+91:     options.setWarningLevel(
+92:         DiagnosticGroups.MISSING_PROPERTIES, CheckLevel.WARNING);
+93:     options.setWarningLevel(
+94:         DiagnosticGroups.DEPRECATED, CheckLevel.WARNING);
+95:   }
+
+[36] com.google.javascript.jscomp.CheckMissingReturn#explicitReturnExpected  (lines 149-171)
+149:   private JSType explicitReturnExpected(Node scope) {
+150:     JSType scopeType = scope.getJSType();
+151: 
+152:     if (!(scopeType instanceof FunctionType)) {
+153:       return null;
+154:     }
+155: 
+156:     if (isEmptyFunction(scope)) {
+157:       return null;
+158:     }
+159: 
+160:     JSType returnType = ((FunctionType) scopeType).getReturnType();
+161: 
+162:     if (returnType == null) {
+163:       return null;
+164:     }
+165: 
+166:     if (!isVoidOrUnknown(returnType)) {
+167:       return returnType;
+168:     }
+169: 
+170:     return null;
+171:   }
+
+[37] com.google.javascript.jscomp.NameGenerator#reserveCharacters  (lines 78-87)
+78:   static char[] reserveCharacters(char[] chars, char[] reservedCharacters) {
+79:     if (reservedCharacters == null || reservedCharacters.length == 0) {
+80:       return chars;
+81:     }
+82:     Set<Character> charSet = Sets.newLinkedHashSet(Chars.asList(chars));
+83:     for (char reservedCharacter : reservedCharacters) {
+84:       charSet.remove(reservedCharacter);
+85:     }
+86:     return Chars.toArray(charSet);
+87:   }
+
+[38] com.google.javascript.jscomp.OperaCompoundAssignFix#visit  (lines 81-120)
+81:   @Override
+82:   public void visit(NodeTraversal t, Node n, Node parent) {
+83:     if (!NodeUtil.isName(n)) {
+84:       return;
+85:     }
+86: 
+87:     if (!NodeUtil.isGet(parent)) {
+88:       return;
+89:     }
+90: 
+91:     boolean nested = false;
+92:     boolean reassign = false;
+93:     Node lastAssign = null;
+94:     Node prevParent = n;
+95: 
+96:     while (!(NodeUtil.isExpressionNode(parent) ||
+97:              NodeUtil.isStatementBlock(parent))) {
+98:       if (NodeUtil.isAssign(parent) &&
+99:           NodeUtil.isName(parent.getFirstChild()) &&
+100:           parent.getFirstChild().getString().equals(n.getString()) &&
+101:           nested) {
+102:         reassign = true;
+103:         break;
+104:       } else if (NodeUtil.isAssignmentOp(parent) &&
+105:           parent.getLastChild() == prevParent) {
+106:         if (lastAssign == null) {
+107:           nested = true;
+108:         }
+109:         lastAssign = parent;
+110:       }
+111:       prevParent = parent;
+112:       parent = parent.getParent();
+113:     }
+114: 
+115:     if (!(reassign && nested)) {
+116:       return;
+117:     }
+118: 
+119:     applyWorkAround(parent, t);
+120:   }
+
+[39] com.google.javascript.jscomp.RemoveUnusedVars#maybeCreateAssign  (lines 910-936)
+910:     static Assign maybeCreateAssign(Node assignNode) {
+911:       Preconditions.checkState(NodeUtil.isAssignmentOp(assignNode));
+912: 
+913:       // Skip one level of GETPROPs or GETELEMs.
+914:       //
+915:       // Don't skip more than one level, because then we get into
+916:       // situations where assigns to properties of properties will always
+917:       // trigger side-effects, and the variable they're on cannot be removed.
+918:       boolean isPropAssign = false;
+919:       Node current = assignNode.getFirstChild();
+920:       if (NodeUtil.isGet(current)) {
+921:         current = current.getFirstChild();
+922:         isPropAssign = true;
+923: 
+924:         if (current.getType() == Token.GETPROP &&
+925:             current.getLastChild().getString().equals("prototype")) {
+926:           // Prototype properties sets should be considered like normal
+927:           // property sets.
+928:           current = current.getFirstChild();
+929:         }
+930:       }
+931: 
+932:       if (current.getType() == Token.NAME) {
+933:         return new Assign(assignNode, current, isPropAssign);
+934:       }
+935:       return null;
+936:     }
+
+[40] com.google.javascript.jscomp.ScopedAliases#getAliasDefinitions  (lines 189-191)
+189:     List<Node> getAliasDefinitions() {
+190:       return aliasDefinitions;
+191:     }
+
+[41] com.google.javascript.jscomp.Compiler#precheck  (lines 718-720)
+718:   boolean precheck() {
+719:     return true;
+720:   }
+
+[42] com.google.javascript.jscomp.StatementFusion#canFuseIntoOneStatement  (lines 46-83)
+46:   private static boolean canFuseIntoOneStatement(Node block) {
+47:     // Fold only statement block. NOT scripts block.
+48:     if (block.getType() != Token.BLOCK) {
+49:       return false;
+50:     }
+51: 
+52:     // Nothing to do here.
+53:     if (!block.hasChildren() || block.hasOneChild()) {
+54:       return false;
+55:     }
+56: 
+57:     Node last = block.getLastChild();
+58: 
+59:     for (Node c = block.getFirstChild(); c != null; c = c.getNext()) {
+60:       if (!NodeUtil.isExpressionNode(c) && c != last) {
+61:         return false;
+62:       }
+63:     }
+64: 
+65:     // TODO(user): Support more control statement for fusion.
+66:     // FOR
+67:     switch(last.getType()) {
+68:       case Token.IF:
+69:       case Token.THROW:
+70:       case Token.SWITCH:
+71:       case Token.EXPR_RESULT:
+72:         return true;
+73:       case Token.RETURN:
+74:         // We don't want to add a new return value.
+75:         return last.hasChildren();
+76:       case Token.FOR:
+77:         return NodeUtil.isForIn(last) &&
+78:             // Avoid cases where we have for(var x = foo() in a) { ....
+79:             !NodeUtil.mayHaveSideEffects(last.getFirstChild());
+80:     }
+81: 
+82:     return false;
+83:   }
+
+[43] com.google.javascript.jscomp.ShadowVariables#visit  (lines 129-169)
+129:     @Override
+130:     public void visit(NodeTraversal t, Node n, Node parent) {
+131:       // Skipping over non-name nodes and empty function names.
+132:       if (!NodeUtil.isReferenceName(n)) {
+133:         return;
+134:       }
+135: 
+136:       // We focus on shadowing local variables as their name occurs much more
+137:       // than global names.
+138:       // TODO(user): Alternatively, we could experiment with using a local
+139:       // name to shadow a global variable.
+140:       if (t.inGlobalScope()) {
+141:         return;
+142:       }
+143: 
+144:       Var var = t.getScope().getVar(n.getString());
+145:       if (var == null) {
+146:         // extern name or undefined name.
+147:         return;
+148:       }
+149: 
+150:       if (var.getScope().isGlobal()) {
+151:         // We will not shadow a global variable name.
+152:         return;
+153:       }
+154: 
+155:       // Using the definition of upward referencing, fill in the map.
+156:       if (var.getScope() != t.getScope()) {
+157:         for (Scope s = t.getScope();
+158:             s != var.getScope() && s.isLocal(); s = s.getParent()) {
+159:           scopeUpRefMap.put(s.getRootNode(), var.name);
+160:         }
+161:       }
+162: 
+163:       if (var.getScope() == t.getScope()) {
+164:         scopeUpRefMap.put(t.getScopeRoot(), var.name);
+165:       }
+166: 
+167:       // Find in the usage map that tracks a var and all of its usage.
+168:       varToNameUsage.put(var, n);
+169:     }
+
+[44] com.google.javascript.jscomp.ScopedAliases#getAliasUsages  (lines 193-195)
+193:     private List<AliasUsage> getAliasUsages() {
+194:       return aliasUsages;
+195:     }
+
+[45] com.google.javascript.jscomp.CheckMissingReturn#isVoidOrUnknown  (lines 187-191)
+187:   private boolean isVoidOrUnknown(JSType returnType) {
+188:     final JSType voidType =
+189:         compiler.getTypeRegistry().getNativeType(JSTypeNative.VOID_TYPE);
+190:     return voidType.isSubtype(returnType);
+191:   }
+
+[46] com.google.javascript.jscomp.CheckGlobalThis#CheckGlobalThis  (lines 71-73)
+71:   CheckGlobalThis(AbstractCompiler compiler) {
+72:     this.compiler = compiler;
+73:   }
+
+[47] com.google.javascript.jscomp.Compiler#check  (lines 722-754)
+722:   public void check() {
+723:     runCustomPasses(CustomPassExecutionTime.BEFORE_CHECKS);
+724: 
+725:     PhaseOptimizer phaseOptimizer = new PhaseOptimizer(this, tracker);
+726:     if (options.devMode == DevMode.EVERY_PASS) {
+727:       phaseOptimizer.setSanityCheck(sanityCheck);
+728:     }
+729:     phaseOptimizer.consume(getPassConfig().getChecks());
+730:     phaseOptimizer.process(externsRoot, jsRoot);
+731:     if (hasErrors()) {
+732:       return;
+733:     }
+734: 
+735:     // TODO(nicksantos): clean this up. The flow here is too hard to follow.
+736:     if (options.nameAnonymousFunctionsOnly) {
+737:       return;
+738:     }
+739: 
+740:     if (options.removeTryCatchFinally) {
+741:       removeTryCatchFinally();
+742:     }
+743: 
+744:     if (options.getTweakProcessing().shouldStrip() ||
+745:         !options.stripTypes.isEmpty() ||
+746:         !options.stripNameSuffixes.isEmpty() ||
+747:         !options.stripTypePrefixes.isEmpty() ||
+748:         !options.stripNamePrefixes.isEmpty()) {
+749:       stripCode(options.stripTypes, options.stripNameSuffixes,
+750:           options.stripTypePrefixes, options.stripNamePrefixes);
+751:     }
+752: 
+753:     runCustomPasses(CustomPassExecutionTime.BEFORE_OPTIMIZATIONS);
+754:   }
+
+[48] com.google.javascript.jscomp.Denormalize#maybeCollapseIntoForStatements  (lines 65-127)
+65:   private void maybeCollapseIntoForStatements(Node n, Node parent) {
+66:     // Only SCRIPT, BLOCK, and LABELs can have FORs that can be collapsed into.
+67:     // LABELs are not supported here.
+68:     if (parent == null || !NodeUtil.isStatementBlock(parent)) {
+69:       return;
+70:     }
+71: 
+72:     // Is the current node something that can be in a for loop initializer?
+73:     if (!NodeUtil.isExpressionNode(n) && !NodeUtil.isVar(n)) {
+74:       return;
+75:     }
+76: 
+77:     // Is the next statement a valid FOR?
+78:     Node nextSibling = n.getNext();
+79:     if (nextSibling == null) {
+80:       return;
+81:     } else if (NodeUtil.isForIn(nextSibling)) {
+82:       Node forNode = nextSibling;
+83:       Node forVar = forNode.getFirstChild();
+84:       if (NodeUtil.isName(forVar)
+85:           && NodeUtil.isVar(n) && n.hasOneChild()) {
+86:         Node name = n.getFirstChild();
+87:         if (!name.hasChildren()
+88:             && forVar.getString().equals(name.getString())) {
+89:           // Ok, the names match, and the var declaration does not have an
+90:           // initializer. Move it into the loop.
+91:           parent.removeChild(n);
+92:           forNode.replaceChild(forVar, n);
+93:           compiler.reportCodeChange();
+94:         }
+95:       }
+96:     } else if (nextSibling.getType() == Token.FOR
+97:         && nextSibling.getFirstChild().getType() == Token.EMPTY) {
+98: 
+99:       // Does the current node contain an in operator?  If so, embedding
+100:       // the expression in a for loop can cause some Javascript parsers (such
+101:       // as the Playstation 3's browser based on Access's NetFront
+102:       // browser) to fail to parse the code.
+103:       // See bug 1778863 for details.
+104:       if (NodeUtil.containsType(n, Token.IN)) {
+105:         return;
+106:       }
+107: 
+108:       // Move the current node into the FOR loop initializer.
+109:       Node forNode = nextSibling;
+110:       Node oldInitializer = forNode.getFirstChild();
+111:       parent.removeChild(n);
+112: 
+113:       Node newInitializer;
+114:       if (NodeUtil.isVar(n)) {
+115:         newInitializer = n;
+116:       } else {
+117:         // Extract the expression from EXPR_RESULT node.
+118:         Preconditions.checkState(n.hasOneChild());
+119:         newInitializer = n.getFirstChild();
+120:         n.removeChild(newInitializer);
+121:       }
+122: 
+123:       forNode.replaceChild(oldInitializer, newInitializer);
+124: 
+125:       compiler.reportCodeChange();
+126:     }
+127:   }
+
+[49] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 870-874)
+870:     @Override
+871:     protected HotSwapCompilerPass createInternal(AbstractCompiler compiler) {
+872:       return new ScopedAliases(
+873:               compiler, options.getAliasTransformationHandler());
+874:     }
+
+[50] com.google.javascript.jscomp.DiagnosticGroups#forName  (lines 62-64)
+62:   protected DiagnosticGroup forName(String name) {
+63:     return groupsByName.get(name);
+64:   }

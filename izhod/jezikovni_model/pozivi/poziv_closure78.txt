@@ -1,0 +1,1545 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.PeepholeFoldConstantsTest::testFoldArithmetic
+junit.framework.AssertionFailedError: Unexpected error(s): JSC_DIVIDE_BY_0_ERROR. Divide by 0 at testcode line 1 : 8 expected:<0> but was:<1>
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:767)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:410)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:335)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:304)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:292)
+	at com.google.javascript.jscomp.PeepholeFoldConstantsTest.fold(PeepholeFoldConstantsTest.java:69)
+	at com.google.javascript.jscomp.PeepholeFoldConstantsTest.testFoldArithmetic(PeepholeFoldConstantsTest.java:558)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.PeepholeFoldConstants#tryFoldLeftChildOp  (lines 757-795)
+757:   private Node tryFoldLeftChildOp(Node n, Node left, Node right) {
+758:     int opType = n.getType();
+759:     Preconditions.checkState(
+760:         (NodeUtil.isAssociative(opType) && NodeUtil.isCommutative(opType))
+761:         || n.getType() == Token.ADD);
+762: 
+763:     Preconditions.checkState(
+764:         n.getType() != Token.ADD || !NodeUtil.mayBeString(n));
+765: 
+766:     // Use getNumberValue to handle constants like "NaN" and "Infinity"
+767:     // other values are converted to numbers elsewhere.
+768:     Double rightValObj = NodeUtil.getNumberValue(right);
+769:     if (rightValObj != null && left.getType() == opType) {
+770:       Preconditions.checkState(left.getChildCount() == 2);
+771: 
+772:       Node ll = left.getFirstChild();
+773:       Node lr = ll.getNext();
+774: 
+775:       Node valueToCombine = ll;
+776:       Node replacement = performArithmeticOp(opType, valueToCombine, right);
+777:       if (replacement == null) {
+778:         valueToCombine = lr;
+779:         replacement = performArithmeticOp(opType, valueToCombine, right);
+780:       }
+781:       if (replacement != null) {
+782:         // Remove the child that has been combined
+783:         left.removeChild(valueToCombine);
+784:         // Replace the left op with the remaining child.
+785:         n.replaceChild(left, left.removeFirstChild());
+786:         // New "-Infinity" node need location info explicitly
+787:         // added.
+788:         replacement.copyInformationFromForTree(right);
+789:         n.replaceChild(right, replacement);
+790:         reportCodeChange();
+791:       }
+792:     }
+793: 
+794:     return n;
+795:   }
+
+[2] com.google.javascript.jscomp.Compiler#report  (lines 1705-1718)
+1705:   @Override
+1706:   public void report(JSError error) {
+1707:     CheckLevel level = error.level;
+1708:     if (warningsGuard != null) {
+1709:       CheckLevel newLevel = warningsGuard.level(error);
+1710:       if (newLevel != null) {
+1711:         level = newLevel;
+1712:       }
+1713:     }
+1714: 
+1715:     if (level.isOn()) {
+1716:       errorManager.report(level, error);
+1717:     }
+1718:   }
+
+[3] com.google.javascript.jscomp.NodeUtil#isAssociative  (lines 1322-1334)
+1322:   static boolean isAssociative(int type) {
+1323:     switch (type) {
+1324:       case Token.MUL:
+1325:       case Token.AND:
+1326:       case Token.OR:
+1327:       case Token.BITOR:
+1328:       case Token.BITXOR:
+1329:       case Token.BITAND:
+1330:         return true;
+1331:       default:
+1332:         return false;
+1333:     }
+1334:   }
+
+[4] com.google.javascript.jscomp.NodeTraversal#makeError  (lines 637-639)
+637:   public JSError makeError(Node n, DiagnosticType type, String... arguments) {
+638:     return JSError.make(getSourceName(), n, type, arguments);
+639:   }
+
+[5] com.google.javascript.jscomp.PeepholeFoldConstants#tryFoldArithmeticOp  (lines 650-659)
+650:   private Node tryFoldArithmeticOp(Node n, Node left, Node right) {
+651:     Node result = performArithmeticOp(n.getType(), left, right);
+652:     if (result != null) {
+653:       result.copyInformationFromForTree(n);
+654:       n.getParent().replaceChild(n, result);
+655:       reportCodeChange();
+656:       return result;
+657:     }
+658:     return n;
+659:   }
+
+[6] com.google.javascript.rhino.Node#propToString  (lines 174-237)
+174:   private static final String propToString(int propType) {
+175:       switch (propType) {
+176:         case LOCAL_BLOCK_PROP:   return "local_block";
+177:         case OBJECT_IDS_PROP:    return "object_ids_prop";
+178:         case CATCH_SCOPE_PROP:   return "catch_scope_prop";
+179:         case LABEL_ID_PROP:      return "label_id_prop";
+180:         case TARGET_PROP:        return "target";
+181:         case BREAK_PROP:         return "break";
+182:         case CONTINUE_PROP:      return "continue";
+183:         case ENUM_PROP:          return "enum";
+184:         case FUNCTION_PROP:      return "function";
+185:         case TEMP_PROP:          return "temp";
+186:         case LOCAL_PROP:         return "local";
+187:         case CODEOFFSET_PROP:    return "codeoffset";
+188:         case FIXUPS_PROP:        return "fixups";
+189:         case VARS_PROP:          return "vars";
+190:         case USES_PROP:          return "uses";
+191:         case REGEXP_PROP:        return "regexp";
+192:         case CASES_PROP:         return "cases";
+193:         case DEFAULT_PROP:       return "default";
+194:         case CASEARRAY_PROP:     return "casearray";
+195:         case SOURCENAME_PROP:    return "sourcename";
+196:         case TYPE_PROP:          return "type";
+197:         case SPECIAL_PROP_PROP:  return "special_prop";
+198:         case LABEL_PROP:         return "label";
+199:         case FINALLY_PROP:       return "finally";
+200:         case LOCALCOUNT_PROP:    return "localcount";
+201: 
+202:         case TARGETBLOCK_PROP:   return "targetblock";
+203:         case VARIABLE_PROP:      return "variable";
+204:         case LASTUSE_PROP:       return "lastuse";
+205:         case ISNUMBER_PROP:      return "isnumber";
+206:         case DIRECTCALL_PROP:    return "directcall";
+207: 
+208:         case SPECIALCALL_PROP:   return "specialcall";
+209:         case DEBUGSOURCE_PROP:   return "debugsource";
+210: 
+211:         case JSDOC_INFO_PROP:    return "jsdoc_info";
+212: 
+213:         case SKIP_INDEXES_PROP:  return "skip_indexes";
+214:         case INCRDECR_PROP:      return "incrdecr";
+215:         case MEMBER_TYPE_PROP:   return "member_type";
+216:         case NAME_PROP:          return "name";
+217:         case PARENTHESIZED_PROP: return "parenthesized";
+218:         case QUOTED_PROP:        return "quoted";
+219: 
+220:         case SYNTHETIC_BLOCK_PROP: return "synthetic";
+221:         case EMPTY_BLOCK: return "empty_block";
+222:         case ORIGINALNAME_PROP: return "originalname";
+223:         case SIDE_EFFECT_FLAGS: return "side_effect_flags";
+224: 
+225:         case IS_CONSTANT_NAME:   return "is_constant_name";
+226:         case IS_OPTIONAL_PARAM:  return "is_optional_param";
+227:         case IS_VAR_ARGS_PARAM:  return "is_var_args_param";
+228:         case IS_NAMESPACE:       return "is_namespace";
+229:         case IS_DISPATCHER:      return "is_dispatcher";
+230:         case DIRECTIVES:         return "directives";
+231:         case DIRECT_EVAL:        return "direct_eval";
+232:         case FREE_CALL:          return "free_call";
+233:         default:
+234:           Kit.codeBug();
+235:       }
+236:       return null;
+237:   }
+
+[7] com.google.javascript.rhino.Node#extractCharno  (lines 1172-1178)
+1172:   protected static int extractCharno(int lineCharNo) {
+1173:     if (lineCharNo == -1) {
+1174:       return -1;
+1175:     } else {
+1176:       return lineCharNo & COLUMN_MASK;
+1177:     }
+1178:   }
+
+[8] com.google.javascript.rhino.Node#extractLineno  (lines 1160-1166)
+1160:   protected static int extractLineno(int lineCharNo) {
+1161:     if (lineCharNo == -1) {
+1162:       return -1;
+1163:     } else {
+1164:       return lineCharNo >>> COLUMN_BITS;
+1165:     }
+1166:   }
+
+[9] com.google.javascript.jscomp.JSModule#add  (lines 102-105)
+102:   public void add(CompilerInput input) {
+103:     inputs.add(input);
+104:     input.setModule(this);
+105:   }
+
+[10] com.google.javascript.jscomp.PeepholeFoldConstants#tryFoldBinaryOperator  (lines 96-163)
+96:   private Node tryFoldBinaryOperator(Node subtree) {
+97:     Node left = subtree.getFirstChild();
+98: 
+99:     if (left == null) {
+100:       return subtree;
+101:     }
+102: 
+103:     Node right = left.getNext();
+104: 
+105:     if (right == null) {
+106:       return subtree;
+107:     }
+108: 
+109:     // If we've reached here, node is truly a binary operator.
+110:     switch(subtree.getType()) {
+111:       case Token.GETPROP:
+112:         return tryFoldGetProp(subtree, left, right);
+113: 
+114:       case Token.GETELEM:
+115:         return tryFoldGetElem(subtree, left, right);
+116: 
+117:       case Token.INSTANCEOF:
+118:         return tryFoldInstanceof(subtree, left, right);
+119: 
+120:       case Token.AND:
+121:       case Token.OR:
+122:         return tryFoldAndOr(subtree, left, right);
+123: 
+124:       case Token.LSH:
+125:       case Token.RSH:
+126:       case Token.URSH:
+127:         return tryFoldShift(subtree, left, right);
+128: 
+129:       case Token.ASSIGN:
+130:         return tryFoldAssign(subtree, left, right);
+131: 
+132:       case Token.ADD:
+133:         return tryFoldAdd(subtree, left, right);
+134: 
+135:       case Token.SUB:
+136:       case Token.DIV:
+137:       case Token.MOD:
+138:         return tryFoldArithmeticOp(subtree, left, right);
+139: 
+140:       case Token.MUL:
+141:       case Token.BITAND:
+142:       case Token.BITOR:
+143:       case Token.BITXOR:
+144:         Node result = tryFoldArithmeticOp(subtree, left, right);
+145:         if (result != subtree) {
+146:           return result;
+147:         }
+148:         return tryFoldLeftChildOp(subtree, left, right);
+149: 
+150:       case Token.LT:
+151:       case Token.GT:
+152:       case Token.LE:
+153:       case Token.GE:
+154:       case Token.EQ:
+155:       case Token.NE:
+156:       case Token.SHEQ:
+157:       case Token.SHNE:
+158:         return tryFoldComparison(subtree, left, right);
+159: 
+160:       default:
+161:         return subtree;
+162:     }
+163:   }
+
+[11] com.google.javascript.jscomp.SourceFile#fromCode  (lines 256-258)
+256:   public static SourceFile fromCode(String fileName, String code) {
+257:     return new Preloaded(fileName, code);
+258:   }
+
+[12] com.google.javascript.rhino.Node#getCharno  (lines 862-864)
+862:   public int getCharno() {
+863:     return extractCharno(sourcePosition);
+864:   }
+
+[13] com.google.javascript.rhino.Node#mergeLineCharNo  (lines 1146-1154)
+1146:   protected static int mergeLineCharNo(int lineno, int charno) {
+1147:     if (lineno < 0 || charno < 0) {
+1148:       return -1;
+1149:     } else if ((charno & ~COLUMN_MASK) != 0) {
+1150:       return lineno << COLUMN_BITS | COLUMN_MASK;
+1151:     } else {
+1152:       return lineno << COLUMN_BITS | (charno & COLUMN_MASK);
+1153:     }
+1154:   }
+
+[14] com.google.javascript.rhino.Node#addChildToBack  (lines 601-612)
+601:   public void addChildToBack(Node child) {
+602:     Preconditions.checkArgument(child.parent == null);
+603:     Preconditions.checkArgument(child.next == null);
+604:     child.parent = this;
+605:     child.next = null;
+606:     if (last == null) {
+607:       first = last = child;
+608:       return;
+609:     }
+610:     last.next = child;
+611:     last = child;
+612:   }
+
+[15] com.google.javascript.jscomp.NodeUtil#isNumericResult  (lines 1186-1188)
+1186:   static boolean isNumericResult(Node n) {
+1187:     return valueCheck(n, NUMBERIC_RESULT_PREDICATE);
+1188:   }
+
+[16] com.google.javascript.jscomp.NodeTraversal#getSourceName  (lines 392-394)
+392:   public String getSourceName() {
+393:     return sourceName;
+394:   }
+
+[17] com.google.javascript.jscomp.PeepholeFoldConstants#performArithmeticOp  (lines 664-746)
+664:   private Node performArithmeticOp(int opType, Node left, Node right) {
+665:     // Unlike other operations, ADD operands are not always converted
+666:     // to Number.
+667:     if (opType == Token.ADD
+668:         && (NodeUtil.mayBeString(left, false)
+669:             || NodeUtil.mayBeString(right, false))) {
+670:       return null;
+671:     }
+672: 
+673:     double result;
+674: 
+675:     // TODO(johnlenz): Handle NaN with unknown value. BIT ops convert NaN
+676:     // to zero so this is a little akward here.
+677: 
+678:     Double lValObj = NodeUtil.getNumberValue(left);
+679:     if (lValObj == null) {
+680:       return null;
+681:     }
+682:     Double rValObj = NodeUtil.getNumberValue(right);
+683:     if (rValObj == null) {
+684:       return null;
+685:     }
+686: 
+687:     double lval = lValObj;
+688:     double rval = rValObj;
+689: 
+690:     switch (opType) {
+691:       case Token.BITAND:
+692:         result = ScriptRuntime.toInt32(lval) & ScriptRuntime.toInt32(rval);
+693:         break;
+694:       case Token.BITOR:
+695:         result = ScriptRuntime.toInt32(lval) | ScriptRuntime.toInt32(rval);
+696:         break;
+697:       case Token.BITXOR:
+698:         result = ScriptRuntime.toInt32(lval) ^ ScriptRuntime.toInt32(rval);
+699:         break;
+700:       case Token.ADD:
+701:         result = lval + rval;
+702:         break;
+703:       case Token.SUB:
+704:         result = lval - rval;
+705:         break;
+706:       case Token.MUL:
+707:         result = lval * rval;
+708:         break;
+709:       case Token.MOD:
+710:         if (rval == 0) {
+711:           error(DiagnosticType.error("JSC_DIVIDE_BY_0_ERROR", "Divide by 0"), right);
+712:           return null;
+713:         }
+714:         result = lval % rval;
+715:         break;
+716:       case Token.DIV:
+717:         if (rval == 0) {
+718:           error(DiagnosticType.error("JSC_DIVIDE_BY_0_ERROR", "Divide by 0"), right);
+719:           return null;
+720:         }
+721:         result = lval / rval;
+722:         break;
+723:       default:
+724:         throw new Error("Unexpected arithmetic operator");
+725:     }
+726: 
+727:     // TODO(johnlenz): consider removing the result length check.
+728:     // length of the left and right value plus 1 byte for the operator.
+729:     if (String.valueOf(result).length() <=
+730:         String.valueOf(lval).length() + String.valueOf(rval).length() + 1 &&
+731: 
+732:         // Do not try to fold arithmetic for numbers > 2^53. After that
+733:         // point, fixed-point math starts to break down and become inaccurate.
+734:         Math.abs(result) <= MAX_FOLD_NUMBER) {
+735:       Node newNumber = Node.newNumber(result);
+736:       return newNumber;
+737:     } else if (Double.isNaN(result)) {
+738:       return Node.newString(Token.NAME, "NaN");
+739:     } else if (result == Double.POSITIVE_INFINITY) {
+740:       return Node.newString(Token.NAME, "Infinity");
+741:     } else if (result == Double.NEGATIVE_INFINITY) {
+742:       return new Node(Token.NEG, Node.newString(Token.NAME, "Infinity"));
+743:     }
+744: 
+745:     return null;
+746:   }
+
+[18] com.google.javascript.jscomp.parsing.IRFactory#position2charno  (lines 306-314)
+306:   private int position2charno(int position) {
+307:     int lineIndex = sourceString.lastIndexOf('\n', position);
+308:     if (lineIndex == -1) {
+309:       return position;
+310:     } else {
+311:       // Subtract one for initial position being 0.
+312:       return position - lineIndex - 1;
+313:     }
+314:   }
+
+[19] com.google.javascript.jscomp.DiagnosticType#DiagnosticType  (lines 93-99)
+93:   private DiagnosticType(String key, CheckLevel level, MessageFormat format) {
+94:     this.key = key;
+95:     this.defaultLevel = level;
+96:     this.format = format;
+97: 
+98:     this.level = this.defaultLevel;
+99:   }
+
+[20] com.google.javascript.jscomp.NodeUtil#mayBeStringHelper  (lines 1311-1314)
+1311:   static boolean mayBeStringHelper(Node n) {
+1312:     return !isNumericResult(n) && !isBooleanResult(n)
+1313:         && !isUndefined(n) && !isNull(n);
+1314:   }
+
+[21] com.google.javascript.jscomp.parsing.IRFactory#processAstRoot  (lines 381-389)
+381:     @Override
+382:     Node processAstRoot(AstRoot rootNode) {
+383:       Node node = newNode(Token.SCRIPT);
+384:       for (com.google.javascript.jscomp.mozilla.rhino.Node child : rootNode) {
+385:         node.addChildToBack(transform((AstNode)child));
+386:       }
+387:       parseDirectives(node);
+388:       return node;
+389:     }
+
+[22] com.google.javascript.jscomp.parsing.IRFactory#transformTokenType  (lines 998-1309)
+998:   private static int transformTokenType(int token) {
+999:     switch (token) {
+1000:       case com.google.javascript.jscomp.mozilla.rhino.Token.ERROR:
+1001:         return Token.ERROR;
+1002:       case com.google.javascript.jscomp.mozilla.rhino.Token.EOF:
+1003:         return Token.EOF;
+1004:       case com.google.javascript.jscomp.mozilla.rhino.Token.EOL:
+1005:         return Token.EOL;
+1006:       case com.google.javascript.jscomp.mozilla.rhino.Token.ENTERWITH:
+1007:         return Token.ENTERWITH;
+1008:       case com.google.javascript.jscomp.mozilla.rhino.Token.LEAVEWITH:
+1009:         return Token.LEAVEWITH;
+1010:       case com.google.javascript.jscomp.mozilla.rhino.Token.RETURN:
+1011:         return Token.RETURN;
+1012:       case com.google.javascript.jscomp.mozilla.rhino.Token.GOTO:
+1013:         return Token.GOTO;
+1014:       case com.google.javascript.jscomp.mozilla.rhino.Token.IFEQ:
+1015:         return Token.IFEQ;
+1016:       case com.google.javascript.jscomp.mozilla.rhino.Token.IFNE:
+1017:         return Token.IFNE;
+1018:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETNAME:
+1019:         return Token.SETNAME;
+1020:       case com.google.javascript.jscomp.mozilla.rhino.Token.BITOR:
+1021:         return Token.BITOR;
+1022:       case com.google.javascript.jscomp.mozilla.rhino.Token.BITXOR:
+1023:         return Token.BITXOR;
+1024:       case com.google.javascript.jscomp.mozilla.rhino.Token.BITAND:
+1025:         return Token.BITAND;
+1026:       case com.google.javascript.jscomp.mozilla.rhino.Token.EQ:
+1027:         return Token.EQ;
+1028:       case com.google.javascript.jscomp.mozilla.rhino.Token.NE:
+1029:         return Token.NE;
+1030:       case com.google.javascript.jscomp.mozilla.rhino.Token.LT:
+1031:         return Token.LT;
+1032:       case com.google.javascript.jscomp.mozilla.rhino.Token.LE:
+1033:         return Token.LE;
+1034:       case com.google.javascript.jscomp.mozilla.rhino.Token.GT:
+1035:         return Token.GT;
+1036:       case com.google.javascript.jscomp.mozilla.rhino.Token.GE:
+1037:         return Token.GE;
+1038:       case com.google.javascript.jscomp.mozilla.rhino.Token.LSH:
+1039:         return Token.LSH;
+1040:       case com.google.javascript.jscomp.mozilla.rhino.Token.RSH:
+1041:         return Token.RSH;
+1042:       case com.google.javascript.jscomp.mozilla.rhino.Token.URSH:
+1043:         return Token.URSH;
+1044:       case com.google.javascript.jscomp.mozilla.rhino.Token.ADD:
+1045:         return Token.ADD;
+1046:       case com.google.javascript.jscomp.mozilla.rhino.Token.SUB:
+1047:         return Token.SUB;
+1048:       case com.google.javascript.jscomp.mozilla.rhino.Token.MUL:
+1049:         return Token.MUL;
+1050:       case com.google.javascript.jscomp.mozilla.rhino.Token.DIV:
+1051:         return Token.DIV;
+1052:       case com.google.javascript.jscomp.mozilla.rhino.Token.MOD:
+1053:         return Token.MOD;
+1054:       case com.google.javascript.jscomp.mozilla.rhino.Token.NOT:
+1055:         return Token.NOT;
+1056:       case com.google.javascript.jscomp.mozilla.rhino.Token.BITNOT:
+1057:         return Token.BITNOT;
+1058:       case com.google.javascript.jscomp.mozilla.rhino.Token.POS:
+1059:         return Token.POS;
+1060:       case com.google.javascript.jscomp.mozilla.rhino.Token.NEG:
+1061:         return Token.NEG;
+1062:       case com.google.javascript.jscomp.mozilla.rhino.Token.NEW:
+1063:         return Token.NEW;
+1064:       case com.google.javascript.jscomp.mozilla.rhino.Token.DELPROP:
+1065:         return Token.DELPROP;
+1066:       case com.google.javascript.jscomp.mozilla.rhino.Token.TYPEOF:
+1067:         return Token.TYPEOF;
+1068:       case com.google.javascript.jscomp.mozilla.rhino.Token.GETPROP:
+1069:         return Token.GETPROP;
+1070:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETPROP:
+1071:         return Token.SETPROP;
+1072:       case com.google.javascript.jscomp.mozilla.rhino.Token.GETELEM:
+1073:         return Token.GETELEM;
+1074:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETELEM:
+1075:         return Token.SETELEM;
+1076:       case com.google.javascript.jscomp.mozilla.rhino.Token.CALL:
+1077:         return Token.CALL;
+1078:       case com.google.javascript.jscomp.mozilla.rhino.Token.NAME:
+1079:         return Token.NAME;
+1080:       case com.google.javascript.jscomp.mozilla.rhino.Token.NUMBER:
+1081:         return Token.NUMBER;
+1082:       case com.google.javascript.jscomp.mozilla.rhino.Token.STRING:
+1083:         return Token.STRING;
+1084:       case com.google.javascript.jscomp.mozilla.rhino.Token.NULL:
+1085:         return Token.NULL;
+1086:       case com.google.javascript.jscomp.mozilla.rhino.Token.THIS:
+1087:         return Token.THIS;
+1088:       case com.google.javascript.jscomp.mozilla.rhino.Token.FALSE:
+1089:         return Token.FALSE;
+1090:       case com.google.javascript.jscomp.mozilla.rhino.Token.TRUE:
+1091:         return Token.TRUE;
+1092:       case com.google.javascript.jscomp.mozilla.rhino.Token.SHEQ:
+1093:         return Token.SHEQ;
+1094:       case com.google.javascript.jscomp.mozilla.rhino.Token.SHNE:
+1095:         return Token.SHNE;
+1096:       case com.google.javascript.jscomp.mozilla.rhino.Token.REGEXP:
+1097:         return Token.REGEXP;
+1098:       case com.google.javascript.jscomp.mozilla.rhino.Token.BINDNAME:
+1099:         return Token.BINDNAME;
+1100:       case com.google.javascript.jscomp.mozilla.rhino.Token.THROW:
+1101:         return Token.THROW;
+1102:       case com.google.javascript.jscomp.mozilla.rhino.Token.RETHROW:
+1103:         return Token.RETHROW;
+1104:       case com.google.javascript.jscomp.mozilla.rhino.Token.IN:
+1105:         return Token.IN;
+1106:       case com.google.javascript.jscomp.mozilla.rhino.Token.INSTANCEOF:
+1107:         return Token.INSTANCEOF;
+1108:       case com.google.javascript.jscomp.mozilla.rhino.Token.LOCAL_LOAD:
+1109:         return Token.LOCAL_LOAD;
+1110:       case com.google.javascript.jscomp.mozilla.rhino.Token.GETVAR:
+1111:         return Token.GETVAR;
+1112:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETVAR:
+1113:         return Token.SETVAR;
+1114:       case com.google.javascript.jscomp.mozilla.rhino.Token.CATCH_SCOPE:
+1115:         return Token.CATCH_SCOPE;
+1116:       case com.google.javascript.jscomp.mozilla.rhino.Token.ENUM_INIT_KEYS:
+1117:         return Token.ENUM_INIT_KEYS;
+1118:       case com.google.javascript.jscomp.mozilla.rhino.Token.ENUM_INIT_VALUES:
+1119:         return Token.ENUM_INIT_VALUES;
+1120:       case com.google.javascript.jscomp.mozilla.rhino.Token.ENUM_NEXT:
+1121:         return Token.ENUM_NEXT;
+1122:       case com.google.javascript.jscomp.mozilla.rhino.Token.ENUM_ID:
+1123:         return Token.ENUM_ID;
+1124:       case com.google.javascript.jscomp.mozilla.rhino.Token.THISFN:
+1125:         return Token.THISFN;
+1126:       case com.google.javascript.jscomp.mozilla.rhino.Token.RETURN_RESULT:
+1127:         return Token.RETURN_RESULT;
+1128:       case com.google.javascript.jscomp.mozilla.rhino.Token.ARRAYLIT:
+1129:         return Token.ARRAYLIT;
+1130:       case com.google.javascript.jscomp.mozilla.rhino.Token.OBJECTLIT:
+1131:         return Token.OBJECTLIT;
+1132:       case com.google.javascript.jscomp.mozilla.rhino.Token.GET_REF:
+1133:         return Token.GET_REF;
+1134:       case com.google.javascript.jscomp.mozilla.rhino.Token.SET_REF:
+1135:         return Token.SET_REF;
+1136:       case com.google.javascript.jscomp.mozilla.rhino.Token.DEL_REF:
+1137:         return Token.DEL_REF;
+1138:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_CALL:
+1139:         return Token.REF_CALL;
+1140:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_SPECIAL:
+1141:         return Token.REF_SPECIAL;
+1142:       case com.google.javascript.jscomp.mozilla.rhino.Token.DEFAULTNAMESPACE:
+1143:         return Token.DEFAULTNAMESPACE;
+1144:       case com.google.javascript.jscomp.mozilla.rhino.Token.ESCXMLTEXT:
+1145:         return Token.ESCXMLTEXT;
+1146:       case com.google.javascript.jscomp.mozilla.rhino.Token.ESCXMLATTR:
+1147:         return Token.ESCXMLATTR;
+1148:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_MEMBER:
+1149:         return Token.REF_MEMBER;
+1150:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_NS_MEMBER:
+1151:         return Token.REF_NS_MEMBER;
+1152:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_NAME:
+1153:         return Token.REF_NAME;
+1154:       case com.google.javascript.jscomp.mozilla.rhino.Token.REF_NS_NAME:
+1155:         return Token.REF_NS_NAME;
+1156:       case com.google.javascript.jscomp.mozilla.rhino.Token.TRY:
+1157:         return Token.TRY;
+1158:       case com.google.javascript.jscomp.mozilla.rhino.Token.SEMI:
+1159:         return Token.SEMI;
+1160:       case com.google.javascript.jscomp.mozilla.rhino.Token.LB:
+1161:         return Token.LB;
+1162:       case com.google.javascript.jscomp.mozilla.rhino.Token.RB:
+1163:         return Token.RB;
+1164:       case com.google.javascript.jscomp.mozilla.rhino.Token.LC:
+1165:         return Token.LC;
+1166:       case com.google.javascript.jscomp.mozilla.rhino.Token.RC:
+1167:         return Token.RC;
+1168:       case com.google.javascript.jscomp.mozilla.rhino.Token.LP:
+1169:         return Token.LP;
+1170:       case com.google.javascript.jscomp.mozilla.rhino.Token.RP:
+1171:         return Token.RP;
+1172:       case com.google.javascript.jscomp.mozilla.rhino.Token.COMMA:
+1173:         return Token.COMMA;
+1174:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN:
+1175:         return Token.ASSIGN;
+1176:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_BITOR:
+1177:         return Token.ASSIGN_BITOR;
+1178:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_BITXOR:
+1179:         return Token.ASSIGN_BITXOR;
+1180:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_BITAND:
+1181:         return Token.ASSIGN_BITAND;
+1182:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_LSH:
+1183:         return Token.ASSIGN_LSH;
+1184:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_RSH:
+1185:         return Token.ASSIGN_RSH;
+1186:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_URSH:
+1187:         return Token.ASSIGN_URSH;
+1188:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_ADD:
+1189:         return Token.ASSIGN_ADD;
+1190:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_SUB:
+1191:         return Token.ASSIGN_SUB;
+1192:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_MUL:
+1193:         return Token.ASSIGN_MUL;
+1194:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_DIV:
+1195:         return Token.ASSIGN_DIV;
+1196:       case com.google.javascript.jscomp.mozilla.rhino.Token.ASSIGN_MOD:
+1197:         return Token.ASSIGN_MOD;
+1198:       case com.google.javascript.jscomp.mozilla.rhino.Token.HOOK:
+1199:         return Token.HOOK;
+1200:       case com.google.javascript.jscomp.mozilla.rhino.Token.COLON:
+1201:         return Token.COLON;
+1202:       case com.google.javascript.jscomp.mozilla.rhino.Token.OR:
+1203:         return Token.OR;
+1204:       case com.google.javascript.jscomp.mozilla.rhino.Token.AND:
+1205:         return Token.AND;
+1206:       case com.google.javascript.jscomp.mozilla.rhino.Token.INC:
+1207:         return Token.INC;
+1208:       case com.google.javascript.jscomp.mozilla.rhino.Token.DEC:
+1209:         return Token.DEC;
+1210:       case com.google.javascript.jscomp.mozilla.rhino.Token.DOT:
+1211:         return Token.DOT;
+1212:       case com.google.javascript.jscomp.mozilla.rhino.Token.FUNCTION:
+1213:         return Token.FUNCTION;
+1214:       case com.google.javascript.jscomp.mozilla.rhino.Token.EXPORT:
+1215:         return Token.EXPORT;
+1216:       case com.google.javascript.jscomp.mozilla.rhino.Token.IMPORT:
+1217:         return Token.IMPORT;
+1218:       case com.google.javascript.jscomp.mozilla.rhino.Token.IF:
+1219:         return Token.IF;
+1220:       case com.google.javascript.jscomp.mozilla.rhino.Token.ELSE:
+1221:         return Token.ELSE;
+1222:       case com.google.javascript.jscomp.mozilla.rhino.Token.SWITCH:
+1223:         return Token.SWITCH;
+1224:       case com.google.javascript.jscomp.mozilla.rhino.Token.CASE:
+1225:         return Token.CASE;
+1226:       case com.google.javascript.jscomp.mozilla.rhino.Token.DEFAULT:
+1227:         return Token.DEFAULT;
+1228:       case com.google.javascript.jscomp.mozilla.rhino.Token.WHILE:
+1229:         return Token.WHILE;
+1230:       case com.google.javascript.jscomp.mozilla.rhino.Token.DO:
+1231:         return Token.DO;
+1232:       case com.google.javascript.jscomp.mozilla.rhino.Token.FOR:
+1233:         return Token.FOR;
+1234:       case com.google.javascript.jscomp.mozilla.rhino.Token.BREAK:
+1235:         return Token.BREAK;
+1236:       case com.google.javascript.jscomp.mozilla.rhino.Token.CONTINUE:
+1237:         return Token.CONTINUE;
+1238:       case com.google.javascript.jscomp.mozilla.rhino.Token.VAR:
+1239:         return Token.VAR;
+1240:       case com.google.javascript.jscomp.mozilla.rhino.Token.WITH:
+1241:         return Token.WITH;
+1242:       case com.google.javascript.jscomp.mozilla.rhino.Token.CATCH:
+1243:         return Token.CATCH;
+1244:       case com.google.javascript.jscomp.mozilla.rhino.Token.FINALLY:
+1245:         return Token.FINALLY;
+1246:       case com.google.javascript.jscomp.mozilla.rhino.Token.VOID:
+1247:         return Token.VOID;
+1248:       case com.google.javascript.jscomp.mozilla.rhino.Token.RESERVED:
+1249:         return Token.RESERVED;
+1250:       case com.google.javascript.jscomp.mozilla.rhino.Token.EMPTY:
+1251:         return Token.EMPTY;
+1252:       case com.google.javascript.jscomp.mozilla.rhino.Token.BLOCK:
+1253:         return Token.BLOCK;
+1254:       case com.google.javascript.jscomp.mozilla.rhino.Token.LABEL:
+1255:         return Token.LABEL;
+1256:       case com.google.javascript.jscomp.mozilla.rhino.Token.TARGET:
+1257:         return Token.TARGET;
+1258:       case com.google.javascript.jscomp.mozilla.rhino.Token.LOOP:
+1259:         return Token.LOOP;
+1260:       case com.google.javascript.jscomp.mozilla.rhino.Token.EXPR_VOID:
+1261:       case com.google.javascript.jscomp.mozilla.rhino.Token.EXPR_RESULT:
+1262:         return Token.EXPR_RESULT;
+1263:       case com.google.javascript.jscomp.mozilla.rhino.Token.JSR:
+1264:         return Token.JSR;
+1265:       case com.google.javascript.jscomp.mozilla.rhino.Token.SCRIPT:
+1266:         return Token.SCRIPT;
+1267:       case com.google.javascript.jscomp.mozilla.rhino.Token.TYPEOFNAME:
+1268:         return Token.TYPEOFNAME;
+1269:       case com.google.javascript.jscomp.mozilla.rhino.Token.USE_STACK:
+1270:         return Token.USE_STACK;
+1271:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETPROP_OP:
+1272:         return Token.SETPROP_OP;
+1273:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETELEM_OP:
+1274:         return Token.SETELEM_OP;
+1275:       case com.google.javascript.jscomp.mozilla.rhino.Token.LOCAL_BLOCK:
+1276:         return Token.LOCAL_BLOCK;
+1277:       case com.google.javascript.jscomp.mozilla.rhino.Token.SET_REF_OP:
+1278:         return Token.SET_REF_OP;
+1279:       case com.google.javascript.jscomp.mozilla.rhino.Token.DOTDOT:
+1280:         return Token.DOTDOT;
+1281:       case com.google.javascript.jscomp.mozilla.rhino.Token.COLONCOLON:
+1282:         return Token.COLONCOLON;
+1283:       case com.google.javascript.jscomp.mozilla.rhino.Token.XML:
+1284:         return Token.XML;
+1285:       case com.google.javascript.jscomp.mozilla.rhino.Token.DOTQUERY:
+1286:         return Token.DOTQUERY;
+1287:       case com.google.javascript.jscomp.mozilla.rhino.Token.XMLATTR:
+1288:         return Token.XMLATTR;
+1289:       case com.google.javascript.jscomp.mozilla.rhino.Token.XMLEND:
+1290:         return Token.XMLEND;
+1291:       case com.google.javascript.jscomp.mozilla.rhino.Token.TO_OBJECT:
+1292:         return Token.TO_OBJECT;
+1293:       case com.google.javascript.jscomp.mozilla.rhino.Token.TO_DOUBLE:
+1294:         return Token.TO_DOUBLE;
+1295:       case com.google.javascript.jscomp.mozilla.rhino.Token.GET:
+1296:         return Token.GET;
+1297:       case com.google.javascript.jscomp.mozilla.rhino.Token.SET:
+1298:         return Token.SET;
+1299:       case com.google.javascript.jscomp.mozilla.rhino.Token.CONST:
+1300:         return Token.CONST;
+1301:       case com.google.javascript.jscomp.mozilla.rhino.Token.SETCONST:
+1302:         return Token.SETCONST;
+1303:       case com.google.javascript.jscomp.mozilla.rhino.Token.DEBUGGER:
+1304:         return Token.DEBUGGER;
+1305:     }
+1306: 
+1307:     // Token without name
+1308:     throw new IllegalStateException(String.valueOf(token));
+1309:   }
+
+[23] com.google.javascript.jscomp.NodeUtil#isNumericResultHelper  (lines 1190-1224)
+1190:   static boolean isNumericResultHelper(Node n) {
+1191:     switch (n.getType()) {
+1192:       case Token.ADD:
+1193:         return !mayBeString(n.getFirstChild())
+1194:             && !mayBeString(n.getLastChild());
+1195:       case Token.BITNOT:
+1196:       case Token.BITOR:
+1197:       case Token.BITXOR:
+1198:       case Token.BITAND:
+1199:       case Token.LSH:
+1200:       case Token.RSH:
+1201:       case Token.URSH:
+1202:       case Token.SUB:
+1203:       case Token.MUL:
+1204:       case Token.MOD:
+1205:       case Token.DIV:
+1206:       case Token.INC:
+1207:       case Token.DEC:
+1208:       case Token.POS:
+1209:       case Token.NEG:
+1210:       case Token.NUMBER:
+1211:         return true;
+1212:       case Token.NAME:
+1213:         String name = n.getString();
+1214:         if (name.equals("NaN")) {
+1215:           return true;
+1216:         }
+1217:         if (name.equals("Infinity")) {
+1218:           return true;
+1219:         }
+1220:         return false;
+1221:       default:
+1222:         return false;
+1223:     }
+1224:   }
+
+[24] com.google.javascript.jscomp.JsAst#parse  (lines 84-106)
+84:   private void parse(AbstractCompiler compiler, String sourceName,
+85:       String sourceStr) {
+86:     try {
+87:       logger_.fine("Parsing: " + sourceName);
+88:       root = ParserRunner.parse(sourceName, sourceStr,
+89:           compiler.getParserConfig(),
+90:           compiler.getDefaultErrorReporter(),
+91:           logger_);
+92:     } catch (IOException e) {
+93:       compiler.report(JSError.make(AbstractCompiler.READ_ERROR, sourceName));
+94:     }
+95: 
+96:     if (root == null || compiler.hasHaltingErrors()) {
+97:       // There was a parse error or IOException, so use a dummy block.
+98:       root = new Node(Token.BLOCK);
+99:     } else {
+100:       compiler.prepareAst(root);
+101:     }
+102: 
+103:     // Set the source name so that the compiler passes can track
+104:     // the source file and module.
+105:     root.putProp(Node.SOURCENAME_PROP, sourceName);
+106:   }
+
+[25] com.google.javascript.jscomp.SuppressDocWarningsGuard#level  (lines 49-86)
+49:   @Override
+50:   public CheckLevel level(JSError error) {
+51:     Node node = error.node;
+52:     if (node != null) {
+53:       for (Node current = node;
+54:            current != null;
+55:            current = current.getParent()) {
+56:         int type = current.getType();
+57:         JSDocInfo info = null;
+58: 
+59:         // We only care about function annotations at the FUNCTION and SCRIPT
+60:         // level. Otherwise, the @suppress annotation has an implicit
+61:         // dependency on the exact structure of our AST, and that seems like
+62:         // a bad idea.
+63:         if (type == Token.FUNCTION) {
+64:           info = NodeUtil.getFunctionInfo(current);
+65:         } else if (type == Token.SCRIPT) {
+66:           info = current.getJSDocInfo();
+67:         }
+68: 
+69:         if (info != null) {
+70:           for (String suppressor : info.getSuppressions()) {
+71:             WarningsGuard guard = suppressors.get(suppressor);
+72: 
+73:             // Some @suppress tags are for other tools, and
+74:             // may not have a warnings guard.
+75:             if (guard != null) {
+76:               CheckLevel newLevel = guard.level(error);
+77:               if (newLevel != null) {
+78:                 return newLevel;
+79:               }
+80:             }
+81:           }
+82:         }
+83:       }
+84:     }
+85:     return null;
+86:   }
+
+[26] com.google.javascript.jscomp.CodeConsumer#addNumber  (lines 233-259)
+233:   void addNumber(double x) {
+234:     // This is not pretty printing. This is to prevent misparsing of x- -4 as
+235:     // x--4 (which is a syntax error).
+236:     char prev = getLastChar();
+237:     if (x < 0 && prev == '-') {
+238:       add(" ");
+239:     }
+240: 
+241:     if ((long) x == x) {
+242:       long value = (long) x;
+243:       long mantissa = value;
+244:       int exp = 0;
+245:       if (Math.abs(x) >= 100) {
+246:         while (mantissa / 10 * Math.pow(10, exp + 1) == value) {
+247:           mantissa /= 10;
+248:           exp++;
+249:         }
+250:       }
+251:       if (exp > 2) {
+252:         add(Long.toString(mantissa) + "E" + Integer.toString(exp));
+253:       } else {
+254:         add(Long.toString(value));
+255:       }
+256:     } else {
+257:       add(String.valueOf(x));
+258:     }
+259:   }
+
+[27] com.google.javascript.rhino.Node#toString  (lines 906-909)
+906:   @Override
+907:   public String toString() {
+908:     return toString(true, true, true);
+909:   }
+
+[28] com.google.javascript.jscomp.Compiler#getAllInputsFromModules  (lines 411-427)
+411:   private static List<CompilerInput> getAllInputsFromModules(
+412:       List<JSModule> modules) {
+413:     List<CompilerInput> inputs = Lists.newArrayList();
+414:     Map<String, JSModule> inputMap = Maps.newHashMap();
+415:     for (JSModule module : modules) {
+416:       for (CompilerInput input : module.getInputs()) {
+417:         String inputName = input.getName();
+418: 
+419:         // NOTE(nicksantos): If an input is in more than one module,
+420:         // it will show up twice in the inputs list, and then we
+421:         // will get an error down the line.
+422:         inputs.add(input);
+423:         inputMap.put(inputName, module);
+424:       }
+425:     }
+426:     return inputs;
+427:   }
+
+[29] com.google.javascript.jscomp.PeepholeFoldConstants#tryFoldAdd  (lines 797-817)
+797:   private Node tryFoldAdd(Node node, Node left, Node right) {
+798:     Preconditions.checkArgument(node.getType() == Token.ADD);
+799: 
+800:     if (NodeUtil.mayBeString(node, true)) {
+801:       if (NodeUtil.isLiteralValue(left, false) &&
+802:           NodeUtil.isLiteralValue(right, false)) {
+803:         // '6' + 7
+804:         return tryFoldAddConstantString(node, left, right);
+805:       } else {
+806:         // a + 7 or 6 + a
+807:         return tryFoldChildAddString(node, left, right);
+808:       }
+809:     } else {
+810:       // Try arithmetic add
+811:       Node result = tryFoldArithmeticOp(node, left, right);
+812:       if (result != node) {
+813:         return result;
+814:       }
+815:       return tryFoldLeftChildOp(node, left, right);
+816:     }
+817:   }
+
+[30] com.google.javascript.jscomp.parsing.IRFactory#setSourceInfo  (lines 255-272)
+255:   private void setSourceInfo(Node irNode, AstNode node) {
+256:     // If we have a named function, set the position to that of the name.
+257:     if (irNode.getType() == Token.FUNCTION &&
+258:         irNode.getFirstChild().getLineno() != -1) {
+259:       irNode.setLineno(irNode.getFirstChild().getLineno());
+260:       irNode.setCharno(irNode.getFirstChild().getCharno());
+261:     } else {
+262:       if (irNode.getLineno() == -1) {
+263:         // If we didn't already set the line, then set it now.  This avoids
+264:         // cases like ParenthesizedExpression where we just return a previous
+265:         // node, but don't want the new node to get its parent's line number.
+266:         int lineno = node.getLineno();
+267:         irNode.setLineno(lineno);
+268:         int charno = position2charno(node.getAbsolutePosition());
+269:         irNode.setCharno(charno);
+270:       }
+271:     }
+272:   }
+
+[31] com.google.javascript.jscomp.NodeUtil#isCommutative  (lines 1343-1353)
+1343:   static boolean isCommutative(int type) {
+1344:     switch (type) {
+1345:       case Token.MUL:
+1346:       case Token.BITOR:
+1347:       case Token.BITXOR:
+1348:       case Token.BITAND:
+1349:         return true;
+1350:       default:
+1351:         return false;
+1352:     }
+1353:   }
+
+[32] com.google.javascript.jscomp.BasicErrorManager#report  (lines 44-52)
+44:   public void report(CheckLevel level, JSError error) {
+45:     if (messages.add(new ErrorWithLevel(error, level))) {
+46:       if (level == CheckLevel.ERROR) {
+47:         errorCount++;
+48:       } else if (level == CheckLevel.WARNING) {
+49:         warningCount++;
+50:       }
+51:     }
+52:   }
+
+[33] com.google.javascript.jscomp.NodeUtil#apply  (lines 1175-1177)
+1175:     public boolean apply(Node n) {
+1176:       return isNumericResultHelper(n);
+1177:     }
+
+[34] com.google.javascript.jscomp.Compiler#init  (lines 287-295)
+287:   public void init(List<JSSourceFile> externs, List<JSSourceFile> inputs,
+288:       CompilerOptions options) {
+289:     JSModule module = new JSModule("[singleton]");
+290:     for (JSSourceFile input : inputs) {
+291:       module.add(input);
+292:     }
+293: 
+294:     initModules(externs, Lists.newArrayList(module), options);
+295:   }
+
+[35] com.google.javascript.rhino.Node#toString  (lines 923-1039)
+923:   private void toString(
+924:       StringBuilder sb,
+925:       boolean printSource,
+926:       boolean printAnnotations,
+927:       boolean printType) {
+928:     if (Token.printTrees) {
+929:       sb.append(Token.name(type));
+930:       if (this instanceof StringNode) {
+931:         sb.append(' ');
+932:         sb.append(getString());
+933:       } else if (type == Token.FUNCTION) {
+934:         sb.append(' ');
+935:         // In the case of JsDoc trees, the first child is often not a string
+936:         // which causes exceptions to be thrown when calling toString or
+937:         // toStringTree.
+938:         if (first.getType() == Token.STRING) {
+939:           sb.append(first.getString());
+940:         }
+941:       } else if (this instanceof ScriptOrFnNode) {
+942:         ScriptOrFnNode sof = (ScriptOrFnNode) this;
+943:         if (this instanceof FunctionNode) {
+944:           FunctionNode fn = (FunctionNode) this;
+945:           sb.append(' ');
+946:           sb.append(fn.getFunctionName());
+947:         }
+948:         if (printSource) {
+949:           sb.append(" [source name: ");
+950:           sb.append(sof.getSourceName());
+951:           sb.append("] [encoded source length: ");
+952:           sb.append(sof.getEncodedSourceEnd() - sof.getEncodedSourceStart());
+953:           sb.append("] [base line: ");
+954:           sb.append(sof.getBaseLineno());
+955:           sb.append("] [end line: ");
+956:           sb.append(sof.getEndLineno());
+957:           sb.append(']');
+958:         }
+959:       } else if (type == Token.NUMBER) {
+960:         sb.append(' ');
+961:         sb.append(getDouble());
+962:       }
+963:       if (printSource) {
+964:         int lineno = getLineno();
+965:         if (lineno != -1) {
+966:           sb.append(' ');
+967:           sb.append(lineno);
+968:         }
+969:       }
+970: 
+971:       if (printAnnotations) {
+972:         int[] keys = getSortedPropTypes();
+973:         for (int i = 0; i < keys.length; i++) {
+974:           int type = keys[i];
+975:           PropListItem x = lookupProperty(type);
+976:           sb.append(" [");
+977:           sb.append(propToString(type));
+978:           sb.append(": ");
+979:           String value;
+980:           switch (type) {
+981:             case TARGETBLOCK_PROP: // can't add this as it recurses
+982:               value = "target block property";
+983:               break;
+984:             case LOCAL_BLOCK_PROP: // can't add this as it is dull
+985:               value = "last local block";
+986:               break;
+987:             case ISNUMBER_PROP:
+988:               switch (x.intValue) {
+989:                 case BOTH:
+990:                   value = "both";
+991:                   break;
+992:                 case RIGHT:
+993:                   value = "right";
+994:                   break;
+995:                 case LEFT:
+996:                   value = "left";
+997:                   break;
+998:                 default:
+999:                   throw Kit.codeBug();
+1000:               }
+1001:               break;
+1002:             case SPECIALCALL_PROP:
+1003:               switch (x.intValue) {
+1004:                 case SPECIALCALL_EVAL:
+1005:                   value = "eval";
+1006:                   break;
+1007:                 case SPECIALCALL_WITH:
+1008:                   value = "with";
+1009:                   break;
+1010:                 default:
+1011:                   // NON_SPECIALCALL should not be stored
+1012:                   throw Kit.codeBug();
+1013:               }
+1014:               break;
+1015:             default:
+1016:               Object obj = x.objectValue;
+1017:               if (obj != null) {
+1018:                 value = obj.toString();
+1019:               } else {
+1020:                 value = String.valueOf(x.intValue);
+1021:               }
+1022:               break;
+1023:           }
+1024:           sb.append(value);
+1025:           sb.append(']');
+1026:         }
+1027:       }
+1028: 
+1029:       if (printType) {
+1030:         if (jsType != null) {
+1031:           String jsTypeString = jsType.toString();
+1032:           if (jsTypeString != null) {
+1033:             sb.append(" : ");
+1034:             sb.append(jsTypeString);
+1035:           }
+1036:         }
+1037:       }
+1038:     }
+1039:   }
+
+[36] com.google.javascript.jscomp.NodeUtil#getNumberValue  (lines 242-299)
+242:   static Double getNumberValue(Node n) {
+243:     switch (n.getType()) {
+244:       case Token.TRUE:
+245:         return 1.0;
+246: 
+247:       case Token.FALSE:
+248:       case Token.NULL:
+249:         return 0.0;
+250: 
+251:       case Token.NUMBER:
+252:         return n.getDouble();
+253: 
+254:       case Token.VOID:
+255:         if (mayHaveSideEffects(n.getFirstChild())) {
+256:           return null;
+257:         } else {
+258:           return Double.NaN;
+259:         }
+260: 
+261:       case Token.NAME:
+262:         // Check for known constants
+263:         String name = n.getString();
+264:         if (name.equals("undefined")) {
+265:           return Double.NaN;
+266:         }
+267:         if (name.equals("NaN")) {
+268:           return Double.NaN;
+269:         }
+270:         if (name.equals("Infinity")) {
+271:           return Double.POSITIVE_INFINITY;
+272:         }
+273:         return null;
+274: 
+275:       case Token.NEG:
+276:         if (n.getChildCount() == 1 && n.getFirstChild().getType() == Token.NAME
+277:             && n.getFirstChild().getString().equals("Infinity")) {
+278:           return Double.NEGATIVE_INFINITY;
+279:         }
+280:         return null;
+281: 
+282:       case Token.NOT:
+283:         TernaryValue child = getBooleanValue(n.getFirstChild());
+284:         if (child != TernaryValue.UNKNOWN) {
+285:           return child.toBoolean(true) ? 0.0 : 1.0; // reversed.
+286:         }
+287:         break;
+288: 
+289:       case Token.STRING:
+290:         return getStringNumberValue(n.getString());
+291: 
+292:       case Token.ARRAYLIT:
+293:       case Token.OBJECTLIT:
+294:         String value = getStringValue(n);
+295:         return value != null ? getStringNumberValue(value) : null;
+296:     }
+297: 
+298:     return null;
+299:   }
+
+[37] com.google.javascript.rhino.Node#getSortedPropTypes  (lines 842-856)
+842:   private int[] getSortedPropTypes() {
+843:     int count = 0;
+844:     for (PropListItem x = propListHead; x != null; x = x.next) {
+845:       count++;
+846:     }
+847: 
+848:     int[] keys = new int[count];
+849:     for (PropListItem x = propListHead; x != null; x = x.next) {
+850:       count--;
+851:       keys[count] = x.type;
+852:     }
+853: 
+854:     Arrays.sort(keys);
+855:     return keys;
+856:   }
+
+[38] com.google.javascript.jscomp.JSError#JSError  (lines 139-149)
+139:   private JSError(
+140:       String sourceName, @Nullable Node node, int lineno, int charno,
+141:       DiagnosticType type, CheckLevel level, String... arguments) {
+142:     this.type = type;
+143:     this.node = node;
+144:     this.description = type.format.format(arguments);
+145:     this.lineNumber = lineno;
+146:     this.charno = charno;
+147:     this.sourceName = sourceName;
+148:     this.level = level == null ? type.level : level;
+149:   }
+
+[39] com.google.javascript.rhino.Node#getLineno  (lines 858-860)
+858:   public int getLineno() {
+859:     return extractLineno(sourcePosition);
+860:   }
+
+[40] com.google.javascript.jscomp.PeepholeFoldConstants#tryReduceOperandsForOp  (lines 176-214)
+176:   private void tryReduceOperandsForOp(Node n) {
+177:     switch (n.getType()) {
+178:       case Token.ADD:
+179:         Node left = n.getFirstChild();
+180:         Node right = n.getLastChild();
+181:         if (!NodeUtil.mayBeString(left) && !NodeUtil.mayBeString(right)) {
+182:           tryConvertOperandsToNumber(n);
+183:         }
+184:         break;
+185:       case Token.ASSIGN_BITOR:
+186:       case Token.ASSIGN_BITXOR:
+187:       case Token.ASSIGN_BITAND:
+188:         // TODO(johnlenz): convert these to integers.
+189:       case Token.ASSIGN_LSH:
+190:       case Token.ASSIGN_RSH:
+191:       case Token.ASSIGN_URSH:
+192:       case Token.ASSIGN_SUB:
+193:       case Token.ASSIGN_MUL:
+194:       case Token.ASSIGN_MOD:
+195:       case Token.ASSIGN_DIV:
+196:         tryConvertToNumber(n.getLastChild());
+197:         break;
+198:       case Token.BITNOT:
+199:       case Token.BITOR:
+200:       case Token.BITXOR:
+201:       case Token.BITAND:
+202:       case Token.LSH:
+203:       case Token.RSH:
+204:       case Token.URSH:
+205:       case Token.SUB:
+206:       case Token.MUL:
+207:       case Token.MOD:
+208:       case Token.DIV:
+209:       case Token.POS:
+210:       case Token.NEG:
+211:         tryConvertOperandsToNumber(n);
+212:         break;
+213:     }
+214:   }
+
+[41] com.google.javascript.jscomp.parsing.ParserRunner#parse  (lines 90-132)
+90:   public static Node parse(String sourceName,
+91:                            String sourceString,
+92:                            Config config,
+93:                            ErrorReporter errorReporter,
+94:                            Logger logger) throws IOException {
+95:     Context cx = Context.enter();
+96:     cx.setErrorReporter(errorReporter);
+97:     cx.setLanguageVersion(Context.VERSION_1_5);
+98:     CompilerEnvirons compilerEnv = new CompilerEnvirons();
+99:     compilerEnv.initFromContext(cx);
+100:     compilerEnv.setRecordingComments(true);
+101:     compilerEnv.setRecordingLocalJsDocComments(true);
+102:     // ES5 specifically allows trailing commas
+103:     compilerEnv.setWarnTrailingComma(
+104:         config.languageMode == LanguageMode.ECMASCRIPT3);
+105: 
+106:     if (config.isIdeMode || config.languageMode != LanguageMode.ECMASCRIPT3) {
+107:       // Do our own identifier check for ECMASCRIPT 5
+108:       compilerEnv.setReservedKeywordAsIdentifier(true);
+109:       compilerEnv.setAllowKeywordAsObjectPropertyName(true);
+110:     }
+111: 
+112:     if (config.isIdeMode) {
+113:       compilerEnv.setAllowMemberExprAsFunctionName(true);
+114:     }
+115: 
+116:     Parser p = new Parser(compilerEnv, errorReporter);
+117:     AstRoot astRoot = null;
+118:     try {
+119:       astRoot = p.parse(sourceString, sourceName, 1);
+120:     } catch (EvaluatorException e) {
+121:       logger.info("Error parsing " + sourceName + ": " + e.getMessage());
+122:     } finally {
+123:       Context.exit();
+124:     }
+125:     Node root = null;
+126:     if (astRoot != null) {
+127:       root = IRFactory.transformTree(
+128:           astRoot, sourceString, config, errorReporter);
+129:       root.setIsSyntheticBlock(true);
+130:     }
+131:     return root;
+132:   }
+
+[42] com.google.javascript.rhino.Node#Node  (lines 368-372)
+368:   public Node(int nodeType) {
+369:     type = nodeType;
+370:     parent = null;
+371:     sourcePosition = -1;
+372:   }
+
+[43] com.google.javascript.jscomp.BasicErrorManager#getErrorCount  (lines 72-74)
+72:   public int getErrorCount() {
+73:     return errorCount;
+74:   }
+
+[44] com.google.javascript.rhino.Node#toString  (lines 911-921)
+911:   public String toString(
+912:       boolean printSource,
+913:       boolean printAnnotations,
+914:       boolean printType) {
+915:     if (Token.printTrees) {
+916:         StringBuilder sb = new StringBuilder();
+917:         toString(sb, printSource, printAnnotations, printType);
+918:         return sb.toString();
+919:     }
+920:     return String.valueOf(type);
+921:   }
+
+[45] com.google.javascript.jscomp.JSModule#add  (lines 92-94)
+92:   public void add(JSSourceFile file) {
+93:     add(new CompilerInput(file));
+94:   }
+
+[46] com.google.javascript.jscomp.Compiler#parseInputs  (lines 1067-1204)
+1067:   Node parseInputs() {
+1068:     boolean devMode = options.devMode != DevMode.OFF;
+1069: 
+1070:     // If old roots exist (we are parsing a second time), detach each of the
+1071:     // individual file parse trees.
+1072:     if (externsRoot != null) {
+1073:       externsRoot.detachChildren();
+1074:     }
+1075:     if (jsRoot != null) {
+1076:       jsRoot.detachChildren();
+1077:     }
+1078: 
+1079:     // Parse main js sources.
+1080:     jsRoot = new Node(Token.BLOCK);
+1081:     jsRoot.setIsSyntheticBlock(true);
+1082: 
+1083:     if (options.tracer.isOn()) {
+1084:       tracker = new PerformanceTracker(jsRoot,
+1085:           options.tracer == TracerMode.ALL);
+1086:       addChangeHandler(tracker.getCodeChangeHandler());
+1087:     }
+1088: 
+1089:     Tracer tracer = newTracer("parseInputs");
+1090: 
+1091:     try {
+1092:       // Parse externs sources.
+1093:       externsRoot = new Node(Token.BLOCK);
+1094:       externsRoot.setIsSyntheticBlock(true);
+1095:       for (CompilerInput input : externs) {
+1096:         Node n = input.getAstRoot(this);
+1097:         if (hasErrors()) {
+1098:           return null;
+1099:         }
+1100:         externsRoot.addChildToBack(n);
+1101:       }
+1102: 
+1103:       // Check if the sources need to be re-ordered.
+1104:       if (options.manageClosureDependencies) {
+1105:         for (CompilerInput input : inputs) {
+1106:           input.setCompiler(this);
+1107: 
+1108:           // Forward-declare all the provided types, so that they
+1109:           // are not flagged even if they are dropped from the process.
+1110:           for (String provide : input.getProvides()) {
+1111:             getTypeRegistry().forwardDeclareType(provide);
+1112:           }
+1113:         }
+1114: 
+1115:         try {
+1116:           inputs =
+1117:               (moduleGraph == null ? new JSModuleGraph(modules) : moduleGraph)
+1118:               .manageDependencies(
+1119:                   options.manageClosureDependenciesEntryPoints, inputs);
+1120:         } catch (CircularDependencyException e) {
+1121:           report(JSError.make(
+1122:               JSModule.CIRCULAR_DEPENDENCY_ERROR, e.getMessage()));
+1123:           return null;
+1124:         } catch (MissingProvideException e) {
+1125:           report(JSError.make(
+1126:               MISSING_ENTRY_ERROR, e.getMessage()));
+1127:           return null;
+1128:         }
+1129:       }
+1130: 
+1131:       // Check if inputs need to be rebuilt from modules.
+1132:       boolean staleInputs = false;
+1133:       for (CompilerInput input : inputs) {
+1134:         Node n = input.getAstRoot(this);
+1135:         if (hasErrors()) {
+1136:           return null;
+1137:         }
+1138: 
+1139:         // Inputs can have a null AST during initial parse.
+1140:         if (n == null) {
+1141:           continue;
+1142:         }
+1143: 
+1144:         if (n.getJSDocInfo() != null) {
+1145:           JSDocInfo info = n.getJSDocInfo();
+1146:           if (info.isExterns()) {
+1147:             // If the input file is explicitly marked as an externs file, then
+1148:             // assume the programmer made a mistake and throw it into
+1149:             // the externs pile anyways.
+1150:             externsRoot.addChildToBack(n);
+1151:             input.setIsExtern(true);
+1152: 
+1153:             input.getModule().remove(input);
+1154: 
+1155:             externs.add(input);
+1156:             staleInputs = true;
+1157:           } else if (info.isNoCompile()) {
+1158:             input.getModule().remove(input);
+1159:             staleInputs = true;
+1160:           }
+1161:         }
+1162:       }
+1163: 
+1164:       if (staleInputs) {
+1165:         fillEmptyModules(modules);
+1166:         rebuildInputsFromModules();
+1167:       }
+1168: 
+1169:       // Build the AST.
+1170:       for (CompilerInput input : inputs) {
+1171:         Node n = input.getAstRoot(this);
+1172:         if (n == null) {
+1173:           continue;
+1174:         }
+1175: 
+1176:         if (devMode) {
+1177:           runSanityCheck();
+1178:           if (hasErrors()) {
+1179:             return null;
+1180:           }
+1181:         }
+1182: 
+1183:         if (options.sourceMapOutputPath != null ||
+1184:             options.nameReferenceReportPath != null) {
+1185: 
+1186:           // Annotate the nodes in the tree with information from the
+1187:           // input file. This information is used to construct the SourceMap.
+1188:           SourceInformationAnnotator sia =
+1189:               new SourceInformationAnnotator(
+1190:                   input.getName(), options.devMode != DevMode.OFF);
+1191:           NodeTraversal.traverse(this, n, sia);
+1192:         }
+1193: 
+1194:         jsRoot.addChildToBack(n);
+1195:       }
+1196: 
+1197:       externAndJsRoot = new Node(Token.BLOCK, externsRoot, jsRoot);
+1198:       externAndJsRoot.setIsSyntheticBlock(true);
+1199: 
+1200:       return externAndJsRoot;
+1201:     } finally {
+1202:       stopTracer(tracer, "parseInputs");
+1203:     }
+1204:   }
+
+[47] com.google.javascript.rhino.Node#setCharno  (lines 1136-1138)
+1136:   public void setCharno(int charno) {
+1137:       sourcePosition = mergeLineCharNo(getLineno(), charno);
+1138:   }
+
+[48] com.google.javascript.jscomp.Compiler#getErrorCount  (lines 1751-1753)
+1751:   public int getErrorCount() {
+1752:     return errorManager.getErrorCount();
+1753:   }
+
+[49] com.google.javascript.jscomp.PeepholeFoldConstants#tryFoldAssign  (lines 450-520)
+450:   private Node tryFoldAssign(Node n, Node left, Node right) {
+451:     Preconditions.checkArgument(n.getType() == Token.ASSIGN);
+452: 
+453:     // Tries to convert x = x + y -> x += y;
+454:     if (!right.hasChildren() ||
+455:         right.getFirstChild().getNext() != right.getLastChild()) {
+456:       // RHS must have two children.
+457:       return n;
+458:     }
+459: 
+460:     if (mayHaveSideEffects(left)) {
+461:       return n;
+462:     }
+463: 
+464:     Node newRight;
+465:     if (areNodesEqualForInlining(left, right.getFirstChild())) {
+466:       newRight = right.getLastChild();
+467:     } else if (NodeUtil.isCommutative(right.getType()) &&
+468:           areNodesEqualForInlining(left, right.getLastChild())) {
+469:       newRight = right.getFirstChild();
+470:     } else {
+471:       return n;
+472:     }
+473: 
+474:     int newType = -1;
+475:     switch (right.getType()) {
+476:       case Token.ADD:
+477:         newType = Token.ASSIGN_ADD;
+478:         break;
+479:       case Token.BITAND:
+480:         newType = Token.ASSIGN_BITAND;
+481:         break;
+482:       case Token.BITOR:
+483:         newType = Token.ASSIGN_BITOR;
+484:         break;
+485:       case Token.BITXOR:
+486:         newType = Token.ASSIGN_BITXOR;
+487:         break;
+488:       case Token.DIV:
+489:         newType = Token.ASSIGN_DIV;
+490:         break;
+491:       case Token.LSH:
+492:         newType = Token.ASSIGN_LSH;
+493:         break;
+494:       case Token.MOD:
+495:         newType = Token.ASSIGN_MOD;
+496:         break;
+497:       case Token.MUL:
+498:         newType = Token.ASSIGN_MUL;
+499:         break;
+500:       case Token.RSH:
+501:         newType = Token.ASSIGN_RSH;
+502:         break;
+503:       case Token.SUB:
+504:         newType = Token.ASSIGN_SUB;
+505:         break;
+506:       case Token.URSH:
+507:         newType = Token.ASSIGN_URSH;
+508:         break;
+509:       default:
+510:         return n;
+511:     }
+512: 
+513:     Node newNode = new Node(newType,
+514:         left.detachFromParent(), newRight.detachFromParent());
+515:     n.getParent().replaceChild(n, newNode);
+516: 
+517:     reportCodeChange();
+518: 
+519:     return newNode;
+520:   }
+
+[50] com.google.javascript.jscomp.AbstractPeepholeOptimization#error  (lines 52-55)
+52:   protected void error(DiagnosticType diagnostic, Node n) {
+53:     JSError error = currentTraversal.makeError(n, diagnostic, n.toString());
+54:     currentTraversal.getCompiler().report(error);
+55:   }

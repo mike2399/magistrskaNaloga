@@ -1,0 +1,94 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.lang3.text.translate.NumericEntityUnescaperTest::testSupplementaryUnescaping
+junit.framework.ComparisonFailure: Failed to unescape numeric entities supplementary characters expected:<[𐰢]> but was:<[ఢ]>
+	at org.apache.commons.lang3.text.translate.NumericEntityUnescaperTest.testSupplementaryUnescaping(NumericEntityUnescaperTest.java:33)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.lang3.text.translate.CharSequenceTranslator#translate  (lines 76-105)
+76:     public final void translate(CharSequence input, Writer out) throws IOException {
+77:         if (out == null) {
+78:             throw new IllegalArgumentException("The Writer must not be null");
+79:         }
+80:         if (input == null) {
+81:             return;
+82:         }
+83:         int sz = Character.codePointCount(input, 0, input.length());
+84:         for (int i = 0; i < sz; i++) {
+85: 
+86:             // consumed is the number of codepoints consumed
+87:             int consumed = translate(input, i, out);
+88: 
+89:             if(consumed == 0) { 
+90:                 out.write( Character.toChars( Character.codePointAt(input, i) ) );
+91:             } else {
+92:                 // contract with translators is that they have to understand codepoints and they just took care of a surrogate pair
+93:                 for(int j=0; j<consumed; j++) {
+94:                     if(i < sz - 2) {
+95:                         i += Character.charCount( Character.codePointAt(input, i) );
+96:                     } else {
+97:                         // If the String ends with a high surrogate, just add the 1 and don't worry about such things
+98:                         i++;
+99:                     }
+100:                 }
+101:                 // for loop will increment 1 anyway, so remove 1 to account for that
+102:                 i--;
+103:             }
+104:         }
+105:     }
+
+[2] org.apache.commons.lang3.text.translate.NumericEntityUnescaper#translate  (lines 34-67)
+34:     @Override
+35:     public int translate(CharSequence input, int index, Writer out) throws IOException {
+36:         // TODO: Protect from ArrayIndexOutOfBounds
+37:         if(input.charAt(index) == '&' && input.charAt(index + 1) == '#') {
+38:             int start = index + 2;
+39:             boolean isHex = false;
+40: 
+41:             char firstChar = input.charAt(start);
+42:             if(firstChar == 'x' || firstChar == 'X') {
+43:                 start++;
+44:                 isHex = true;
+45:             }
+46: 
+47:             int end = start;
+48:             while(input.charAt(end) != ';') {
+49:                 end++;
+50:             }
+51: 
+52:             int entityValue;
+53:             try {
+54:                 if(isHex) {
+55:                     entityValue = Integer.parseInt(input.subSequence(start, end).toString(), 16);
+56:                 } else {
+57:                     entityValue = Integer.parseInt(input.subSequence(start, end).toString(), 10);
+58:                 }
+59:             } catch(NumberFormatException nfe) {
+60:                 return 0;
+61:             }
+62: 
+63:                 out.write(entityValue);
+64:             return 2 + (end - start) + (isHex ? 1 : 0) + 1;
+65:         }
+66:         return 0;
+67:     }
+
+[3] org.apache.commons.lang3.text.translate.CharSequenceTranslator#translate  (lines 53-65)
+53:     public final String translate(CharSequence input) {
+54:         if (input == null) {
+55:             return null;
+56:         }
+57:         try {
+58:             StringWriter writer = new StringWriter(input.length() * 2);  // TODO: Make the 2 part of the API???
+59:             translate(input, writer);
+60:             return writer.toString();
+61:         } catch (IOException ioe) {
+62:             // this should never ever happen while writing to a StringWriter
+63:             throw new RuntimeException(ioe);
+64:         }
+65:     }

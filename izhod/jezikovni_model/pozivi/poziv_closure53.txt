@@ -1,0 +1,1165 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.InlineObjectLiteralsTest::testBug545
+java.lang.RuntimeException: INTERNAL COMPILER ERROR.
+Please report this problem.
+index (1) must be less than size (1)
+  Node(BLOCK): testcode:1:16
+function local(){var a; a = {}}
+  Parent(FUNCTION local): testcode:1:0
+	at com.google.common.base.Preconditions.checkElementIndex(Preconditions.java:301)
+	at com.google.common.base.Preconditions.checkElementIndex(Preconditions.java:280)
+	at com.google.common.collect.Lists$ReverseList.reverseIndex(Lists.java:743)
+	at com.google.common.collect.Lists$ReverseList.get(Lists.java:774)
+	at com.google.javascript.jscomp.InlineObjectLiterals$InliningBehavior.replaceAssignmentExpression(InlineObjectLiterals.java:349)
+	at com.google.javascript.jscomp.InlineObjectLiterals$InliningBehavior.splitObject(InlineObjectLiterals.java:412)
+	at com.google.javascript.jscomp.InlineObjectLiterals$InliningBehavior.afterExitScope(InlineObjectLiterals.java:103)
+	at com.google.javascript.jscomp.ReferenceCollectingCallback.exitScope(ReferenceCollectingCallback.java:187)
+	at com.google.javascript.jscomp.NodeTraversal.popScope(NodeTraversal.java:560)
+	at com.google.javascript.jscomp.NodeTraversal.traverseFunction(NodeTraversal.java:520)
+	at com.google.javascript.jscomp.NodeTraversal.traverseBranch(NodeTraversal.java:465)
+	at com.google.javascript.jscomp.NodeTraversal.traverseBranch(NodeTraversal.java:473)
+	at com.google.javascript.jscomp.NodeTraversal.traverseBranch(NodeTraversal.java:473)
+	at com.google.javascript.jscomp.NodeTraversal.traverseRoots(NodeTraversal.java:286)
+	at com.google.javascript.jscomp.NodeTraversal.traverseRoots(NodeTraversal.java:446)
+	at com.google.javascript.jscomp.ReferenceCollectingCallback.process(ReferenceCollectingCallback.java:110)
+	at com.google.javascript.jscomp.InlineObjectLiterals.process(InlineObjectLiterals.java:66)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:765)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:423)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:348)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:317)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:305)
+	at com.google.javascript.jscomp.InlineObjectLiteralsTest.testLocal(InlineObjectLiteralsTest.java:368)
+	at com.google.javascript.jscomp.InlineObjectLiteralsTest.testBug545(InlineObjectLiteralsTest.java:361)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.InlineObjectLiterals#afterExitScope  (lines 82-106)
+82:     @Override
+83:     public void afterExitScope(NodeTraversal t, ReferenceMap referenceMap) {
+84:       for (Iterator<Var> it = t.getScope().getVars(); it.hasNext();) {
+85:         Var v = it.next();
+86: 
+87:         if (isVarInlineForbidden(v)) {
+88:             continue;
+89:         }
+90: 
+91:         ReferenceCollection referenceInfo = referenceMap.getReferences(v);
+92: 
+93:         if (isInlinableObject(referenceInfo.references)) {
+94:             // Blacklist the object itself, as well as any other values
+95:             // that it refers to, since they will have been moved around.
+96:             staleVars.add(v);
+97: 
+98:             Reference declaration = referenceInfo.references.get(0);
+99:             Reference init = referenceInfo.getInitializingReference();
+100: 
+101:             // Split up the object into individual variables if the object
+102:             // is never referenced directly in full.
+103:             splitObject(v, declaration, init, referenceInfo);
+104:         }
+105:       }
+106:     }
+
+[2] com.google.javascript.jscomp.Compiler#getSourceFileByName  (lines 1888-1898)
+1888:   private SourceFile getSourceFileByName(String sourceName) {
+1889:     // Here we assume that the source name is the input name, this
+1890:     // is try of javascript parsed from source.
+1891:     if (sourceName != null) {
+1892:       CompilerInput input = inputsById.get(new InputId(sourceName));
+1893:       if (input != null) {
+1894:         return input.getSourceFile();
+1895:       }
+1896:     }
+1897:     return null;
+1898:   }
+
+[3] com.google.javascript.jscomp.NodeTraversal#popScope  (lines 558-568)
+558:   private void popScope() {
+559:     if (scopeCallback != null) {
+560:       scopeCallback.exitScope(this);
+561:     }
+562:     if (scopeRoots.isEmpty()) {
+563:       scopes.pop();
+564:     } else {
+565:       scopeRoots.pop();
+566:     }
+567:     cfgs.pop();
+568:   }
+
+[4] com.google.javascript.jscomp.parsing.IRFactory#processGeneric  (lines 372-379)
+372:     private Node processGeneric(
+373:         com.google.javascript.jscomp.mozilla.rhino.Node n) {
+374:       Node node = newNode(transformTokenType(n.getType()));
+375:       for (com.google.javascript.jscomp.mozilla.rhino.Node child : n) {
+376:         node.addChildToBack(transform((AstNode)child));
+377:       }
+378:       return node;
+379:     }
+
+[5] com.google.javascript.jscomp.NodeTraversal#formatNodePosition  (lines 297-310)
+297:   private String formatNodePosition(Node n) {
+298:     if (n == null) {
+299:       return MISSING_SOURCE + "\n";
+300:     }
+301: 
+302:     int lineNumber = n.getLineno();
+303:     int columnNumber = n.getCharno();
+304:     String src = compiler.getSourceLine(sourceName, lineNumber);
+305:     if (src == null) {
+306:       src = MISSING_SOURCE;
+307:     }
+308:     return sourceName + ":" + lineNumber + ":" + columnNumber + "\n"
+309:         + src + "\n";
+310:   }
+
+[6] com.google.javascript.rhino.Node#extractCharno  (lines 1358-1364)
+1358:   protected static int extractCharno(int lineCharNo) {
+1359:     if (lineCharNo == -1) {
+1360:       return -1;
+1361:     } else {
+1362:       return lineCharNo & COLUMN_MASK;
+1363:     }
+1364:   }
+
+[7] com.google.javascript.jscomp.InlineObjectLiterals#replaceAssignmentExpression  (lines 303-360)
+303:     private void replaceAssignmentExpression(Var v, Reference ref,
+304:                                              Map<String, String> varmap) {
+305:       // Compute all of the assignments necessary
+306:       List<Node> nodes = Lists.newArrayList();
+307:       Node val = ref.getAssignedValue();
+308:       blacklistVarReferencesInTree(val, v.scope);
+309:       Preconditions.checkState(val.getType() == Token.OBJECTLIT);
+310:       Set<String> all = Sets.newLinkedHashSet(varmap.keySet());
+311:       for (Node key = val.getFirstChild(); key != null;
+312:            key = key.getNext()) {
+313:         String var = key.getString();
+314:         Node value = key.removeFirstChild();
+315:         // TODO(user): Copy type information.
+316:         nodes.add(
+317:           new Node(Token.ASSIGN,
+318:                    Node.newString(Token.NAME, varmap.get(var)), value));
+319:         all.remove(var);
+320:       }
+321: 
+322:       // TODO(user): Better source information.
+323:       for (String var : all) {
+324:         nodes.add(
+325:           new Node(Token.ASSIGN,
+326:                    Node.newString(Token.NAME, varmap.get(var)),
+327:                    NodeUtil.newUndefinedNode(null)));
+328:       }
+329: 
+330:       Node replacement;
+331:         // All assignments evaluate to true, so make sure that the
+332:         // expr statement evaluates to true in case it matters.
+333:         nodes.add(new Node(Token.TRUE));
+334: 
+335:         // Join these using COMMA.  A COMMA node must have 2 children, so we
+336:         // create a tree. In the tree the first child be the COMMA to match
+337:         // the parser, otherwise tree equality tests fail.
+338:         nodes = Lists.reverse(nodes);
+339:         replacement = new Node(Token.COMMA);
+340:         Node cur = replacement;
+341:         int i;
+342:         for (i = 0; i < nodes.size() - 2; i++) {
+343:           cur.addChildToFront(nodes.get(i));
+344:           Node t = new Node(Token.COMMA);
+345:           cur.addChildToFront(t);
+346:           cur = t;
+347:         }
+348:         cur.addChildToFront(nodes.get(i));
+349:         cur.addChildToFront(nodes.get(i + 1));
+350: 
+351:       Node replace = ref.getParent();
+352:       replacement.copyInformationFromForTree(replace);
+353: 
+354:       if (replace.getType() == Token.VAR) {
+355:         replace.getParent().replaceChild(
+356:             replace, NodeUtil.newExpr(replacement));
+357:       } else {
+358:         replace.getParent().replaceChild(replace, replacement);
+359:       }
+360:     }
+
+[8] com.google.javascript.rhino.Node#Node  (lines 456-460)
+456:   public Node(int nodeType) {
+457:     type = nodeType;
+458:     parent = null;
+459:     sourcePosition = -1;
+460:   }
+
+[9] com.google.javascript.jscomp.SourceFile#getName  (lines 181-184)
+181:   @Override
+182:   public String getName() {
+183:     return fileName;
+184:   }
+
+[10] com.google.javascript.rhino.Node#getLineno  (lines 1282-1284)
+1282:   public int getLineno() {
+1283:     return extractLineno(sourcePosition);
+1284:   }
+
+[11] com.google.javascript.rhino.Node#addChildToBack  (lines 703-714)
+703:   public void addChildToBack(Node child) {
+704:     Preconditions.checkArgument(child.parent == null);
+705:     Preconditions.checkArgument(child.next == null);
+706:     child.parent = this;
+707:     child.next = null;
+708:     if (last == null) {
+709:       first = last = child;
+710:       return;
+711:     }
+712:     last.next = child;
+713:     last = child;
+714:   }
+
+[12] com.google.javascript.jscomp.NodeTraversal#traverseRoots  (lines 270-293)
+270:   public void traverseRoots(List<Node> roots) {
+271:     if (roots.isEmpty()) {
+272:       return;
+273:     }
+274: 
+275:     try {
+276:       Node scopeRoot = roots.get(0).getParent();
+277:       Preconditions.checkState(scopeRoot != null);
+278: 
+279:       inputId = NodeUtil.getInputId(scopeRoot);
+280:       sourceName = "";
+281:       curNode = scopeRoot;
+282:       pushScope(scopeRoot);
+283: 
+284:       for (Node root : roots) {
+285:         Preconditions.checkState(root.getParent() == scopeRoot);
+286:         traverseBranch(root, scopeRoot);
+287:       }
+288: 
+289:       popScope();
+290:     } catch (Exception unexpectedException) {
+291:       throwUnexpectedException(unexpectedException);
+292:     }
+293:   }
+
+[13] com.google.javascript.jscomp.InlineObjectLiterals#visit  (lines 116-121)
+116:         @Override
+117:         public void visit(Node node) {
+118:           if (node.getType() == Token.NAME) {
+119:             staleVars.add(scope.getVar(node.getString()));
+120:           }
+121:         }
+
+[14] com.google.javascript.jscomp.NodeTraversal#throwUnexpectedException  (lines 223-240)
+223:   private void throwUnexpectedException(Exception unexpectedException) {
+224:     // If there's an unexpected exception, try to get the
+225:     // line number of the code that caused it.
+226:     String message = unexpectedException.getMessage();
+227: 
+228:     // TODO(user): It is possible to get more information if curNode or
+229:     // its parent is missing. We still have the scope stack in which it is still
+230:     // very useful to find out at least which function caused the exception.
+231:     if (inputId != null) {
+232:       message =
+233:           unexpectedException.getMessage() + "\n" +
+234:           formatNodeContext("Node", curNode) +
+235:           (curNode == null ?
+236:               "" :
+237:               formatNodeContext("Parent", curNode.getParent()));
+238:     }
+239:     compiler.throwInternalError(message, unexpectedException);
+240:   }
+
+[15] com.google.javascript.jscomp.parsing.IRFactory#processAstRoot  (lines 432-440)
+432:     @Override
+433:     Node processAstRoot(AstRoot rootNode) {
+434:       Node node = newNode(Token.SCRIPT);
+435:       for (com.google.javascript.jscomp.mozilla.rhino.Node child : rootNode) {
+436:         node.addChildToBack(transform((AstNode)child));
+437:       }
+438:       parseDirectives(node);
+439:       return node;
+440:     }
+
+[16] com.google.javascript.jscomp.NodeTraversal#traverseBranch  (lines 452-481)
+452:   @SuppressWarnings("fallthrough")
+453:   private void traverseBranch(Node n, Node parent) {
+454:     int type = n.getType();
+455:     if (type == Token.SCRIPT) {
+456:       inputId = n.getInputId();
+457:       sourceName = getSourceName(n);
+458:     }
+459: 
+460:     curNode = n;
+461:     if (!callback.shouldTraverse(this, n, parent)) return;
+462: 
+463:     switch (type) {
+464:       case Token.FUNCTION:
+465:         traverseFunction(n, parent);
+466:         break;
+467: 
+468:       default:
+469:         for (Node child = n.getFirstChild(); child != null; ) {
+470:           // child could be replaced, in which case our child node
+471:           // would no longer point to the true next
+472:           Node next = child.getNext();
+473:           traverseBranch(child, n);
+474:           child = next;
+475:         }
+476:         break;
+477:     }
+478: 
+479:     curNode = n;
+480:     callback.visit(this, n, parent);
+481:   }
+
+[17] com.google.javascript.jscomp.InlineObjectLiterals#computeVarList  (lines 243-282)
+243:     private Map<String, String> computeVarList(
+244:         Var v, ReferenceCollection referenceInfo) {
+245:       Map<String, String> varmap = Maps.newLinkedHashMap();
+246: 
+247:       for (Reference ref : referenceInfo.references) {
+248:         if (ref.isLvalue() || ref.isInitializingDeclaration()) {
+249:           Node val = ref.getAssignedValue();
+250:           if (val != null) {
+251:             Preconditions.checkState(val.getType() == Token.OBJECTLIT);
+252:             for (Node child = val.getFirstChild(); child != null;
+253:                  child = child.getNext()) {
+254:               String varname = child.getString();
+255:               if (varmap.containsKey(varname)) {
+256:                 continue;
+257:               }
+258: 
+259:               String var = VAR_PREFIX + varname + "_" +
+260:                 safeNameIdSupplier.get();
+261:               varmap.put(varname, var);
+262:             }
+263:           }
+264:         } else if (ref.getParent().getType() == Token.VAR) {
+265:           // This is the var. There is no value.
+266:         } else {
+267:           Node getprop = ref.getParent();
+268:           Preconditions.checkState(getprop.getType() == Token.GETPROP);
+269: 
+270:           // The key being looked up in the original map.
+271:           String varname = getprop.getLastChild().getString();
+272:           if (varmap.containsKey(varname)) {
+273:             continue;
+274:           }
+275: 
+276:           String var = VAR_PREFIX + varname + "_" + safeNameIdSupplier.get();
+277:           varmap.put(varname, var);
+278:         }
+279:       }
+280: 
+281:       return varmap;
+282:     }
+
+[18] com.google.javascript.rhino.Node#extractLineno  (lines 1346-1352)
+1346:   protected static int extractLineno(int lineCharNo) {
+1347:     if (lineCharNo == -1) {
+1348:       return -1;
+1349:     } else {
+1350:       return lineCharNo >>> COLUMN_BITS;
+1351:     }
+1352:   }
+
+[19] com.google.javascript.jscomp.parsing.IRFactory#setSourceInfo  (lines 304-315)
+304:   private void setSourceInfo(Node irNode, AstNode node) {
+305:     if (irNode.getLineno() == -1) {
+306:       // If we didn't already set the line, then set it now. This avoids
+307:       // cases like ParenthesizedExpression where we just return a previous
+308:       // node, but don't want the new node to get its parent's line number.
+309:       int lineno = node.getLineno();
+310:       irNode.setLineno(lineno);
+311:       int charno = position2charno(node.getAbsolutePosition());
+312:       irNode.setCharno(charno);
+313:       maybeSetLengthFrom(irNode, node);
+314:     }
+315:   }
+
+[20] com.google.javascript.jscomp.NodeTraversal#traverseRoots  (lines 443-447)
+443:   public static void traverseRoots(
+444:       AbstractCompiler compiler, List<Node> roots, Callback cb) {
+445:     NodeTraversal t = new NodeTraversal(compiler, cb);
+446:     t.traverseRoots(roots);
+447:   }
+
+[21] com.google.javascript.jscomp.ReferenceCollectingCallback#isWellDefined  (lines 310-333)
+310:     protected boolean isWellDefined() {
+311:       int size = references.size();
+312:       if (size == 0) {
+313:         return false;
+314:       }
+315: 
+316:       // If this is a declaration that does not instantiate the variable,
+317:       // it's not well-defined.
+318:       Reference init = getInitializingReference();
+319:       if (init == null) {
+320:         return false;
+321:       }
+322: 
+323:       Preconditions.checkState(references.get(0).isDeclaration());
+324:       BasicBlock initBlock = init.getBasicBlock();
+325:       for (int i = 1; i < size; i++) {
+326:         if (!initBlock.provablyExecutesBefore(
+327:                 references.get(i).getBasicBlock())) {
+328:           return false;
+329:         }
+330:       }
+331: 
+332:       return true;
+333:     }
+
+[22] com.google.javascript.jscomp.SourceFile#SourceFile  (lines 86-94)
+86:   public SourceFile(String fileName) {
+87:     if (fileName == null || fileName.isEmpty()) {
+88:       throw new IllegalArgumentException("a source must have a name");
+89:     }
+90:     this.fileName = fileName;
+91:     // Starting point: offset 0 is at line 1.
+92:     this.lastOffset = 0;
+93:     this.lastLine = 1;
+94:   }
+
+[23] com.google.javascript.jscomp.ReferenceCollectingCallback#exitScope  (lines 179-189)
+179:   @Override
+180:   public void exitScope(NodeTraversal t) {
+181:     blockStack.pop();
+182:     if (t.getScope().isGlobal()) {
+183:       // Update global scope reference lists when we are done with it.
+184:       compiler.updateGlobalVarReferences(referenceMap, t.getScopeRoot());
+185:       behavior.afterExitScope(t, compiler.getGlobalVarReferences());
+186:     } else {
+187:       behavior.afterExitScope(t, new ReferenceMapWrapper(referenceMap));
+188:     }
+189:   }
+
+[24] com.google.javascript.jscomp.SourceFile#getLine  (lines 205-250)
+205:   public String getLine(int lineNumber) {
+206:     String js = "";
+207:     try {
+208:       // NOTE(nicksantos): Right now, this is optimized for few warnings.
+209:       // This is probably the right trade-off, but will be slow if there
+210:       // are lots of warnings in one file.
+211:       js = getCode();
+212:     } catch (IOException e) {
+213:       return null;
+214:     }
+215: 
+216:     int pos = 0;
+217:     int startLine = 1;
+218: 
+219:     // If we've saved a previous offset and it's for a line less than the
+220:     // one we're searching for, then start at that point.
+221:     if (lineNumber >= lastLine) {
+222:       pos = lastOffset;
+223:       startLine = lastLine;
+224:     }
+225: 
+226:     for (int n = startLine; n < lineNumber; n++) {
+227:       int nextpos = js.indexOf('\n', pos);
+228:       if (nextpos == -1) {
+229:         return null;
+230:       }
+231:       pos = nextpos + 1;
+232:     }
+233: 
+234:     // Remember this offset for the next search we do.
+235:     lastOffset = pos;
+236:     lastLine = lineNumber;
+237: 
+238:     if (js.indexOf('\n', pos) == -1) {
+239:       // If next new line cannot be found, there are two cases
+240:       // 1. pos already reaches the end of file, then null should be returned
+241:       // 2. otherwise, return the contents between pos and the end of file.
+242:       if (pos >= js.length()) {
+243:         return null;
+244:       } else {
+245:         return js.substring(pos, js.length());
+246:       }
+247:     } else {
+248:       return js.substring(pos, js.indexOf('\n', pos));
+249:     }
+250:   }
+
+[25] com.google.javascript.rhino.Node#isEquivalentTo  (lines 1781-1844)
+1781:   boolean isEquivalentTo(Node node, boolean compareJsType, boolean recurse) {
+1782:     if (type != node.getType()
+1783:         || getChildCount() != node.getChildCount()
+1784:         || getNodeClass(this) != getNodeClass(node)) {
+1785:       return false;
+1786:     }
+1787: 
+1788:     if (compareJsType && !JSType.isEquivalent(jsType, node.getJSType())) {
+1789:       return false;
+1790:     }
+1791: 
+1792:     if (type == Token.ARRAYLIT) {
+1793:       try {
+1794:         int[] indices1 = (int[]) getProp(Node.SKIP_INDEXES_PROP);
+1795:         int[] indices2 = (int[]) node.getProp(Node.SKIP_INDEXES_PROP);
+1796:         if (indices1 == null) {
+1797:           if (indices2 != null) {
+1798:             return false;
+1799:           }
+1800:         } else if (indices2 == null) {
+1801:           return false;
+1802:         } else if (indices1.length != indices2.length) {
+1803:           return false;
+1804:         } else {
+1805:           for (int i = 0; i < indices1.length; i++) {
+1806:             if (indices1[i] != indices2[i]) {
+1807:               return false;
+1808:             }
+1809:           }
+1810:         }
+1811:       } catch (Exception e) {
+1812:         return false;
+1813:       }
+1814:     } else if (type == Token.INC || type == Token.DEC) {
+1815:       int post1 = this.getIntProp(INCRDECR_PROP);
+1816:       int post2 = node.getIntProp(INCRDECR_PROP);
+1817:       if (post1 != post2) {
+1818:         return false;
+1819:       }
+1820:     } else if (type == Token.STRING) {
+1821:       int quoted1 = this.getIntProp(QUOTED_PROP);
+1822:       int quoted2 = node.getIntProp(QUOTED_PROP);
+1823:       if (quoted1 != quoted2) {
+1824:         return false;
+1825:       }
+1826:     } else if (type == Token.CALL) {
+1827:       if (this.getBooleanProp(FREE_CALL) != node.getBooleanProp(FREE_CALL)) {
+1828:         return false;
+1829:       }
+1830:     }
+1831: 
+1832:     if (recurse) {
+1833:       Node n, n2;
+1834:       for (n = first, n2 = node.first;
+1835:            n != null;
+1836:            n = n.next, n2 = n2.next) {
+1837:         if (!n.isEquivalentTo(n2, compareJsType, true)) {
+1838:           return false;
+1839:         }
+1840:       }
+1841:     }
+1842: 
+1843:     return true;
+1844:   }
+
+[26] com.google.javascript.rhino.InputId#equals  (lines 64-70)
+64:   @Override
+65:   public boolean equals(Object obj) {
+66:     if (this == obj) return true;
+67:     if (obj == null) return false;
+68:     if (getClass() != obj.getClass()) return false;
+69:     return id.equals(((InputId) obj).id);
+70:   }
+
+[27] com.google.javascript.jscomp.JSModule#add  (lines 93-95)
+93:   public void add(JSSourceFile file) {
+94:     add(new CompilerInput(file));
+95:   }
+
+[28] com.google.javascript.jscomp.Compiler#getSourceLine  (lines 1900-1910)
+1900:   @Override
+1901:   public String getSourceLine(String sourceName, int lineNumber) {
+1902:     if (lineNumber < 1) {
+1903:       return null;
+1904:     }
+1905:     SourceFile input = getSourceFileByName(sourceName);
+1906:     if (input != null) {
+1907:       return input.getLine(lineNumber);
+1908:     }
+1909:     return null;
+1910:   }
+
+[29] com.google.javascript.rhino.Node#toString  (lines 1022-1032)
+1022:   public String toString(
+1023:       boolean printSource,
+1024:       boolean printAnnotations,
+1025:       boolean printType) {
+1026:     if (Token.shouldPrintTrees()) {
+1027:         StringBuilder sb = new StringBuilder();
+1028:         toString(sb, printSource, printAnnotations, printType);
+1029:         return sb.toString();
+1030:     }
+1031:     return String.valueOf(type);
+1032:   }
+
+[30] com.google.javascript.jscomp.ReferenceCollectingCallback#isInitializingAssignmentAt  (lines 374-386)
+374:     private boolean isInitializingAssignmentAt(int index) {
+375:       if (index < references.size() && index > 0) {
+376:         Reference maybeDecl = references.get(index-1);
+377:         if (maybeDecl.isVarDeclaration()) {
+378:           Preconditions.checkState(!maybeDecl.isInitializingDeclaration());
+379:           Reference maybeInit = references.get(index);
+380:           if (maybeInit.isSimpleAssignmentToName()) {
+381:             return true;
+382:           }
+383:         }
+384:       }
+385:       return false;
+386:     }
+
+[31] com.google.javascript.jscomp.Compiler#init  (lines 305-313)
+305:   public void init(List<JSSourceFile> externs, List<JSSourceFile> inputs,
+306:       CompilerOptions options) {
+307:     JSModule module = new JSModule("[singleton]");
+308:     for (JSSourceFile input : inputs) {
+309:       module.add(input);
+310:     }
+311: 
+312:     initModules(externs, Lists.newArrayList(module), options);
+313:   }
+
+[32] com.google.javascript.rhino.Node#mergeLineCharNo  (lines 1332-1340)
+1332:   protected static int mergeLineCharNo(int lineno, int charno) {
+1333:     if (lineno < 0 || charno < 0) {
+1334:       return -1;
+1335:     } else if ((charno & ~COLUMN_MASK) != 0) {
+1336:       return lineno << COLUMN_BITS | COLUMN_MASK;
+1337:     } else {
+1338:       return lineno << COLUMN_BITS | (charno & COLUMN_MASK);
+1339:     }
+1340:   }
+
+[33] com.google.javascript.jscomp.NodeTraversal#traverseFunction  (lines 486-521)
+486:   private void traverseFunction(Node n, Node parent) {
+487:     Preconditions.checkState(n.getChildCount() == 3);
+488:     Preconditions.checkState(n.getType() == Token.FUNCTION);
+489: 
+490:     final Node fnName = n.getFirstChild();
+491: 
+492:     boolean isFunctionExpression = (parent != null)
+493:         && NodeUtil.isFunctionExpression(n);
+494: 
+495:     if (!isFunctionExpression) {
+496:       // Functions declarations are in the scope containing the declaration.
+497:       traverseBranch(fnName, n);
+498:     }
+499: 
+500:     curNode = n;
+501:     pushScope(n);
+502: 
+503:     if (isFunctionExpression) {
+504:       // Function expression names are only accessible within the function
+505:       // scope.
+506:       traverseBranch(fnName, n);
+507:     }
+508: 
+509:     final Node args = fnName.getNext();
+510:     final Node body = args.getNext();
+511: 
+512:     // Args
+513:     traverseBranch(args, n);
+514: 
+515:     // Body
+516:     Preconditions.checkState(body.getNext() == null &&
+517:             body.getType() == Token.BLOCK);
+518:     traverseBranch(body, n);
+519: 
+520:     popScope();
+521:   }
+
+[34] com.google.javascript.jscomp.NodeTraversal#formatNodeContext  (lines 242-248)
+242:   private String formatNodeContext(String label, Node n) {
+243:     if (n == null) {
+244:       return "  " + label + ": NULL";
+245:     }
+246:     return "  " + label + "(" + n.toString(false, false, false) + "): "
+247:         + formatNodePosition(n);
+248:   }
+
+[35] com.google.javascript.jscomp.SourceFile#fromCode  (lines 324-326)
+324:   public static SourceFile fromCode(String fileName, String code) {
+325:     return new Preloaded(fileName, code);
+326:   }
+
+[36] com.google.javascript.jscomp.NodeTraversal#getSourceName  (lines 629-632)
+629:   private static String getSourceName(Node n) {
+630:     String name = n.getSourceFileName();
+631:     return name == null ? "" : name;
+632:   }
+
+[37] com.google.javascript.rhino.Node#setCharno  (lines 1309-1311)
+1309:   public void setCharno(int charno) {
+1310:       sourcePosition = mergeLineCharNo(getLineno(), charno);
+1311:   }
+
+[38] com.google.javascript.jscomp.Compiler#parseInputs  (lines 1154-1292)
+1154:   Node parseInputs() {
+1155:     boolean devMode = options.devMode != DevMode.OFF;
+1156: 
+1157:     // If old roots exist (we are parsing a second time), detach each of the
+1158:     // individual file parse trees.
+1159:     if (externsRoot != null) {
+1160:       externsRoot.detachChildren();
+1161:     }
+1162:     if (jsRoot != null) {
+1163:       jsRoot.detachChildren();
+1164:     }
+1165: 
+1166:     // Parse main js sources.
+1167:     jsRoot = new Node(Token.BLOCK);
+1168:     jsRoot.setIsSyntheticBlock(true);
+1169: 
+1170:     externsRoot = new Node(Token.BLOCK);
+1171:     externsRoot.setIsSyntheticBlock(true);
+1172: 
+1173:     externAndJsRoot = new Node(Token.BLOCK, externsRoot, jsRoot);
+1174:     externAndJsRoot.setIsSyntheticBlock(true);
+1175: 
+1176:     if (options.tracer.isOn()) {
+1177:       tracker = new PerformanceTracker(jsRoot,
+1178:           options.tracer == TracerMode.ALL);
+1179:       addChangeHandler(tracker.getCodeChangeHandler());
+1180:     }
+1181: 
+1182:     Tracer tracer = newTracer("parseInputs");
+1183: 
+1184:     try {
+1185:       // Parse externs sources.
+1186:       for (CompilerInput input : externs) {
+1187:         Node n = input.getAstRoot(this);
+1188:         if (hasErrors()) {
+1189:           return null;
+1190:         }
+1191:         externsRoot.addChildToBack(n);
+1192:       }
+1193: 
+1194:       // Check if the sources need to be re-ordered.
+1195:       if (options.manageClosureDependencies) {
+1196:         for (CompilerInput input : inputs) {
+1197:           input.setCompiler(this);
+1198: 
+1199:           // Forward-declare all the provided types, so that they
+1200:           // are not flagged even if they are dropped from the process.
+1201:           for (String provide : input.getProvides()) {
+1202:             getTypeRegistry().forwardDeclareType(provide);
+1203:           }
+1204:         }
+1205: 
+1206:         try {
+1207:           inputs =
+1208:               (moduleGraph == null ? new JSModuleGraph(modules) : moduleGraph)
+1209:               .manageDependencies(
+1210:                   options.manageClosureDependenciesEntryPoints, inputs);
+1211:         } catch (CircularDependencyException e) {
+1212:           report(JSError.make(
+1213:               JSModule.CIRCULAR_DEPENDENCY_ERROR, e.getMessage()));
+1214:           return null;
+1215:         } catch (MissingProvideException e) {
+1216:           report(JSError.make(
+1217:               MISSING_ENTRY_ERROR, e.getMessage()));
+1218:           return null;
+1219:         }
+1220:       }
+1221: 
+1222:       // Check if inputs need to be rebuilt from modules.
+1223:       boolean staleInputs = false;
+1224:       for (CompilerInput input : inputs) {
+1225:         Node n = input.getAstRoot(this);
+1226: 
+1227:         // Inputs can have a null AST during initial parse.
+1228:         if (n == null) {
+1229:           continue;
+1230:         }
+1231: 
+1232:         if (n.getJSDocInfo() != null) {
+1233:           JSDocInfo info = n.getJSDocInfo();
+1234:           if (info.isExterns()) {
+1235:             // If the input file is explicitly marked as an externs file, then
+1236:             // assume the programmer made a mistake and throw it into
+1237:             // the externs pile anyways.
+1238:             externsRoot.addChildToBack(n);
+1239:             input.setIsExtern(true);
+1240: 
+1241:             input.getModule().remove(input);
+1242: 
+1243:             externs.add(input);
+1244:             staleInputs = true;
+1245:           } else if (info.isNoCompile()) {
+1246:             input.getModule().remove(input);
+1247:             staleInputs = true;
+1248:           }
+1249:         }
+1250:       }
+1251: 
+1252:       if (staleInputs) {
+1253:         fillEmptyModules(modules);
+1254:         rebuildInputsFromModules();
+1255:       }
+1256: 
+1257:       // Build the AST.
+1258:       for (CompilerInput input : inputs) {
+1259:         Node n = input.getAstRoot(this);
+1260:         if (n == null) {
+1261:           continue;
+1262:         }
+1263: 
+1264:         if (devMode) {
+1265:           runSanityCheck();
+1266:           if (hasErrors()) {
+1267:             return null;
+1268:           }
+1269:         }
+1270: 
+1271:         if (options.sourceMapOutputPath != null ||
+1272:             options.nameReferenceReportPath != null) {
+1273: 
+1274:           // Annotate the nodes in the tree with information from the
+1275:           // input file. This information is used to construct the SourceMap.
+1276:           SourceInformationAnnotator sia =
+1277:               new SourceInformationAnnotator(
+1278:                   input.getName(), options.devMode != DevMode.OFF);
+1279:           NodeTraversal.traverse(this, n, sia);
+1280:         }
+1281: 
+1282:         jsRoot.addChildToBack(n);
+1283:       }
+1284: 
+1285:       if (hasErrors()) {
+1286:         return null;
+1287:       }
+1288:       return externAndJsRoot;
+1289:     } finally {
+1290:       stopTracer(tracer, "parseInputs");
+1291:     }
+1292:   }
+
+[39] com.google.javascript.jscomp.JSModule#add  (lines 103-106)
+103:   public void add(CompilerInput input) {
+104:     inputs.add(input);
+105:     input.setModule(this);
+106:   }
+
+[40] com.google.javascript.jscomp.ReferenceCollectingCallback#isInitializingDeclaration  (lines 568-574)
+568:     boolean isInitializingDeclaration() {
+569:       // VAR is the only type of variable declaration that may not initialize
+570:       // its variable. Catch blocks, named functions, and parameters all do.
+571:       return isDeclaration() &&
+572:           getParent().getType() != Token.VAR ||
+573:           nameNode.getFirstChild() != null;
+574:     }
+
+[41] com.google.javascript.jscomp.parsing.ParserRunner#parse  (lines 104-148)
+104:   public static Node parse(StaticSourceFile sourceFile,
+105:                            String sourceString,
+106:                            Config config,
+107:                            ErrorReporter errorReporter,
+108:                            Logger logger) throws IOException {
+109:     Context cx = Context.enter();
+110:     cx.setErrorReporter(errorReporter);
+111:     cx.setLanguageVersion(Context.VERSION_1_5);
+112:     CompilerEnvirons compilerEnv = new CompilerEnvirons();
+113:     compilerEnv.initFromContext(cx);
+114:     compilerEnv.setRecordingComments(true);
+115:     compilerEnv.setRecordingLocalJsDocComments(true);
+116:     // ES5 specifically allows trailing commas
+117:     compilerEnv.setWarnTrailingComma(
+118:         config.languageMode == LanguageMode.ECMASCRIPT3);
+119: 
+120:     if (config.isIdeMode || config.languageMode != LanguageMode.ECMASCRIPT3) {
+121:       // Do our own identifier check for ECMASCRIPT 5
+122:       compilerEnv.setReservedKeywordAsIdentifier(true);
+123:       compilerEnv.setAllowKeywordAsObjectPropertyName(true);
+124:     }
+125: 
+126:     if (config.isIdeMode) {
+127:       compilerEnv.setAllowMemberExprAsFunctionName(true);
+128:     }
+129:     compilerEnv.setIdeMode(config.isIdeMode);
+130: 
+131:     Parser p = new Parser(compilerEnv, errorReporter);
+132:     AstRoot astRoot = null;
+133:     try {
+134:       astRoot = p.parse(sourceString, sourceFile.getName(), 1);
+135:     } catch (EvaluatorException e) {
+136:       logger.info(
+137:           "Error parsing " + sourceFile.getName() + ": " + e.getMessage());
+138:     } finally {
+139:       Context.exit();
+140:     }
+141:     Node root = null;
+142:     if (astRoot != null) {
+143:       root = IRFactory.transformTree(
+144:           astRoot, sourceFile, sourceString, config, errorReporter);
+145:       root.setIsSyntheticBlock(true);
+146:     }
+147:     return root;
+148:   }
+
+[42] com.google.javascript.jscomp.ReferenceCollectingCallback#getInitializingReference  (lines 395-402)
+395:     Reference getInitializingReference() {
+396:       if (isInitializingDeclarationAt(0)) {
+397:         return references.get(0);
+398:       } else if (isInitializingAssignmentAt(1)) {
+399:         return references.get(1);
+400:       }
+401:       return null;
+402:     }
+
+[43] com.google.javascript.rhino.Node#getCharno  (lines 1286-1288)
+1286:   public int getCharno() {
+1287:     return extractCharno(sourcePosition);
+1288:   }
+
+[44] com.google.javascript.jscomp.parsing.IRFactory#position2charno  (lines 357-365)
+357:   private int position2charno(int position) {
+358:     int lineIndex = sourceString.lastIndexOf('\n', position);
+359:     if (lineIndex == -1) {
+360:       return position;
+361:     } else {
+362:       // Subtract one for initial position being 0.
+363:       return position - lineIndex - 1;
+364:     }
+365:   }
+
+[45] com.google.javascript.jscomp.Compiler#throwInternalError  (lines 1834-1845)
+1834:   @Override
+1835:   void throwInternalError(String message, Exception cause) {
+1836:     String finalMessage =
+1837:       "INTERNAL COMPILER ERROR.\n" +
+1838:       "Please report this problem.\n" + message;
+1839: 
+1840:     RuntimeException e = new RuntimeException(finalMessage, cause);
+1841:     if (cause != null) {
+1842:       e.setStackTrace(cause.getStackTrace());
+1843:     }
+1844:     throw e;
+1845:   }
+
+[46] com.google.javascript.jscomp.ReferenceCollectingCallback#isLhsOfForInExpression  (lines 599-605)
+599:     private static boolean isLhsOfForInExpression(Node n) {
+600:       Node parent = n.getParent();
+601:       if (parent.getType() == Token.VAR) {
+602:         return isLhsOfForInExpression(parent);
+603:       }
+604:       return NodeUtil.isForIn(parent) && parent.getFirstChild() == n;
+605:     }
+
+[47] com.google.javascript.jscomp.InlineObjectLiterals#splitObject  (lines 366-437)
+366:     private void splitObject(Var v, Reference declaration,
+367:                              Reference init,
+368:                              ReferenceCollection referenceInfo) {
+369:       // First figure out the FULL set of possible keys, so that they
+370:       // can all be properly set as necessary.
+371:       Map<String, String> varmap = computeVarList(v, referenceInfo);
+372: 
+373:       Map<String, Node> initvals = Maps.newHashMap();
+374:       // Figure out the top-level of the var assign node. If it's a plain
+375:       // ASSIGN, then there's an EXPR_STATEMENT above it, if it's a
+376:       // VAR then it should be directly replaced.
+377:       Node vnode;
+378:       boolean defined = referenceInfo.isWellDefined() &&
+379:           init.getParent().getType() == Token.VAR;
+380:       if (defined) {
+381:         vnode = init.getParent();
+382:         fillInitialValues(init, initvals);
+383:       } else {
+384:         // TODO(user): More test / rewrite this part.
+385:         // Find the beginning of the function / script.
+386:         vnode = v.getScope().getRootNode().getLastChild().getFirstChild();
+387:       }
+388: 
+389:       for (Map.Entry<String, String> entry : varmap.entrySet()) {
+390:         Node val = initvals.get(entry.getKey());
+391:         Node varnode = NodeUtil.newVarNode(entry.getValue(), val);
+392:         if (val == null) {
+393:           // is this right?
+394:           varnode.copyInformationFromForTree(vnode);
+395:         } else {
+396:           blacklistVarReferencesInTree(val, v.scope);
+397:         }
+398:         vnode.getParent().addChildBefore(varnode, vnode);
+399:       }
+400: 
+401:       if (defined) {
+402:         vnode.getParent().removeChild(vnode);
+403:       }
+404: 
+405:       for (Reference ref : referenceInfo.references) {
+406:         // The init/decl have already been converted.
+407:         if (defined && ref == init) continue;
+408: 
+409:         if (ref.isLvalue()) {
+410:           // Assignments have to be handled specially, since they
+411:           // expand out into multiple assignments.
+412:           replaceAssignmentExpression(v, ref, varmap);
+413:         } else if (ref.getParent().getType() == Token.VAR) {
+414:           // The old variable declaration. It didn't have a
+415:           // value. Remove it entirely as it should now be unused.
+416:           ref.getGrandparent().removeChild(ref.getParent());
+417:         } else {
+418:           // Make sure that the reference is a GETPROP as we expect it to be.
+419:           Node getprop = ref.getParent();
+420:           Preconditions.checkState(getprop.getType() == Token.GETPROP);
+421: 
+422:           // The key being looked up in the original map.
+423:           String var = getprop.getChildAtIndex(1).getString();
+424: 
+425:           // If the variable hasn't already been declared, add an empty
+426:           // declaration near all the other declarations.
+427:           Preconditions.checkState(varmap.containsKey(var));
+428: 
+429:           // Replace the GETPROP node with a NAME.
+430:           Node replacement = Node.newString(Token.NAME, varmap.get(var));
+431:           replacement.copyInformationFrom(getprop);
+432:           ref.getGrandparent().replaceChild(ref.getParent(), replacement);
+433:         }
+434:       }
+435: 
+436:       compiler.reportCodeChange();
+437:     }
+
+[48] com.google.javascript.jscomp.Compiler#getAllInputsFromModules  (lines 430-446)
+430:   private static List<CompilerInput> getAllInputsFromModules(
+431:       List<JSModule> modules) {
+432:     List<CompilerInput> inputs = Lists.newArrayList();
+433:     Map<String, JSModule> inputMap = Maps.newHashMap();
+434:     for (JSModule module : modules) {
+435:       for (CompilerInput input : module.getInputs()) {
+436:         String inputName = input.getName();
+437: 
+438:         // NOTE(nicksantos): If an input is in more than one module,
+439:         // it will show up twice in the inputs list, and then we
+440:         // will get an error down the line.
+441:         inputs.add(input);
+442:         inputMap.put(inputName, module);
+443:       }
+444:     }
+445:     return inputs;
+446:   }
+
+[49] com.google.javascript.jscomp.ReferenceCollectingCallback#isInitializingDeclarationAt  (lines 357-366)
+357:     private boolean isInitializingDeclarationAt(int index) {
+358:       Reference maybeInit = references.get(index);
+359:       if (maybeInit.isInitializingDeclaration()) {
+360:         // This is a declaration that represents the initial value.
+361:         // Specifically, var declarations without assignments such as "var a;"
+362:         // are not.
+363:         return true;
+364:       }
+365:       return false;
+366:     }
+
+[50] com.google.javascript.rhino.Node#toString  (lines 1034-1147)
+1034:   private void toString(
+1035:       StringBuilder sb,
+1036:       boolean printSource,
+1037:       boolean printAnnotations,
+1038:       boolean printType) {
+1039:     if (Token.printTrees) {
+1040:       sb.append(Token.name(type));
+1041:       if (this instanceof StringNode) {
+1042:         sb.append(' ');
+1043:         sb.append(getString());
+1044:       } else if (type == Token.FUNCTION) {
+1045:         sb.append(' ');
+1046:         // In the case of JsDoc trees, the first child is often not a string
+1047:         // which causes exceptions to be thrown when calling toString or
+1048:         // toStringTree.
+1049:         if (first == null || first.getType() != Token.NAME) {
+1050:           sb.append("<invalid>");
+1051:         } else {
+1052:           sb.append(first.getString());
+1053:         }
+1054:       } else if (this instanceof ScriptOrFnNode) {
+1055:         ScriptOrFnNode sof = (ScriptOrFnNode) this;
+1056:         if (this instanceof FunctionNode) {
+1057:           FunctionNode fn = (FunctionNode) this;
+1058:           sb.append(' ');
+1059:           sb.append(fn.getFunctionName());
+1060:         }
+1061:         if (printSource) {
+1062:           sb.append(" [source name: ");
+1063:           sb.append(sof.getSourceName());
+1064:           sb.append("] [encoded source length: ");
+1065:           sb.append(sof.getEncodedSourceEnd() - sof.getEncodedSourceStart());
+1066:           sb.append("] [base line: ");
+1067:           sb.append(sof.getBaseLineno());
+1068:           sb.append("] [end line: ");
+1069:           sb.append(sof.getEndLineno());
+1070:           sb.append(']');
+1071:         }
+1072:       } else if (type == Token.NUMBER) {
+1073:         sb.append(' ');
+1074:         sb.append(getDouble());
+1075:       }
+1076:       if (printSource) {
+1077:         int lineno = getLineno();
+1078:         if (lineno != -1) {
+1079:           sb.append(' ');
+1080:           sb.append(lineno);
+1081:         }
+1082:       }
+1083: 
+1084:       if (printAnnotations) {
+1085:         int[] keys = getSortedPropTypes();
+1086:         for (int i = 0; i < keys.length; i++) {
+1087:           int type = keys[i];
+1088:           PropListItem x = lookupProperty(type);
+1089:           sb.append(" [");
+1090:           sb.append(propToString(type));
+1091:           sb.append(": ");
+1092:           String value;
+1093:           switch (type) {
+1094:             case TARGETBLOCK_PROP: // can't add this as it recurses
+1095:               value = "target block property";
+1096:               break;
+1097:             case LOCAL_BLOCK_PROP: // can't add this as it is dull
+1098:               value = "last local block";
+1099:               break;
+1100:             case ISNUMBER_PROP:
+1101:               switch (x.getIntValue()) {
+1102:                 case BOTH:
+1103:                   value = "both";
+1104:                   break;
+1105:                 case RIGHT:
+1106:                   value = "right";
+1107:                   break;
+1108:                 case LEFT:
+1109:                   value = "left";
+1110:                   break;
+1111:                 default:
+1112:                   throw Kit.codeBug();
+1113:               }
+1114:               break;
+1115:             case SPECIALCALL_PROP:
+1116:               switch (x.getIntValue()) {
+1117:                 case SPECIALCALL_EVAL:
+1118:                   value = "eval";
+1119:                   break;
+1120:                 case SPECIALCALL_WITH:
+1121:                   value = "with";
+1122:                   break;
+1123:                 default:
+1124:                   // NON_SPECIALCALL should not be stored
+1125:                   throw Kit.codeBug();
+1126:               }
+1127:               break;
+1128:             default:
+1129:               value = x.toString();
+1130:               break;
+1131:           }
+1132:           sb.append(value);
+1133:           sb.append(']');
+1134:         }
+1135:       }
+1136: 
+1137:       if (printType) {
+1138:         if (jsType != null) {
+1139:           String jsTypeString = jsType.toString();
+1140:           if (jsTypeString != null) {
+1141:             sb.append(" : ");
+1142:             sb.append(jsTypeString);
+1143:           }
+1144:         }
+1145:       }
+1146:     }
+1147:   }

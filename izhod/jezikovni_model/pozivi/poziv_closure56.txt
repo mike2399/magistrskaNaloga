@@ -1,0 +1,1023 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.JSCompilerSourceExcerptProviderTest::testExceptNoNewLine
+junit.framework.ComparisonFailure: expected:<foo2:third line> but was:<null>
+	at com.google.javascript.jscomp.JSCompilerSourceExcerptProviderTest.testExceptNoNewLine(JSCompilerSourceExcerptProviderTest.java:67)
+--- com.google.javascript.jscomp.JsMessageExtractorTest::testSyntaxError1
+junit.framework.AssertionFailedError
+	at com.google.javascript.jscomp.JsMessageExtractorTest.testSyntaxError1(JsMessageExtractorTest.java:62)
+--- com.google.javascript.jscomp.JsMessageExtractorTest::testSyntaxError2
+junit.framework.AssertionFailedError
+	at com.google.javascript.jscomp.JsMessageExtractorTest.testSyntaxError2(JsMessageExtractorTest.java:74)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.JsMessageExtractor#JsMessageExtractor  (lines 56-60)
+56:   public JsMessageExtractor(JsMessage.IdGenerator idGenerator,
+57:       JsMessage.Style style) {
+58:     this.idGenerator = idGenerator;
+59:     this.style = style;
+60:   }
+
+[2] com.google.javascript.jscomp.ComposeWarningsGuard#disables  (lines 115-133)
+115:   @Override
+116:   public boolean disables(DiagnosticGroup group) {
+117:     nextSingleton:
+118:     for (DiagnosticType type : group.getTypes()) {
+119:       DiagnosticGroup singleton = DiagnosticGroup.forType(type);
+120: 
+121:       for (WarningsGuard guard : guards) {
+122:         if (guard.disables(singleton)) {
+123:           continue nextSingleton;
+124:         } else if (guard.enables(singleton)) {
+125:           return false;
+126:         }
+127:       }
+128: 
+129:       return false;
+130:     }
+131: 
+132:     return true;
+133:   }
+
+[3] com.google.javascript.jscomp.ComposeWarningsGuard#compare  (lines 60-71)
+60:     @Override
+61:     public int compare(WarningsGuard a, WarningsGuard b) {
+62:       int priorityDiff = a.getPriority() - b.getPriority();
+63:       if (priorityDiff != 0) {
+64:         return priorityDiff;
+65:       }
+66: 
+67:       // If the warnings guards have the same priority, the one that
+68:       // was added last wins.
+69:       return orderOfAddition.get(b).intValue() -
+70:           orderOfAddition.get(a).intValue();
+71:     }
+
+[4] com.google.javascript.jscomp.JSError#make  (lines 97-101)
+97:   public static JSError make(String sourceName, int lineno, int charno,
+98:       CheckLevel level, DiagnosticType type, String... arguments) {
+99:     return new JSError(
+100:         sourceName, null, lineno, charno, type, level, arguments);
+101:   }
+
+[5] com.google.javascript.jscomp.LightweightMessageFormatter#formatError  (lines 58-61)
+58:   @Override
+59:   public String formatError(JSError error) {
+60:     return format(error, false);
+61:   }
+
+[6] com.google.javascript.jscomp.AbstractMessageFormatter#getSource  (lines 43-45)
+43:   protected final SourceExcerptProvider getSource() {
+44:     return source;
+45:   }
+
+[7] com.google.javascript.jscomp.parsing.ParserRunner#parse  (lines 104-147)
+104:   public static Node parse(StaticSourceFile sourceFile,
+105:                            String sourceString,
+106:                            Config config,
+107:                            ErrorReporter errorReporter,
+108:                            Logger logger) throws IOException {
+109:     Context cx = Context.enter();
+110:     cx.setErrorReporter(errorReporter);
+111:     cx.setLanguageVersion(Context.VERSION_1_5);
+112:     CompilerEnvirons compilerEnv = new CompilerEnvirons();
+113:     compilerEnv.initFromContext(cx);
+114:     compilerEnv.setRecordingComments(true);
+115:     compilerEnv.setRecordingLocalJsDocComments(true);
+116:     // ES5 specifically allows trailing commas
+117:     compilerEnv.setWarnTrailingComma(
+118:         config.languageMode == LanguageMode.ECMASCRIPT3);
+119: 
+120:     if (config.isIdeMode || config.languageMode != LanguageMode.ECMASCRIPT3) {
+121:       // Do our own identifier check for ECMASCRIPT 5
+122:       compilerEnv.setReservedKeywordAsIdentifier(true);
+123:       compilerEnv.setAllowKeywordAsObjectPropertyName(true);
+124:     }
+125: 
+126:     if (config.isIdeMode) {
+127:       compilerEnv.setAllowMemberExprAsFunctionName(true);
+128:     }
+129: 
+130:     Parser p = new Parser(compilerEnv, errorReporter);
+131:     AstRoot astRoot = null;
+132:     try {
+133:       astRoot = p.parse(sourceString, sourceFile.getName(), 1);
+134:     } catch (EvaluatorException e) {
+135:       logger.info(
+136:           "Error parsing " + sourceFile.getName() + ": " + e.getMessage());
+137:     } finally {
+138:       Context.exit();
+139:     }
+140:     Node root = null;
+141:     if (astRoot != null) {
+142:       root = IRFactory.transformTree(
+143:           astRoot, sourceFile, sourceString, config, errorReporter);
+144:       root.setIsSyntheticBlock(true);
+145:     }
+146:     return root;
+147:   }
+
+[8] com.google.javascript.jscomp.SourceFile#getLine  (lines 205-246)
+205:   public String getLine(int lineNumber) {
+206:     String js = "";
+207:     try {
+208:       // NOTE(nicksantos): Right now, this is optimized for few warnings.
+209:       // This is probably the right trade-off, but will be slow if there
+210:       // are lots of warnings in one file.
+211:       js = getCode();
+212:     } catch (IOException e) {
+213:       return null;
+214:     }
+215: 
+216:     int pos = 0;
+217:     int startLine = 1;
+218: 
+219:     // If we've saved a previous offset and it's for a line less than the
+220:     // one we're searching for, then start at that point.
+221:     if (lineNumber >= lastLine) {
+222:       pos = lastOffset;
+223:       startLine = lastLine;
+224:     }
+225: 
+226:     for (int n = startLine; n < lineNumber; n++) {
+227:       int nextpos = js.indexOf('\n', pos);
+228:       if (nextpos == -1) {
+229:         return null;
+230:       }
+231:       pos = nextpos + 1;
+232:     }
+233: 
+234:     // Remember this offset for the next search we do.
+235:     lastOffset = pos;
+236:     lastLine = lineNumber;
+237: 
+238:     if (js.indexOf('\n', pos) == -1) {
+239:       // If next new line cannot be found, there are two cases
+240:       // 1. pos already reaches the end of file, then null should be returned
+241:       // 2. otherwise, return the contents between pos and the end of file.
+242:         return null;
+243:     } else {
+244:       return js.substring(pos, js.indexOf('\n', pos));
+245:     }
+246:   }
+
+[9] com.google.javascript.jscomp.JSError#JSError  (lines 139-149)
+139:   private JSError(
+140:       String sourceName, @Nullable Node node, int lineno, int charno,
+141:       DiagnosticType type, CheckLevel level, String... arguments) {
+142:     this.type = type;
+143:     this.node = node;
+144:     this.description = type.format.format(arguments);
+145:     this.lineNumber = lineno;
+146:     this.charno = charno;
+147:     this.sourceName = sourceName;
+148:     this.level = level == null ? type.level : level;
+149:   }
+
+[10] com.google.javascript.jscomp.DiagnosticType#equals  (lines 113-117)
+113:   @Override
+114:   public boolean equals(Object type) {
+115:     return type instanceof DiagnosticType &&
+116:         ((DiagnosticType) type).key.equals(key);
+117:   }
+
+[11] com.google.javascript.jscomp.JsMessageExtractor#extractMessages  (lines 98-101)
+98:   public Collection<JsMessage> extractMessages(JSSourceFile... inputs)
+99:       throws IOException {
+100:     return extractMessages(ImmutableList.copyOf(inputs));
+101:   }
+
+[12] com.google.javascript.jscomp.CompilerInput#setModule  (lines 311-316)
+311:   public void setModule(JSModule module) {
+312:     // An input may only belong to one module.
+313:     Preconditions.checkArgument(
+314:         module == null || this.module == null || this.module == module);
+315:     this.module = module;
+316:   }
+
+[13] com.google.javascript.jscomp.RhinoErrorReporter#error  (lines 118-122)
+118:   public void error(String message, String sourceName, int line,
+119:       String lineSource, int lineOffset) {
+120:     compiler.report(
+121:         makeError(message, sourceName, line, lineOffset, CheckLevel.ERROR));
+122:   }
+
+[14] com.google.javascript.jscomp.RhinoErrorReporter#RhinoErrorReporter  (lines 73-101)
+73:   private RhinoErrorReporter(AbstractCompiler compiler) {
+74:     this.compiler = compiler;
+75:     typeMap = ImmutableMap.of(
+76: 
+77:         // Extra @fileoverview
+78:         replacePlaceHolders(
+79:             ScriptRuntime.getMessage0("msg.jsdoc.fileoverview.extra")),
+80:         EXTRA_FILEOVERVIEW,
+81: 
+82:         // Trailing comma
+83:         replacePlaceHolders(
+84:             com.google.javascript.jscomp.mozilla.rhino.ScriptRuntime
+85:               .getMessage0("msg.extra.trailing.comma")),
+86:         TRAILING_COMMA,
+87: 
+88:         // Duplicate parameter
+89:         replacePlaceHolders(
+90:             com.google.javascript.jscomp.mozilla.rhino.ScriptRuntime
+91:               .getMessage0("msg.dup.parms")),
+92:         DUPLICATE_PARAM,
+93: 
+94:         // Unknown @annotations.
+95:         replacePlaceHolders(ScriptRuntime.getMessage0("msg.bad.jsdoc.tag")),
+96:         BAD_JSDOC_ANNOTATION,
+97: 
+98:         // Type annotation errors.
+99:         Pattern.compile("^Bad type annotation.*"),
+100:         TYPE_PARSE_ERROR);
+101:   }
+
+[15] com.google.javascript.jscomp.DiagnosticGroup#forType  (lines 71-76)
+71:   static DiagnosticGroup forType(DiagnosticType type) {
+72:     if (!singletons.containsKey(type)) {
+73:       singletons.put(type, new DiagnosticGroup(type));
+74:     }
+75:     return singletons.get(type);
+76:   }
+
+[16] com.google.javascript.rhino.Node#Node  (lines 456-460)
+456:   public Node(int nodeType) {
+457:     type = nodeType;
+458:     parent = null;
+459:     sourcePosition = -1;
+460:   }
+
+[17] com.google.javascript.jscomp.AbstractMessageFormatter#getLevelName  (lines 73-79)
+73:   String getLevelName(CheckLevel level) {
+74:     switch (level) {
+75:       case ERROR: return maybeColorize("ERROR", Color.ERROR);
+76:       case WARNING: return maybeColorize("WARNING", Color.WARNING);
+77:       default: return level.toString();
+78:     }
+79:   }
+
+[18] com.google.javascript.jscomp.BasicErrorManager#report  (lines 44-53)
+44:   @Override
+45:   public void report(CheckLevel level, JSError error) {
+46:     if (messages.add(new ErrorWithLevel(error, level))) {
+47:       if (level == CheckLevel.ERROR) {
+48:         errorCount++;
+49:       } else if (level == CheckLevel.WARNING) {
+50:         warningCount++;
+51:       }
+52:     }
+53:   }
+
+[19] com.google.javascript.jscomp.NodeTraversal#NodeTraversal  (lines 211-221)
+211:   public NodeTraversal(AbstractCompiler compiler, Callback cb,
+212:       ScopeCreator scopeCreator) {
+213:     this.callback = cb;
+214:     if (cb instanceof ScopedCallback) {
+215:       this.scopeCallback = (ScopedCallback) cb;
+216:     }
+217:     this.compiler = compiler;
+218:     this.inputId = null;
+219:     this.sourceName = "";
+220:     this.scopeCreator = scopeCreator;
+221:   }
+
+[20] com.google.javascript.jscomp.CompilerOptions#disables  (lines 1007-1009)
+1007:   boolean disables(DiagnosticGroup type) {
+1008:     return warningsGuard.disables(type);
+1009:   }
+
+[21] com.google.javascript.jscomp.LightweightMessageFormatter#format  (lines 68-113)
+68:   private String format(JSError error, boolean warning) {
+69:     // extract source excerpt
+70:     SourceExcerptProvider source = getSource();
+71:     String sourceExcerpt = source == null ? null :
+72:         excerpt.get(
+73:             source, error.sourceName, error.lineNumber, excerptFormatter);
+74: 
+75:     // formatting the message
+76:     StringBuilder b = new StringBuilder();
+77:     if (error.sourceName != null) {
+78:       b.append(error.sourceName);
+79:       if (error.lineNumber > 0) {
+80:         b.append(':');
+81:         b.append(error.lineNumber);
+82:       }
+83:       b.append(": ");
+84:     }
+85: 
+86:     b.append(getLevelName(warning ? CheckLevel.WARNING : CheckLevel.ERROR));
+87:     b.append(" - ");
+88: 
+89:     b.append(error.description);
+90:     b.append('\n');
+91:     if (sourceExcerpt != null) {
+92:       b.append(sourceExcerpt);
+93:       b.append('\n');
+94:       int charno = error.getCharno();
+95: 
+96:       // padding equal to the excerpt and arrow at the end
+97:       // charno == sourceExpert.length() means something is missing
+98:       // at the end of the line
+99:       if (excerpt.equals(LINE)
+100:           && 0 <= charno && charno <= sourceExcerpt.length()) {
+101:         for (int i = 0; i < charno; i++) {
+102:           char c = sourceExcerpt.charAt(i);
+103:           if (Character.isWhitespace(c)) {
+104:             b.append(c);
+105:           } else {
+106:             b.append(' ');
+107:           }
+108:         }
+109:         b.append("^\n");
+110:       }
+111:     }
+112:     return b.toString();
+113:   }
+
+[22] com.google.javascript.jscomp.DiagnosticGroups#registerGroup  (lines 42-47)
+42:   static DiagnosticGroup registerGroup(String name,
+43:       DiagnosticType ... types) {
+44:     DiagnosticGroup group = new DiagnosticGroup(name, types);
+45:     groupsByName.put(name, group);
+46:     return group;
+47:   }
+
+[23] com.google.javascript.jscomp.Compiler#init  (lines 296-300)
+296:   public void init(JSSourceFile[] externs, JSSourceFile[] inputs,
+297:       CompilerOptions options) {
+298:     init(Lists.<JSSourceFile>newArrayList(externs),
+299:         Lists.<JSSourceFile>newArrayList(inputs), options);
+300:   }
+
+[24] com.google.javascript.jscomp.SourceFile#fromCode  (lines 320-322)
+320:   public static SourceFile fromCode(String fileName, String code) {
+321:     return new Preloaded(fileName, code);
+322:   }
+
+[25] com.google.javascript.jscomp.LightweightMessageFormatter#formatLine  (lines 123-126)
+123:     @Override
+124:     public String formatLine(String line, int lineNumber) {
+125:       return line;
+126:     }
+
+[26] com.google.javascript.jscomp.Compiler#getSourceFileByName  (lines 1885-1895)
+1885:   private SourceFile getSourceFileByName(String sourceName) {
+1886:     // Here we assume that the source name is the input name, this
+1887:     // is try of javascript parsed from source.
+1888:     if (sourceName != null) {
+1889:       CompilerInput input = inputsById.get(new InputId(sourceName));
+1890:       if (input != null) {
+1891:         return input.getSourceFile();
+1892:       }
+1893:     }
+1894:     return null;
+1895:   }
+
+[27] com.google.javascript.jscomp.SourceFile#SourceFile  (lines 86-94)
+86:   public SourceFile(String fileName) {
+87:     if (fileName == null || fileName.isEmpty()) {
+88:       throw new IllegalArgumentException("a source must have a name");
+89:     }
+90:     this.fileName = fileName;
+91:     // Starting point: offset 0 is at line 1.
+92:     this.lastOffset = 0;
+93:     this.lastLine = 1;
+94:   }
+
+[28] com.google.javascript.jscomp.RhinoErrorReporter#runtimeError  (lines 162-168)
+162:     @Override
+163:     public com.google.javascript.jscomp.mozilla.rhino.EvaluatorException
+164:         runtimeError(String message, String sourceName, int line,
+165:             String lineSource, int lineOffset) {
+166:       return new com.google.javascript.jscomp.mozilla.rhino.EvaluatorException(
+167:           message, sourceName, line, lineSource, lineOffset);
+168:     }
+
+[29] com.google.javascript.jscomp.SourceExcerptProvider#get  (lines 33-38)
+33:       @Override
+34:       public String get(SourceExcerptProvider source, String sourceName,
+35:           int lineNumber, ExcerptFormatter formatter) {
+36:         return formatter.formatLine(
+37:             source.getSourceLine(sourceName, lineNumber), lineNumber);
+38:       }
+
+[30] com.google.javascript.jscomp.JsMessageExtractor#ExtractMessagesVisitor  (lines 73-75)
+73:     private ExtractMessagesVisitor(AbstractCompiler compiler) {
+74:       super(compiler, true, style, idGenerator);
+75:     }
+
+[31] com.google.javascript.jscomp.JsMessageVisitor#process  (lines 153-161)
+153:   @Override
+154:   public void process(Node externs, Node root) {
+155:     NodeTraversal.traverse(compiler, root, this);
+156: 
+157:     for (Map.Entry<Node, String> msgNode : googMsgNodes.entrySet()) {
+158:       compiler.report(JSError.make(msgNode.getValue(), msgNode.getKey(),
+159:           checkLevel, MESSAGE_NODE_IS_ORPHANED));
+160:     }
+161:   }
+
+[32] com.google.javascript.jscomp.BasicErrorManager#toArray  (lines 104-112)
+104:   private JSError[] toArray(CheckLevel level) {
+105:     List<JSError> errors = new ArrayList<JSError>(messages.size());
+106:     for (ErrorWithLevel p : messages) {
+107:       if (p.level == level) {
+108:         errors.add(p.error);
+109:       }
+110:     }
+111:     return errors.toArray(new JSError[errors.size()]);
+112:   }
+
+[33] com.google.javascript.jscomp.JsAst#parse  (lines 84-106)
+84:   private void parse(AbstractCompiler compiler) {
+85:     try {
+86:       logger_.fine("Parsing: " + sourceFile.getName());
+87:       root = ParserRunner.parse(sourceFile, sourceFile.getCode(),
+88:           compiler.getParserConfig(),
+89:           compiler.getDefaultErrorReporter(),
+90:           logger_);
+91:     } catch (IOException e) {
+92:       compiler.report(
+93:           JSError.make(AbstractCompiler.READ_ERROR, sourceFile.getName()));
+94:     }
+95: 
+96:     if (root == null || compiler.hasHaltingErrors()) {
+97:       // There was a parse error or IOException, so use a dummy block.
+98:       root = new Node(Token.SCRIPT);
+99:     } else {
+100:       compiler.prepareAst(root);
+101:     }
+102: 
+103:     // Set the source name so that the compiler passes can track
+104:     // the source file and module.
+105:     root.setStaticSourceFile(sourceFile);
+106:   }
+
+[34] com.google.javascript.jscomp.Compiler#report  (lines 1807-1820)
+1807:   @Override
+1808:   public void report(JSError error) {
+1809:     CheckLevel level = error.level;
+1810:     if (warningsGuard != null) {
+1811:       CheckLevel newLevel = warningsGuard.level(error);
+1812:       if (newLevel != null) {
+1813:         level = newLevel;
+1814:       }
+1815:     }
+1816: 
+1817:     if (level.isOn()) {
+1818:       errorManager.report(level, error);
+1819:     }
+1820:   }
+
+[35] com.google.javascript.jscomp.JsMessageVisitor#JsMessageVisitor  (lines 136-151)
+136:   JsMessageVisitor(AbstractCompiler compiler,
+137:       boolean needToCheckDuplications,
+138:       JsMessage.Style style, JsMessage.IdGenerator idGenerator) {
+139: 
+140:     this.compiler = compiler;
+141:     this.needToCheckDuplications = needToCheckDuplications;
+142:     this.style = style;
+143:     this.idGenerator = idGenerator;
+144: 
+145:     checkLevel = (style == JsMessage.Style.CLOSURE)
+146:         ? CheckLevel.ERROR : CheckLevel.WARNING;
+147: 
+148:     // TODO(anatol): add flag that decides whether to process UNNAMED messages.
+149:     // Some projects would not want such functionality (unnamed) as they dont
+150:     // use SOY templates.
+151:   }
+
+[36] com.google.javascript.jscomp.ProcessTweaks#TweakFunction  (lines 140-148)
+140:     TweakFunction(String name, String expectedTypeName,
+141:         int validNodeTypeA, int validNodeTypeB,
+142:         TweakFunction registerFunction) {
+143:       this.name = name;
+144:       this.expectedTypeName = expectedTypeName;
+145:       this.validNodeTypeA = validNodeTypeA;
+146:       this.validNodeTypeB = validNodeTypeB;
+147:       this.registerFunction = registerFunction;
+148:     }
+
+[37] com.google.javascript.jscomp.LightweightMessageFormatter#LightweightMessageFormatter  (lines 47-52)
+47:   public LightweightMessageFormatter(SourceExcerptProvider source,
+48:       SourceExcerpt excerpt) {
+49:     super(source);
+50:     Preconditions.checkNotNull(source);
+51:     this.excerpt = excerpt;
+52:   }
+
+[38] com.google.javascript.jscomp.JsMessageVisitor#visit  (lines 163-277)
+163:   @Override
+164:   public void visit(NodeTraversal traversal, Node node, Node parent) {
+165:     String messageKey;
+166:     boolean isVar;
+167:     Node msgNode, msgNodeParent;
+168: 
+169:     switch (node.getType()) {
+170:       case Token.NAME:
+171:         // var MSG_HELLO = 'Message'
+172:         if ((parent != null) && (parent.getType() == Token.VAR)) {
+173:           messageKey = node.getString();
+174:           isVar = true;
+175:         } else {
+176:           return;
+177:         }
+178: 
+179:         msgNode = node.getFirstChild();
+180:         msgNodeParent = node;
+181:         break;
+182:       case Token.ASSIGN:
+183:         // somenamespace.someclass.MSG_HELLO = 'Message'
+184:         isVar = false;
+185: 
+186:         Node getProp = node.getFirstChild();
+187:         if (getProp.getType() != Token.GETPROP) {
+188:           return;
+189:         }
+190: 
+191:         Node propNode = getProp.getLastChild();
+192: 
+193:         messageKey = propNode.getString();
+194:         msgNode = node.getLastChild();
+195:         msgNodeParent = node;
+196:         break;
+197:       case Token.CALL:
+198:         // goog.getMsg()
+199:         if (MSG_FUNCTION_NAME.equals(node.getFirstChild().getQualifiedName())) {
+200:           googMsgNodes.put(node, traversal.getSourceName());
+201:         }
+202:         return;
+203:       default:
+204:         return;
+205:     }
+206: 
+207:     // Is this a message name?
+208:     boolean isNewStyleMessage =
+209:         msgNode != null && msgNode.getType() == Token.CALL;
+210:     if (!isMessageName(messageKey, isNewStyleMessage)) {
+211:       return;
+212:     }
+213: 
+214:     if (msgNode == null) {
+215:       compiler.report(
+216:           traversal.makeError(node, MESSAGE_HAS_NO_VALUE, messageKey));
+217:       return;
+218:     }
+219: 
+220:     // Just report a warning if a qualified messageKey that looks like a message
+221:     // (e.g. "a.b.MSG_X") doesn't use goog.getMsg().
+222:     if (isNewStyleMessage) {
+223:       googMsgNodes.remove(msgNode);
+224:     } else if (style != JsMessage.Style.LEGACY) {
+225:       compiler.report(traversal.makeError(node, checkLevel,
+226:           MESSAGE_NOT_INITIALIZED_USING_NEW_SYNTAX));
+227:     }
+228: 
+229:     boolean isUnnamedMsg = isUnnamedMessageName(messageKey);
+230: 
+231:     Builder builder = new Builder(
+232:         isUnnamedMsg ? null : messageKey);
+233:     builder.setSourceName(traversal.getSourceName());
+234: 
+235:     try {
+236:       if (isVar) {
+237:         extractMessageFromVariable(builder, node, parent, parent.getParent());
+238:       } else {
+239:         extractMessageFromProperty(builder, node.getFirstChild(), node);
+240:       }
+241:     } catch (MalformedException ex) {
+242:       compiler.report(traversal.makeError(ex.getNode(),
+243:           MESSAGE_TREE_MALFORMED, ex.getMessage()));
+244:       return;
+245:     }
+246: 
+247:     JsMessage extractedMessage = builder.build(idGenerator);
+248: 
+249:     // If asked to check named internal messages.
+250:     if (needToCheckDuplications
+251:         && !isUnnamedMsg
+252:         && !extractedMessage.isExternal()) {
+253:       checkIfMessageDuplicated(traversal.getSourceName(), messageKey, msgNode);
+254:     }
+255: 
+256:     if (extractedMessage.isEmpty()) {
+257:       // value of the message is an empty string. Translators do not like it.
+258:       compiler.report(traversal.makeError(node, MESSAGE_HAS_NO_TEXT,
+259:           messageKey));
+260:     }
+261: 
+262:     // New-style messages must have descriptions. We don't emit a warning
+263:     // for legacy-style messages, because there are thousands of
+264:     // them in legacy code that are not worth the effort to fix, since they've
+265:     // already been translated anyway.
+266:     String desc = extractedMessage.getDesc();
+267:     if (isNewStyleMessage
+268:         && (desc == null || desc.trim().isEmpty())
+269:         && !extractedMessage.isExternal()) {
+270:       compiler.report(traversal.makeError(node, MESSAGE_HAS_NO_DESCRIPTION,
+271:           messageKey));
+272:     }
+273: 
+274:     JsMessageDefinition msgDefinition = new JsMessageDefinition(
+275:         node, msgNode, msgNodeParent);
+276:     processJsMessage(extractedMessage, msgDefinition);
+277:   }
+
+[39] com.google.javascript.jscomp.CompilerInput#getSourceFile  (lines 135-138)
+135:   @Override
+136:   public SourceFile getSourceFile() {
+137:     return ast.getSourceFile();
+138:   }
+
+[40] com.google.javascript.jscomp.Compiler#getSourceLine  (lines 1897-1907)
+1897:   @Override
+1898:   public String getSourceLine(String sourceName, int lineNumber) {
+1899:     if (lineNumber < 1) {
+1900:       return null;
+1901:     }
+1902:     SourceFile input = getSourceFileByName(sourceName);
+1903:     if (input != null) {
+1904:       return input.getLine(lineNumber);
+1905:     }
+1906:     return null;
+1907:   }
+
+[41] com.google.javascript.jscomp.Compiler#getParserConfig  (lines 1762-1787)
+1762:   @Override
+1763:   Config getParserConfig() {
+1764:     if (parserConfig == null) {
+1765:       Config.LanguageMode mode;
+1766:       switch (options.getLanguageIn()) {
+1767:         case ECMASCRIPT3:
+1768:           mode = Config.LanguageMode.ECMASCRIPT3;
+1769:           break;
+1770:         case ECMASCRIPT5:
+1771:           mode = Config.LanguageMode.ECMASCRIPT5;
+1772:           break;
+1773:         case ECMASCRIPT5_STRICT:
+1774:           mode = Config.LanguageMode.ECMASCRIPT5_STRICT;
+1775:           break;
+1776:         default:
+1777:           throw new IllegalStateException("unexpected language mode");
+1778:       }
+1779: 
+1780:       parserConfig = ParserRunner.createConfig(
+1781:         isIdeMode(),
+1782:         mode,
+1783:         acceptConstKeyword(),
+1784:         options.extraAnnotationNames);
+1785:     }
+1786:     return parserConfig;
+1787:   }
+
+[42] com.google.javascript.jscomp.CompilerOptions#CompilerOptions  (lines 738-884)
+738:   public CompilerOptions() {
+739:     // Accepted language
+740:     languageIn = LanguageMode.ECMASCRIPT3;
+741: 
+742:     // Language variation
+743:     acceptConstKeyword = false;
+744: 
+745:     // Checks
+746:     skipAllPasses = false;
+747:     nameAnonymousFunctionsOnly = false;
+748:     devMode = DevMode.OFF;
+749:     checkSymbols = false;
+750:     checkShadowVars = CheckLevel.OFF;
+751:     aggressiveVarCheck = CheckLevel.OFF;
+752:     checkFunctions = CheckLevel.OFF;
+753:     checkMethods = CheckLevel.OFF;
+754:     checkDuplicateMessages = false;
+755:     allowLegacyJsMessages = false;
+756:     strictMessageReplacement = false;
+757:     checkSuspiciousCode = false;
+758:     checkControlStructures = false;
+759:     checkTypes = false;
+760:     tightenTypes = false;
+761:     inferTypesInGlobalScope = false;
+762:     checkTypedPropertyCalls = false;
+763:     reportMissingOverride = CheckLevel.OFF;
+764:     reportUnknownTypes = CheckLevel.OFF;
+765:     checkRequires = CheckLevel.OFF;
+766:     checkProvides = CheckLevel.OFF;
+767:     checkGlobalNamesLevel = CheckLevel.OFF;
+768:     brokenClosureRequiresLevel = CheckLevel.ERROR;
+769:     checkGlobalThisLevel = CheckLevel.OFF;
+770:     checkUnreachableCode = CheckLevel.OFF;
+771:     checkMissingReturn = CheckLevel.OFF;
+772:     checkMissingGetCssNameLevel = CheckLevel.OFF;
+773:     checkMissingGetCssNameBlacklist = null;
+774:     checkCaja = false;
+775:     computeFunctionSideEffects = false;
+776:     chainCalls = false;
+777:     extraAnnotationNames = null;
+778: 
+779:     // Optimizations
+780:     foldConstants = false;
+781:     coalesceVariableNames = false;
+782:     deadAssignmentElimination = false;
+783:     inlineConstantVars = false;
+784:     inlineFunctions = false;
+785:     inlineLocalFunctions = false;
+786:     assumeStrictThis = false;
+787:     crossModuleCodeMotion = false;
+788:     crossModuleMethodMotion = false;
+789:     inlineGetters = false;
+790:     inlineVariables = false;
+791:     inlineLocalVariables = false;
+792:     smartNameRemoval = false;
+793:     removeDeadCode = false;
+794:     extractPrototypeMemberDeclarations = false;
+795:     removeUnusedPrototypeProperties = false;
+796:     removeUnusedPrototypePropertiesInExterns = false;
+797:     removeUnusedVars = false;
+798:     removeUnusedLocalVars = false;
+799:     aliasExternals = false;
+800:     collapseVariableDeclarations = false;
+801:     groupVariableDeclarations = false;
+802:     collapseAnonymousFunctions = false;
+803:     aliasableStrings = Collections.emptySet();
+804:     aliasStringsBlacklist = "";
+805:     aliasAllStrings = false;
+806:     outputJsStringUsage = false;
+807:     convertToDottedProperties = false;
+808:     rewriteFunctionExpressions = false;
+809:     optimizeParameters = false;
+810:     optimizeReturns = false;
+811: 
+812:     // Renaming
+813:     variableRenaming = VariableRenamingPolicy.OFF;
+814:     propertyRenaming = PropertyRenamingPolicy.OFF;
+815:     propertyAffinity = false;
+816:     labelRenaming = false;
+817:     generatePseudoNames = false;
+818:     shadowVariables = false;
+819:     renamePrefix = null;
+820:     aliasKeywords = false;
+821:     collapseProperties = false;
+822:     collapsePropertiesOnExternTypes = false;
+823:     collapseObjectLiterals = false;
+824:     devirtualizePrototypeMethods = false;
+825:     disambiguateProperties = false;
+826:     ambiguateProperties = false;
+827:     anonymousFunctionNaming = AnonymousFunctionNamingPolicy.OFF;
+828:     exportTestFunctions = false;
+829: 
+830:     // Alterations
+831:     runtimeTypeCheck = false;
+832:     runtimeTypeCheckLogFunction = null;
+833:     instrumentForCoverage = false;
+834:     instrumentForCoverageOnly = false;
+835:     ignoreCajaProperties = false;
+836:     syntheticBlockStartMarker = null;
+837:     syntheticBlockEndMarker = null;
+838:     locale = null;
+839:     markAsCompiled = false;
+840:     removeTryCatchFinally = false;
+841:     closurePass = false;
+842:     rewriteNewDateGoogNow = true;
+843:     removeAbstractMethods = true;
+844:     removeClosureAsserts = false;
+845:     stripTypes = Collections.emptySet();
+846:     stripNameSuffixes = Collections.emptySet();
+847:     stripNamePrefixes = Collections.emptySet();
+848:     stripTypePrefixes = Collections.emptySet();
+849:     customPasses = null;
+850:     markNoSideEffectCalls = false;
+851:     defineReplacements = Maps.newHashMap();
+852:     tweakProcessing = TweakProcessing.OFF;
+853:     tweakReplacements = Maps.newHashMap();
+854:     moveFunctionDeclarations = false;
+855:     instrumentationTemplate = null;
+856:     appNameStr = "";
+857:     recordFunctionInformation = false;
+858:     generateExports = false;
+859:     cssRenamingMap = null;
+860:     processObjectPropertyString = false;
+861:     idGenerators = Collections.emptySet();
+862:     replaceStringsFunctionDescriptions = Collections.emptyList();
+863:     replaceStringsPlaceholderToken = "";
+864:     replaceStringsReservedStrings = Collections.emptySet();
+865: 
+866:     // Output
+867:     printInputDelimiter = false;
+868:     prettyPrint = false;
+869:     lineBreak = false;
+870:     reportPath = null;
+871:     tracer = TracerMode.OFF;
+872:     colorizeErrorOutput = false;
+873:     errorFormat = ErrorFormat.SINGLELINE;
+874:     debugFunctionSideEffectsPath = null;
+875:     jsOutputFile = "";
+876:     externExports = false;
+877:     nameReferenceReportPath = null;
+878:     nameReferenceGraphPath = null;
+879: 
+880:     // Debugging
+881:     aliasHandler = NULL_ALIAS_TRANSFORMATION_HANDLER;
+882: 
+883:     operaCompoundAssignFix = true;
+884:   }
+
+[43] com.google.javascript.jscomp.Compiler#initOptions  (lines 228-291)
+228:   public void initOptions(CompilerOptions options) {
+229:     this.options = options;
+230:     if (errorManager == null) {
+231:       if (outStream == null) {
+232:         setErrorManager(
+233:             new LoggerErrorManager(createMessageFormatter(), logger));
+234:       } else {
+235:         PrintStreamErrorManager printer =
+236:             new PrintStreamErrorManager(createMessageFormatter(), outStream);
+237:         printer.setSummaryDetailLevel(options.summaryDetailLevel);
+238:         setErrorManager(printer);
+239:       }
+240:     }
+241: 
+242:     // DiagnosticGroups override the plain checkTypes option.
+243:     if (options.enables(DiagnosticGroups.CHECK_TYPES)) {
+244:       options.checkTypes = true;
+245:     } else if (options.disables(DiagnosticGroups.CHECK_TYPES)) {
+246:       options.checkTypes = false;
+247:     } else if (!options.checkTypes) {
+248:       // If DiagnosticGroups did not override the plain checkTypes
+249:       // option, and checkTypes is enabled, then turn off the
+250:       // parser type warnings.
+251:       options.setWarningLevel(
+252:           DiagnosticGroup.forType(
+253:               RhinoErrorReporter.TYPE_PARSE_ERROR),
+254:           CheckLevel.OFF);
+255:     }
+256: 
+257:     if (options.checkGlobalThisLevel.isOn() &&
+258:         !options.disables(DiagnosticGroups.GLOBAL_THIS)) {
+259:       options.setWarningLevel(
+260:           DiagnosticGroups.GLOBAL_THIS,
+261:           options.checkGlobalThisLevel);
+262:     }
+263: 
+264:     if (options.getLanguageIn() == LanguageMode.ECMASCRIPT5_STRICT) {
+265:       options.setWarningLevel(
+266:           DiagnosticGroups.ES5_STRICT,
+267:           CheckLevel.ERROR);
+268:     }
+269: 
+270:     // Initialize the warnings guard.
+271:     List<WarningsGuard> guards = Lists.newArrayList();
+272:     guards.add(
+273:         new SuppressDocWarningsGuard(
+274:             getDiagnosticGroups().getRegisteredGroups()));
+275:     guards.add(options.getWarningsGuard());
+276: 
+277:     ComposeWarningsGuard composedGuards = new ComposeWarningsGuard(guards);
+278: 
+279:     // All passes must run the variable check. This synthesizes
+280:     // variables later so that the compiler doesn't crash. It also
+281:     // checks the externs file for validity. If you don't want to warn
+282:     // about missing variable declarations, we shut that specific
+283:     // error off.
+284:     if (!options.checkSymbols &&
+285:         !composedGuards.enables(DiagnosticGroups.CHECK_VARIABLES)) {
+286:       composedGuards.addGuard(new DiagnosticGroupWarningsGuard(
+287:           DiagnosticGroups.CHECK_VARIABLES, CheckLevel.OFF));
+288:     }
+289: 
+290:     this.warningsGuard = composedGuards;
+291:   }
+
+[44] com.google.javascript.jscomp.AbstractMessageFormatter#maybeColorize  (lines 81-86)
+81:   private String maybeColorize(String text, Color color) {
+82:     if (!colorize) return text;
+83: 
+84:     return color.getControlCharacter() +
+85:         text + Color.RESET.getControlCharacter();
+86:   }
+
+[45] com.google.javascript.jscomp.BasicErrorManager#ErrorWithLevel  (lines 186-189)
+186:     ErrorWithLevel(JSError error, CheckLevel level) {
+187:       this.error = error;
+188:       this.level = level;
+189:     }
+
+[46] com.google.javascript.jscomp.RhinoErrorReporter#makeError  (lines 124-138)
+124:   private JSError makeError(String message, String sourceName, int line,
+125:       int lineOffset, CheckLevel defaultLevel) {
+126: 
+127:     // Try to see if the message is one of the rhino errors we want to
+128:     // expose as DiagnosticType by matching it with the regex key.
+129:     for (Entry<Pattern, DiagnosticType> entry : typeMap.entrySet()) {
+130:       if (entry.getKey().matcher(message).matches()) {
+131:         return JSError.make(
+132:             sourceName, line, lineOffset, entry.getValue(), message);
+133:       }
+134:     }
+135: 
+136:     return JSError.make(sourceName, line, lineOffset, defaultLevel,
+137:         PARSE_ERROR, message);
+138:   }
+
+[47] com.google.javascript.jscomp.JsMessageExtractor#extractMessages  (lines 113-145)
+113:   public Collection<JsMessage> extractMessages(
+114:       Iterable<JSSourceFile> inputs) throws IOException {
+115: 
+116:     Compiler compiler = new Compiler();
+117:     compiler.init(
+118:         new JSSourceFile[] {},
+119:         Iterables.toArray(inputs, JSSourceFile.class),
+120:         new CompilerOptions());
+121: 
+122:     ExtractMessagesVisitor extractCompilerPass =
+123:         new ExtractMessagesVisitor(compiler);
+124:     for (JSSourceFile input : inputs) {
+125:       // Parse the js files individually, to prevent out-of-memory
+126:       // problems.
+127:       Node root = new JsAst(input).getAstRoot(compiler);
+128: 
+129:       // Traverse the returned nodes and extract messages.
+130:       extractCompilerPass.process(null, root);
+131:     }
+132: 
+133:     JSError[] errors = compiler.getErrors();
+134:     // Check for errors.
+135:     if (errors.length > 0) {
+136:       StringBuilder msg = new StringBuilder("JSCompiler errors\n");
+137:       MessageFormatter formatter = new LightweightMessageFormatter(compiler);
+138:       for (JSError e : errors) {
+139:         msg.append(formatter.formatError(e));
+140:       }
+141:       throw new RuntimeException(msg.toString());
+142:     }
+143: 
+144:     return extractCompilerPass.getMessages();
+145:   }
+
+[48] com.google.javascript.jscomp.AbstractMessageFormatter#Color  (lines 64-66)
+64:     Color(String controlCharacter) {
+65:       this.controlCharacter = controlCharacter;
+66:     }
+
+[49] com.google.javascript.jscomp.DiagnosticGroup#DiagnosticGroup  (lines 61-64)
+61:   private DiagnosticGroup(DiagnosticType type) {
+62:     this.name = null;
+63:     this.types = ImmutableSet.of(type);
+64:   }
+
+[50] com.google.javascript.jscomp.BasicErrorManager#compare  (lines 128-179)
+128:     @Override
+129:     public int compare(ErrorWithLevel p1, ErrorWithLevel p2) {
+130:       // null is the smallest value
+131:       if (p2 == null) {
+132:         if (p1 == null) {
+133:           return 0;
+134:         } else {
+135:           return P1_GT_P2;
+136:         }
+137:       }
+138: 
+139:       // check level
+140:       if (p1.level != p2.level) {
+141:         return p2.level.compareTo(p1.level);
+142:       }
+143: 
+144:       // sourceName comparison
+145:       String source1 = p1.error.sourceName;
+146:       String source2 = p2.error.sourceName;
+147:       if (source1 != null && source2 != null) {
+148:         int sourceCompare = source1.compareTo(source2);
+149:         if (sourceCompare != 0) {
+150:           return sourceCompare;
+151:         }
+152:       } else if (source1 == null && source2 != null) {
+153:         return P1_LT_P2;
+154:       } else if (source1 != null && source2 == null) {
+155:         return P1_GT_P2;
+156:       }
+157:       // lineno comparison
+158:       int lineno1 = p1.error.lineNumber;
+159:       int lineno2 = p2.error.lineNumber;
+160:       if (lineno1 != lineno2) {
+161:         return lineno1 - lineno2;
+162:       } else if (lineno1 < 0 && 0 <= lineno2) {
+163:         return P1_LT_P2;
+164:       } else if (0 <= lineno1 && lineno2 < 0) {
+165:         return P1_GT_P2;
+166:       }
+167:       // charno comparison
+168:       int charno1 = p1.error.getCharno();
+169:       int charno2 = p2.error.getCharno();
+170:       if (charno1 != charno2) {
+171:         return charno1 - charno2;
+172:       } else if (charno1 < 0 && 0 <= charno2) {
+173:         return P1_LT_P2;
+174:       } else if (0 <= charno1 && charno2 < 0) {
+175:         return P1_GT_P2;
+176:       }
+177:       // description
+178:       return p1.error.description.compareTo(p2.error.description);
+179:     }

@@ -1,0 +1,1000 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.ClosureReverseAbstractInterpreterTest::testGoogIsFunction2
+junit.framework.AssertionFailedError: Expected: (Object|boolean|number|string)
+Actual  : (boolean|number|string)
+	at com.google.javascript.rhino.testing.Asserts.assertTypeEquals(Asserts.java:106)
+	at com.google.javascript.rhino.testing.Asserts.assertTypeEquals(Asserts.java:96)
+	at com.google.javascript.jscomp.ClosureReverseAbstractInterpreterTest.testClosureFunction(ClosureReverseAbstractInterpreterTest.java:187)
+	at com.google.javascript.jscomp.ClosureReverseAbstractInterpreterTest.testGoogIsFunction2(ClosureReverseAbstractInterpreterTest.java:121)
+--- com.google.javascript.jscomp.SemanticReverseAbstractInterpreterTest::testTypeof3
+junit.framework.AssertionFailedError: Expected: (Object|boolean|number|string)
+Actual  : (boolean|number|string)
+	at com.google.javascript.rhino.testing.Asserts.assertTypeEquals(Asserts.java:106)
+	at com.google.javascript.rhino.testing.Asserts.assertTypeEquals(Asserts.java:96)
+	at com.google.javascript.rhino.testing.BaseJSTypeTestCase.assertTypeEquals(BaseJSTypeTestCase.java:577)
+	at com.google.javascript.jscomp.SemanticReverseAbstractInterpreterTest.testBinop(SemanticReverseAbstractInterpreterTest.java:568)
+	at com.google.javascript.jscomp.SemanticReverseAbstractInterpreterTest.testTypeof3(SemanticReverseAbstractInterpreterTest.java:465)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.rhino.Node#isTypeOf  (lines 2357-2359)
+2357:   public boolean isTypeOf() {
+2358:     return this.getType() == Token.TYPEOF;
+2359:   }
+
+[2] com.google.javascript.jscomp.type.SemanticReverseAbstractInterpreter#caseTypeOf  (lines 437-442)
+437:   private FlowScope caseTypeOf(Node node, JSType type, String value,
+438:         boolean resultEqualsValue, FlowScope blindScope) {
+439:     return maybeRestrictName(
+440:         blindScope, node, type,
+441:         getRestrictedByTypeOfResult(type, value, resultEqualsValue));
+442:   }
+
+[3] com.google.javascript.rhino.jstype.JSType#filterNoResolvedType  (lines 962-988)
+962:   static JSType filterNoResolvedType(JSType type) {
+963:     if (type.isNoResolvedType()) {
+964:       // inf(UnresolvedType1, UnresolvedType2) needs to resolve
+965:       // to the base unresolved type, so that the relation is symmetric.
+966:       return type.getNativeType(JSTypeNative.NO_RESOLVED_TYPE);
+967:     } else if (type.isUnionType()) {
+968:       UnionType unionType = type.toMaybeUnionType();
+969:       boolean needsFiltering = false;
+970:       for (JSType alt : unionType.getAlternates()) {
+971:         if (alt.isNoResolvedType()) {
+972:           needsFiltering = true;
+973:           break;
+974:         }
+975:       }
+976: 
+977:       if (needsFiltering) {
+978:         UnionTypeBuilder builder = new UnionTypeBuilder(type.registry);
+979:         for (JSType alt : unionType.getAlternates()) {
+980:           if (!alt.isNoResolvedType()) {
+981:             builder.addAlternate(alt);
+982:           }
+983:         }
+984:         return builder.build();
+985:       }
+986:     }
+987:     return type;
+988:   }
+
+[4] com.google.javascript.rhino.jstype.ObjectType#visit  (lines 463-466)
+463:   @Override
+464:   public <T> T visit(Visitor<T> visitor) {
+465:     return visitor.caseObjectType(this);
+466:   }
+
+[5] com.google.javascript.rhino.jstype.NumberType#visit  (lines 110-113)
+110:   @Override
+111:   public <T> T visit(Visitor<T> visitor) {
+112:     return visitor.caseNumberType();
+113:   }
+
+[6] com.google.javascript.rhino.jstype.SimpleSlot#SimpleSlot  (lines 58-62)
+58:   public SimpleSlot(String name, JSType type, boolean inferred) {
+59:     this.name = name;
+60:     this.type = type;
+61:     this.inferred = inferred;
+62:   }
+
+[7] com.google.javascript.jscomp.LinkedFlowScope#getSlot  (lines 142-153)
+142:   @Override
+143:   public StaticSlot<JSType> getSlot(String name) {
+144:     if (cache.dirtySymbols.contains(name)) {
+145:       for (LinkedFlowSlot slot = lastSlot;
+146:            slot != null; slot = slot.parent) {
+147:         if (slot.getName().equals(name)) {
+148:           return slot;
+149:         }
+150:       }
+151:     }
+152:     return cache.getSlot(name);
+153:   }
+
+[8] com.google.javascript.rhino.jstype.UnionType#checkUnionEquivalenceHelper  (lines 333-344)
+333:   boolean checkUnionEquivalenceHelper(
+334:       UnionType that, boolean tolerateUnknowns) {
+335:     if (!tolerateUnknowns && alternates.size() != that.alternates.size()) {
+336:       return false;
+337:     }
+338:     for (JSType alternate : that.alternates) {
+339:       if (!hasAlternate(alternate, tolerateUnknowns)) {
+340:         return false;
+341:       }
+342:     }
+343:     return true;
+344:   }
+
+[9] com.google.javascript.jscomp.LinkedFlowScope#inferSlotType  (lines 103-109)
+103:   @Override
+104:   public void inferSlotType(String symbol, JSType type) {
+105:     Preconditions.checkState(!frozen);
+106:     lastSlot = new LinkedFlowSlot(symbol, type, lastSlot);
+107:     depth++;
+108:     cache.dirtySymbols.add(symbol);
+109:   }
+
+[10] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#declareNameInScope  (lines 158-181)
+158:   protected void declareNameInScope(FlowScope scope, Node node, JSType type) {
+159:     switch (node.getType()) {
+160:       case Token.NAME:
+161:         scope.inferSlotType(node.getString(), type);
+162:         break;
+163: 
+164:       case Token.GETPROP:
+165:         String qualifiedName = node.getQualifiedName();
+166:         Preconditions.checkNotNull(qualifiedName);
+167: 
+168:         JSType origType = node.getJSType();
+169:         origType = origType == null ? getNativeType(UNKNOWN_TYPE) : origType;
+170:         scope.inferQualifiedSlot(node, qualifiedName, origType, type);
+171:         break;
+172: 
+173:       case Token.THIS:
+174:         // "this" references aren't currently modeled in the CFG.
+175:         break;
+176: 
+177:       default:
+178:         throw new IllegalArgumentException("Node cannot be refined. \n" +
+179:             node.toStringTree());
+180:     }
+181:   }
+
+[11] com.google.javascript.rhino.jstype.StringType#visit  (lines 110-113)
+110:   @Override
+111:   public <T> T visit(Visitor<T> visitor) {
+112:     return visitor.caseStringType();
+113:   }
+
+[12] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#getNativeType  (lines 686-688)
+686:   JSType getNativeType(JSTypeNative typeId) {
+687:     return typeRegistry.getNativeType(typeId);
+688:   }
+
+[13] com.google.javascript.rhino.jstype.PrototypeObjectType#getPropertiesCount  (lines 151-164)
+151:   @Override
+152:   public int getPropertiesCount() {
+153:     ObjectType implicitPrototype = getImplicitPrototype();
+154:     if (implicitPrototype == null) {
+155:       return this.properties.size();
+156:     }
+157:     int localCount = 0;
+158:     for (String property : properties.keySet()) {
+159:       if (!implicitPrototype.hasProperty(property)) {
+160:         localCount++;
+161:       }
+162:     }
+163:     return implicitPrototype.getPropertiesCount() + localCount;
+164:   }
+
+[14] com.google.javascript.rhino.jstype.JSType#getLeastSupertype  (lines 879-884)
+879:   static JSType getLeastSupertype(JSType thisType, JSType thatType) {
+880:     boolean areEquivalent = thisType.isEquivalentTo(thatType);
+881:     return areEquivalent ? thisType :
+882:         filterNoResolvedType(
+883:             thisType.registry.createUnionType(thisType, thatType));
+884:   }
+
+[15] com.google.javascript.rhino.jstype.UnionType#isUnknownType  (lines 259-267)
+259:   @Override
+260:   public boolean isUnknownType() {
+261:     for (JSType t : alternates) {
+262:       if (t.isUnknownType()) {
+263:         return true;
+264:       }
+265:     }
+266:     return false;
+267:   }
+
+[16] com.google.javascript.jscomp.type.ClosureReverseAbstractInterpreter#TypeRestriction  (lines 250-253)
+250:     private TypeRestriction(JSType type, boolean outcome) {
+251:       this.type = type;
+252:       this.outcome = outcome;
+253:     }
+
+[17] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#getRestrictedByTypeOfResult  (lines 672-684)
+672:   JSType getRestrictedByTypeOfResult(JSType type, String value,
+673:                                      boolean resultEqualsValue) {
+674:     if (type == null) {
+675:       if (resultEqualsValue) {
+676:         JSType result = getNativeTypeForTypeOf(value);
+677:         return result == null ? getNativeType(CHECKED_UNKNOWN_TYPE) : result;
+678:       } else {
+679:         return null;
+680:       }
+681:     }
+682:     return type.visit(
+683:         new RestrictByOneTypeOfResultVisitor(value, resultEqualsValue));
+684:   }
+
+[18] com.google.javascript.rhino.jstype.UnionType#visit  (lines 539-542)
+539:   @Override
+540:   public <T> T visit(Visitor<T> visitor) {
+541:     return visitor.caseUnionType(this);
+542:   }
+
+[19] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#caseStringType  (lines 620-623)
+620:     @Override
+621:     public JSType caseStringType() {
+622:       return matchesExpectation("string") ? getNativeType(STRING_TYPE) : null;
+623:     }
+
+[20] com.google.javascript.jscomp.type.SemanticReverseAbstractInterpreter#getPreciserScopeKnowingConditionOutcome  (lines 124-264)
+124:   @Override
+125:   public FlowScope getPreciserScopeKnowingConditionOutcome(Node condition,
+126:       FlowScope blindScope, boolean outcome) {
+127:     // Check for the typeof operator.
+128:     int operatorToken = condition.getType();
+129:     switch (operatorToken) {
+130:       case Token.EQ:
+131:       case Token.NE:
+132:       case Token.SHEQ:
+133:       case Token.SHNE:
+134:       case Token.CASE:
+135:         Node left;
+136:         Node right;
+137:         if (operatorToken == Token.CASE) {
+138:           left = condition.getParent().getFirstChild(); // the switch condition
+139:           right = condition.getFirstChild();
+140:         } else {
+141:           left = condition.getFirstChild();
+142:           right = condition.getLastChild();
+143:         }
+144: 
+145:         Node typeOfNode = null;
+146:         Node stringNode = null;
+147:         if (left.isTypeOf() && right.isString()) {
+148:           typeOfNode = left;
+149:           stringNode = right;
+150:         } else if (right.isTypeOf() &&
+151:                    left.isString()) {
+152:           typeOfNode = right;
+153:           stringNode = left;
+154:         }
+155:         if (typeOfNode != null && stringNode != null) {
+156:           Node operandNode = typeOfNode.getFirstChild();
+157:           JSType operandType = getTypeIfRefinable(operandNode, blindScope);
+158:           if (operandType != null) {
+159:             boolean resultEqualsValue = operatorToken == Token.EQ ||
+160:                 operatorToken == Token.SHEQ || operatorToken == Token.CASE;
+161:             if (!outcome) {
+162:               resultEqualsValue = !resultEqualsValue;
+163:             }
+164:             return caseTypeOf(operandNode, operandType, stringNode.getString(),
+165:                 resultEqualsValue, blindScope);
+166:           }
+167:         }
+168:     }
+169:     switch (operatorToken) {
+170:       case Token.AND:
+171:         if (outcome) {
+172:           return caseAndOrNotShortCircuiting(condition.getFirstChild(),
+173:               condition.getLastChild(), blindScope, true);
+174:         } else {
+175:           return caseAndOrMaybeShortCircuiting(condition.getFirstChild(),
+176:               condition.getLastChild(), blindScope, true);
+177:         }
+178: 
+179:       case Token.OR:
+180:         if (!outcome) {
+181:           return caseAndOrNotShortCircuiting(condition.getFirstChild(),
+182:               condition.getLastChild(), blindScope, false);
+183:         } else {
+184:           return caseAndOrMaybeShortCircuiting(condition.getFirstChild(),
+185:               condition.getLastChild(), blindScope, false);
+186:         }
+187: 
+188:       case Token.EQ:
+189:         if (outcome) {
+190:           return caseEquality(condition, blindScope, EQ);
+191:         } else {
+192:           return caseEquality(condition, blindScope, NE);
+193:         }
+194: 
+195:       case Token.NE:
+196:         if (outcome) {
+197:           return caseEquality(condition, blindScope, NE);
+198:         } else {
+199:           return caseEquality(condition, blindScope, EQ);
+200:         }
+201: 
+202:       case Token.SHEQ:
+203:         if (outcome) {
+204:           return caseEquality(condition, blindScope, SHEQ);
+205:         } else {
+206:           return caseEquality(condition, blindScope, SHNE);
+207:         }
+208: 
+209:       case Token.SHNE:
+210:         if (outcome) {
+211:           return caseEquality(condition, blindScope, SHNE);
+212:         } else {
+213:           return caseEquality(condition, blindScope, SHEQ);
+214:         }
+215: 
+216:       case Token.NAME:
+217:       case Token.GETPROP:
+218:         return caseNameOrGetProp(condition, blindScope, outcome);
+219: 
+220:       case Token.ASSIGN:
+221:         return firstPreciserScopeKnowingConditionOutcome(
+222:             condition.getFirstChild(),
+223:             firstPreciserScopeKnowingConditionOutcome(
+224:                 condition.getFirstChild().getNext(), blindScope, outcome),
+225:             outcome);
+226: 
+227:       case Token.NOT:
+228:         return firstPreciserScopeKnowingConditionOutcome(
+229:             condition.getFirstChild(), blindScope, !outcome);
+230: 
+231:       case Token.LE:
+232:       case Token.LT:
+233:       case Token.GE:
+234:       case Token.GT:
+235:         if (outcome) {
+236:           return caseEquality(condition, blindScope, INEQ);
+237:         }
+238:         break;
+239: 
+240:       case Token.INSTANCEOF:
+241:         return caseInstanceOf(
+242:             condition.getFirstChild(), condition.getLastChild(), blindScope,
+243:             outcome);
+244: 
+245:       case Token.IN:
+246:         if (outcome && condition.getFirstChild().isString()) {
+247:           return caseIn(condition.getLastChild(),
+248:               condition.getFirstChild().getString(), blindScope);
+249:         }
+250:         break;
+251: 
+252:       case Token.CASE:
+253:         Node left =
+254:             condition.getParent().getFirstChild(); // the switch condition
+255:         Node right = condition.getFirstChild();
+256:         if (outcome) {
+257:           return caseEquality(left, right, blindScope, SHEQ);
+258:         } else {
+259:           return caseEquality(left, right, blindScope, SHNE);
+260:         }
+261:     }
+262:     return nextPreciserScopeKnowingConditionOutcome(
+263:         condition, blindScope, outcome);
+264:   }
+
+[21] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#caseObjectType  (lines 609-618)
+609:     @Override
+610:     public JSType caseObjectType(ObjectType type) {
+611:       if (value.equals("function")) {
+612:         JSType ctorType = getNativeType(U2U_CONSTRUCTOR_TYPE);
+613:         return resultEqualsValue && ctorType.isSubtype(type) ? ctorType : null;
+614:           // Objects are restricted to "Function", subtypes are left
+615:           // Only filter out subtypes of "function"
+616:       }
+617:       return matchesExpectation("object") ? type : null;
+618:     }
+
+[22] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#caseUnionType  (lines 386-400)
+386:     @Override
+387:     public JSType caseUnionType(UnionType type) {
+388:       JSType restricted = null;
+389:       for (JSType alternate : type.getAlternates()) {
+390:         JSType restrictedAlternate = alternate.visit(this);
+391:         if (restrictedAlternate != null) {
+392:           if (restricted == null) {
+393:             restricted = restrictedAlternate;
+394:           } else {
+395:             restricted = restrictedAlternate.getLeastSupertype(restricted);
+396:           }
+397:         }
+398:       }
+399:       return restricted;
+400:     }
+
+[23] com.google.javascript.rhino.jstype.FunctionType#toStringHelper  (lines 927-967)
+927:   @Override
+928:   String toStringHelper(boolean forAnnotations) {
+929:     if (!isPrettyPrint() ||
+930:         this == registry.getNativeType(JSTypeNative.FUNCTION_INSTANCE_TYPE)) {
+931:       return "Function";
+932:     }
+933: 
+934:     setPrettyPrint(false);
+935: 
+936:     StringBuilder b = new StringBuilder(32);
+937:     b.append("function (");
+938:     int paramNum = call.parameters.getChildCount();
+939:     boolean hasKnownTypeOfThis = !(typeOfThis instanceof UnknownType);
+940:     if (hasKnownTypeOfThis) {
+941:       if (isConstructor()) {
+942:         b.append("new:");
+943:       } else {
+944:         b.append("this:");
+945:       }
+946:       b.append(typeOfThis.toStringHelper(forAnnotations));
+947:     }
+948:     if (paramNum > 0) {
+949:       if (hasKnownTypeOfThis) {
+950:         b.append(", ");
+951:       }
+952:       Node p = call.parameters.getFirstChild();
+953:       appendArgString(b, p, forAnnotations);
+954: 
+955:       p = p.getNext();
+956:       while (p != null) {
+957:         b.append(", ");
+958:         appendArgString(b, p, forAnnotations);
+959:         p = p.getNext();
+960:       }
+961:     }
+962:     b.append("): ");
+963:     b.append(call.returnType.toStringHelper(forAnnotations));
+964: 
+965:     setPrettyPrint(true);
+966:     return b.toString();
+967:   }
+
+[24] com.google.javascript.rhino.jstype.UnionType#getAlternates  (lines 92-94)
+92:   public Iterable<JSType> getAlternates() {
+93:     return alternates;
+94:   }
+
+[25] com.google.javascript.rhino.jstype.UnionTypeBuilder#addAlternate  (lines 121-214)
+121:   UnionTypeBuilder addAlternate(JSType alternate) {
+122:     // build() returns the bottom type by default, so we can
+123:     // just bail out early here.
+124:     if (alternate.isNoType()) {
+125:       return this;
+126:     }
+127: 
+128:     isAllType = isAllType || alternate.isAllType();
+129: 
+130:     boolean isAlternateUnknown = alternate instanceof UnknownType;
+131:     isNativeUnknownType = isNativeUnknownType || isAlternateUnknown;
+132:     if (isAlternateUnknown) {
+133:       areAllUnknownsChecked = areAllUnknownsChecked &&
+134:           alternate.isCheckedUnknownType();
+135:     }
+136:     if (!isAllType && !isNativeUnknownType) {
+137:       if (alternate.isUnionType()) {
+138:         UnionType union = alternate.toMaybeUnionType();
+139:         for (JSType unionAlt : union.getAlternates()) {
+140:           addAlternate(unionAlt);
+141:         }
+142:       } else {
+143:         if (alternates.size() > maxUnionSize) {
+144:           return this;
+145:         }
+146: 
+147:         // Function types are special, because they have their
+148:         // own bizarre sub-lattice. See the comments on
+149:         // FunctionType#supAndInf helper and above at functionTypePosition.
+150:         if (alternate.isFunctionType() && functionTypePosition != -1) {
+151:           // See the comments on functionTypePosition above.
+152:           FunctionType other =
+153:               alternates.get(functionTypePosition).toMaybeFunctionType();
+154:           FunctionType supremum =
+155:               alternate.toMaybeFunctionType().supAndInfHelper(other, true);
+156:           alternates.set(functionTypePosition, supremum);
+157:           result = null;
+158:           return this;
+159:         }
+160: 
+161:         // Look through the alternates we've got so far,
+162:         // and check if any of them are duplicates of
+163:         // one another.
+164:         int currentIndex = 0;
+165:         Iterator<JSType> it = alternates.iterator();
+166:         while (it.hasNext()) {
+167:           JSType current = it.next();
+168: 
+169:           // Unknown and NoResolved types may just be names that haven't
+170:           // been resolved yet. So keep these in the union, and just use
+171:           // equality checking for simple de-duping.
+172:           if (alternate.isUnknownType() ||
+173:               current.isUnknownType() ||
+174:               alternate.isNoResolvedType() ||
+175:               current.isNoResolvedType() ||
+176:               alternate.hasAnyTemplate() ||
+177:               current.hasAnyTemplate()) {
+178:             if (alternate.isEquivalentTo(current)) {
+179:               // Alternate is unnecessary.
+180:               return this;
+181:             }
+182:           } else {
+183:             if (alternate.isSubtype(current)) {
+184:               // Alternate is unnecessary.
+185:               return this;
+186:             } else if (current.isSubtype(alternate)) {
+187:               // Alternate makes current obsolete
+188:               it.remove();
+189: 
+190:               if (currentIndex == functionTypePosition) {
+191:                 functionTypePosition = -1;
+192:               } else if (currentIndex < functionTypePosition) {
+193:                 functionTypePosition--;
+194:                 currentIndex--;
+195:               }
+196:             }
+197:           }
+198:           currentIndex++;
+199:         }
+200: 
+201:         if (alternate.isFunctionType()) {
+202:           // See the comments on functionTypePosition above.
+203:           Preconditions.checkState(functionTypePosition == -1);
+204:           functionTypePosition = alternates.size();
+205:         }
+206: 
+207:         alternates.add(alternate);
+208:         result = null; // invalidate the memoized result
+209:       }
+210:     } else {
+211:       result = null;
+212:     }
+213:     return this;
+214:   }
+
+[26] com.google.javascript.rhino.jstype.SimpleSlot#getType  (lines 69-72)
+69:   @Override
+70:   public JSType getType() {
+71:     return type;
+72:   }
+
+[27] com.google.javascript.rhino.jstype.FunctionType#isSubtype  (lines 1008-1050)
+1008:   @Override
+1009:   public boolean isSubtype(JSType that) {
+1010:     if (JSType.isSubtypeHelper(this, that)) {
+1011:       return true;
+1012:     }
+1013: 
+1014:     if (that.isFunctionType()) {
+1015:       FunctionType other = that.toMaybeFunctionType();
+1016:       if (other.isInterface()) {
+1017:         // Any function can be assigned to an interface function.
+1018:         return true;
+1019:       }
+1020:       if (this.isInterface()) {
+1021:         // An interface function cannot be assigned to anything.
+1022:         return false;
+1023:       }
+1024:       // If functionA is a subtype of functionB, then their "this" types
+1025:       // should be contravariant. However, this causes problems because
+1026:       // of the way we enforce overrides. Because function(this:SubFoo)
+1027:       // is not a subtype of function(this:Foo), our override check treats
+1028:       // this as an error. It also screws up out standard method
+1029:       // for aliasing constructors. Let's punt on all this for now.
+1030:       // TODO(nicksantos): fix this.
+1031:       boolean treatThisTypesAsCovariant =
+1032:         // If either one of these is a ctor, skip 'this' checking.
+1033:         this.isConstructor() || other.isConstructor() ||
+1034: 
+1035:         // An interface 'this'-type is non-restrictive.
+1036:         // In practical terms, if C implements I, and I has a method m,
+1037:         // then any m doesn't necessarily have to C#m's 'this'
+1038:         // type doesn't need to match I.
+1039:         (other.typeOfThis.getConstructor() != null &&
+1040:              other.typeOfThis.getConstructor().isInterface()) ||
+1041: 
+1042:         // If one of the 'this' types is covariant of the other,
+1043:         // then we'll treat them as covariant (see comment above).
+1044:         other.typeOfThis.isSubtype(this.typeOfThis) ||
+1045:         this.typeOfThis.isSubtype(other.typeOfThis);
+1046:       return treatThisTypesAsCovariant && this.call.isSubtype(other.call);
+1047:     }
+1048: 
+1049:     return getNativeType(JSTypeNative.FUNCTION_PROTOTYPE).isSubtype(that);
+1050:   }
+
+[28] com.google.javascript.rhino.jstype.UnionType#toStringHelper  (lines 426-442)
+426:   @Override String toStringHelper(boolean forAnnotations) {
+427:     StringBuilder result = new StringBuilder();
+428:     boolean firstAlternate = true;
+429: 
+430:     result.append("(");
+431:     SortedSet<JSType> sorted = new TreeSet<JSType>(ALPHA);
+432:     sorted.addAll(alternates);
+433:     for (JSType t : sorted) {
+434:       if (!firstAlternate) {
+435:         result.append("|");
+436:       }
+437:       result.append(t.toStringHelper(forAnnotations));
+438:       firstAlternate = false;
+439:     }
+440:     result.append(")");
+441:     return result.toString();
+442:   }
+
+[29] com.google.javascript.jscomp.type.ClosureReverseAbstractInterpreter#apply  (lines 173-176)
+173:         @Override
+174:         public JSType apply(TypeRestriction p) {
+175:           return getRestrictedByTypeOfResult(p.type, "function", p.outcome);
+176:         }
+
+[30] com.google.javascript.jscomp.type.ClosureReverseAbstractInterpreter#restrictParameter  (lines 230-244)
+230:   private FlowScope restrictParameter(Node parameter, JSType type,
+231:       FlowScope blindScope, Function<TypeRestriction, JSType> restriction,
+232:       boolean outcome) {
+233:     // restricting
+234:     type = restriction.apply(new TypeRestriction(type, outcome));
+235: 
+236:     // changing the scope
+237:     if (type != null) {
+238:       FlowScope informed = blindScope.createChildFlowScope();
+239:       declareNameInScope(informed, parameter, type);
+240:       return informed;
+241:     } else {
+242:       return blindScope;
+243:     }
+244:   }
+
+[31] com.google.javascript.rhino.jstype.JSType#checkEquivalenceHelper  (lines 510-591)
+510:   boolean checkEquivalenceHelper(JSType that, boolean tolerateUnknowns) {
+511:     if (this == that) {
+512:       return true;
+513:     }
+514: 
+515:     boolean thisUnknown = isUnknownType();
+516:     boolean thatUnknown = that.isUnknownType();
+517:     if (isUnknownType() || that.isUnknownType()) {
+518:       if (tolerateUnknowns) {
+519:         // If we tolerate unknowns, then two types are the same if they're
+520:         // both unknown.
+521:         return thisUnknown && thatUnknown;
+522:       } else if (thisUnknown && thatUnknown &&
+523:           (isNominalType() ^ that.isNominalType())) {
+524:         // If they're both unknown, but one is a nominal type and the other
+525:         // is not, then we should fail out immediately. This ensures that
+526:         // we won't unbox the unknowns further down.
+527:         return false;
+528:       }
+529:     }
+530: 
+531:     if (isUnionType() && that.isUnionType()) {
+532:       return this.toMaybeUnionType().checkUnionEquivalenceHelper(
+533:           that.toMaybeUnionType(), tolerateUnknowns);
+534:     }
+535: 
+536:     if (isFunctionType() && that.isFunctionType()) {
+537:       return this.toMaybeFunctionType().checkFunctionEquivalenceHelper(
+538:           that.toMaybeFunctionType(), tolerateUnknowns);
+539:     }
+540: 
+541:     if (isRecordType() && that.isRecordType()) {
+542:       return this.toMaybeRecordType().checkRecordEquivalenceHelper(
+543:           that.toMaybeRecordType(), tolerateUnknowns);
+544:     }
+545: 
+546:     ParameterizedType thisParamType = toMaybeParameterizedType();
+547:     ParameterizedType thatParamType = that.toMaybeParameterizedType();
+548:     if (thisParamType != null || thatParamType != null) {
+549:       // Check if one type is parameterized, but the other is not.
+550:       boolean paramsMatch = false;
+551:       if (thisParamType != null && thatParamType != null) {
+552:         paramsMatch = thisParamType.getParameterType().checkEquivalenceHelper(
+553:             thatParamType.getParameterType(), tolerateUnknowns);
+554:       } else if (tolerateUnknowns) {
+555:         paramsMatch = true;
+556:       } else {
+557:         paramsMatch = false;
+558:       }
+559: 
+560:       JSType thisRootType = thisParamType == null ?
+561:           this : thisParamType.getReferencedTypeInternal();
+562:       JSType thatRootType = thatParamType == null ?
+563:           that : thatParamType.getReferencedTypeInternal();
+564:       return paramsMatch &&
+565:           thisRootType.checkEquivalenceHelper(thatRootType, tolerateUnknowns);
+566:     }
+567: 
+568:     if (isNominalType() && that.isNominalType()) {
+569:       return toObjectType().getReferenceName().equals(
+570:           that.toObjectType().getReferenceName());
+571:     }
+572: 
+573:     // Unbox other proxies.
+574:     if (this instanceof ProxyObjectType) {
+575:       return ((ProxyObjectType) this)
+576:           .getReferencedTypeInternal().checkEquivalenceHelper(
+577:               that, tolerateUnknowns);
+578:     }
+579: 
+580:     if (that instanceof ProxyObjectType) {
+581:       return checkEquivalenceHelper(
+582:           ((ProxyObjectType) that).getReferencedTypeInternal(),
+583:           tolerateUnknowns);
+584:     }
+585: 
+586:     // Relies on the fact that for the base {@link JSType}, only one
+587:     // instance of each sub-type will ever be created in a given registry, so
+588:     // there is no need to verify members. If the object pointers are not
+589:     // identical, then the type member must be different.
+590:     return this == that;
+591:   }
+
+[32] com.google.javascript.rhino.jstype.JSType#compare  (lines 93-96)
+93:     @Override
+94:     public int compare(JSType t1, JSType t2) {
+95:       return t1.toString().compareTo(t2.toString());
+96:     }
+
+[33] com.google.javascript.jscomp.LinkedFlowScope#FlatFlowScopeCache  (lines 402-406)
+402:     FlatFlowScopeCache(Scope functionScope) {
+403:       this.functionScope = functionScope;
+404:       symbols = ImmutableMap.of();
+405:       linkedEquivalent = null;
+406:     }
+
+[34] com.google.javascript.rhino.jstype.ObjectType#isUnknownType  (lines 498-518)
+498:   @Override
+499:   public boolean isUnknownType() {
+500:     // If the object is unknown now, check the supertype again,
+501:     // because it might have been resolved since the last check.
+502:     if (unknown) {
+503:       ObjectType implicitProto = getImplicitPrototype();
+504:       if (implicitProto == null ||
+505:           implicitProto.isNativeObjectType()) {
+506:         unknown = false;
+507:         for (ObjectType interfaceType : getCtorExtendedInterfaces()) {
+508:           if (interfaceType.isUnknownType()) {
+509:             unknown = true;
+510:             break;
+511:           }
+512:         }
+513:       } else {
+514:         unknown = implicitProto.isUnknownType();
+515:       }
+516:     }
+517:     return unknown;
+518:   }
+
+[35] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#RestrictByOneTypeOfResultVisitor  (lines 557-560)
+557:     RestrictByOneTypeOfResultVisitor(String value, boolean resultEqualsValue) {
+558:       this.value = value;
+559:       this.resultEqualsValue = resultEqualsValue;
+560:     }
+
+[36] com.google.javascript.rhino.jstype.JSType#getLeastSupertype  (lines 867-873)
+867:   public JSType getLeastSupertype(JSType that) {
+868:     if (that.isUnionType()) {
+869:       // Union types have their own implementation of getLeastSupertype.
+870:       return that.toMaybeUnionType().getLeastSupertype(this);
+871:     }
+872:     return getLeastSupertype(this, that);
+873:   }
+
+[37] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#caseBooleanType  (lines 589-592)
+589:     @Override
+590:     public JSType caseBooleanType() {
+591:       return matchesExpectation("boolean") ? getNativeType(BOOLEAN_TYPE) : null;
+592:     }
+
+[38] com.google.javascript.rhino.jstype.UnionType#toMaybeUnionType  (lines 370-373)
+370:   @Override
+371:   public UnionType toMaybeUnionType() {
+372:     return this;
+373:   }
+
+[39] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#matchesExpectation  (lines 567-569)
+567:     private boolean matchesExpectation(String result) {
+568:       return result.equals(value) == resultEqualsValue;
+569:     }
+
+[40] com.google.javascript.jscomp.LinkedFlowScope#LinkedFlowSlot  (lines 370-373)
+370:     LinkedFlowSlot(String name, JSType type, LinkedFlowSlot parent) {
+371:       super(name, type, true);
+372:       this.parent = parent;
+373:     }
+
+[41] com.google.javascript.jscomp.type.ClosureReverseAbstractInterpreter#getPreciserScopeKnowingConditionOutcome  (lines 205-228)
+205:   @Override
+206:   public FlowScope getPreciserScopeKnowingConditionOutcome(Node condition,
+207:       FlowScope blindScope, boolean outcome) {
+208:     if (condition.isCall() && condition.getChildCount() == 2) {
+209:       Node callee = condition.getFirstChild();
+210:       Node param = condition.getLastChild();
+211:       if (callee.isGetProp() && param.isQualifiedName()) {
+212:         JSType paramType =  getTypeIfRefinable(param, blindScope);
+213:         Node left = callee.getFirstChild();
+214:         Node right = callee.getLastChild();
+215:         if (left.isName() && "goog".equals(left.getString()) &&
+216:             right.isString()) {
+217:           Function<TypeRestriction, JSType> restricter =
+218:               restricters.get(right.getString());
+219:           if (restricter != null) {
+220:             return restrictParameter(param, paramType, blindScope, restricter,
+221:                 outcome);
+222:           }
+223:         }
+224:       }
+225:     }
+226:     return nextPreciserScopeKnowingConditionOutcome(
+227:         condition, blindScope, outcome);
+228:   }
+
+[42] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#caseNumberType  (lines 604-607)
+604:     @Override
+605:     public JSType caseNumberType() {
+606:       return matchesExpectation("number") ? getNativeType(NUMBER_TYPE) : null;
+607:     }
+
+[43] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#ChainableReverseAbstractInterpreter  (lines 63-70)
+63:   public ChainableReverseAbstractInterpreter(CodingConvention convention,
+64:       JSTypeRegistry typeRegistry) {
+65:     Preconditions.checkNotNull(convention);
+66:     this.convention = convention;
+67:     this.typeRegistry = typeRegistry;
+68:     firstLink = this;
+69:     nextLink = null;
+70:   }
+
+[44] com.google.javascript.jscomp.type.SemanticReverseAbstractInterpreter#maybeRestrictName  (lines 392-400)
+392:   private FlowScope maybeRestrictName(
+393:       FlowScope blindScope, Node node, JSType originalType, JSType restrictedType) {
+394:     if (restrictedType != null && restrictedType != originalType) {
+395:       FlowScope informed = blindScope.createChildFlowScope();
+396:       declareNameInScope(informed, node, restrictedType);
+397:       return informed;
+398:     }
+399:     return blindScope;
+400:   }
+
+[45] com.google.javascript.jscomp.type.ChainableReverseAbstractInterpreter#getTypeIfRefinable  (lines 119-151)
+119:   protected JSType getTypeIfRefinable(Node node, FlowScope scope) {
+120:     switch (node.getType()) {
+121:       case Token.NAME:
+122:         StaticSlot<JSType> nameVar = scope.getSlot(node.getString());
+123:         if (nameVar != null) {
+124:           JSType nameVarType = nameVar.getType();
+125:           if (nameVarType == null) {
+126:             nameVarType = node.getJSType();
+127:           }
+128:           return nameVarType;
+129:         }
+130:         return null;
+131: 
+132:       case Token.GETPROP:
+133:         String qualifiedName = node.getQualifiedName();
+134:         if (qualifiedName == null) {
+135:           return null;
+136:         }
+137:         StaticSlot<JSType> propVar = scope.getSlot(qualifiedName);
+138:         JSType propVarType = null;
+139:         if (propVar != null) {
+140:           propVarType = propVar.getType();
+141:         }
+142:         if (propVarType == null) {
+143:           propVarType = node.getJSType();
+144:         }
+145:         if (propVarType == null) {
+146:           propVarType = getNativeType(UNKNOWN_TYPE);
+147:         }
+148:         return propVarType;
+149:     }
+150:     return null;
+151:   }
+
+[46] com.google.javascript.rhino.jstype.PrototypeObjectType#isPrettyPrint  (lines 402-404)
+402:   boolean isPrettyPrint() {
+403:     return prettyPrint;
+404:   }
+
+[47] com.google.javascript.rhino.jstype.BooleanType#visit  (lines 116-119)
+116:   @Override
+117:   public <T> T visit(Visitor<T> visitor) {
+118:     return visitor.caseBooleanType();
+119:   }
+
+[48] com.google.javascript.jscomp.type.ClosureReverseAbstractInterpreter#ClosureReverseAbstractInterpreter  (lines 118-203)
+118:   public ClosureReverseAbstractInterpreter(CodingConvention convention,
+119:       final JSTypeRegistry typeRegistry) {
+120:     super(convention, typeRegistry);
+121:     this.restricters =
+122:       new ImmutableMap.Builder<String, Function<TypeRestriction, JSType>>()
+123:       .put("isDef", new Function<TypeRestriction, JSType>() {
+124:         @Override
+125:         public JSType apply(TypeRestriction p) {
+126:           if (p.outcome) {
+127:             return getRestrictedWithoutUndefined(p.type);
+128:           } else {
+129:             return null;
+130:           }
+131:          }
+132:       })
+133:       .put("isNull", new Function<TypeRestriction, JSType>() {
+134:         @Override
+135:         public JSType apply(TypeRestriction p) {
+136:           if (p.outcome) {
+137:             return getNativeType(NULL_TYPE);
+138:           } else {
+139:             return getRestrictedWithoutNull(p.type);
+140:           }
+141:         }
+142:       })
+143:       .put("isDefAndNotNull", new Function<TypeRestriction, JSType>() {
+144:         @Override
+145:         public JSType apply(TypeRestriction p) {
+146:           if (p.outcome) {
+147:             return getRestrictedWithoutUndefined(
+148:                 getRestrictedWithoutNull(p.type));
+149:           } else {
+150:             return null;
+151:           }
+152:         }
+153:       })
+154:       .put("isString", new Function<TypeRestriction, JSType>() {
+155:         @Override
+156:         public JSType apply(TypeRestriction p) {
+157:           return getRestrictedByTypeOfResult(p.type, "string", p.outcome);
+158:         }
+159:       })
+160:       .put("isBoolean", new Function<TypeRestriction, JSType>() {
+161:         @Override
+162:         public JSType apply(TypeRestriction p) {
+163:           return getRestrictedByTypeOfResult(p.type, "boolean", p.outcome);
+164:         }
+165:       })
+166:       .put("isNumber", new Function<TypeRestriction, JSType>() {
+167:         @Override
+168:         public JSType apply(TypeRestriction p) {
+169:           return getRestrictedByTypeOfResult(p.type, "number", p.outcome);
+170:         }
+171:       })
+172:       .put("isFunction", new Function<TypeRestriction, JSType>() {
+173:         @Override
+174:         public JSType apply(TypeRestriction p) {
+175:           return getRestrictedByTypeOfResult(p.type, "function", p.outcome);
+176:         }
+177:       })
+178:       .put("isArray", new Function<TypeRestriction, JSType>() {
+179:         @Override
+180:         public JSType apply(TypeRestriction p) {
+181:           if (p.type == null) {
+182:             return p.outcome ? getNativeType(ARRAY_TYPE) : null;
+183:           }
+184: 
+185:           Visitor<JSType> visitor = p.outcome ? restrictToArrayVisitor :
+186:               restrictToNotArrayVisitor;
+187:           return p.type.visit(visitor);
+188:         }
+189:       })
+190:       .put("isObject", new Function<TypeRestriction, JSType>() {
+191:         @Override
+192:         public JSType apply(TypeRestriction p) {
+193:           if (p.type == null) {
+194:             return p.outcome ? getNativeType(OBJECT_TYPE) : null;
+195:           }
+196: 
+197:           Visitor<JSType> visitor = p.outcome ? restrictToObjectVisitor :
+198:               restrictToNotObjectVisitor;
+199:           return p.type.visit(visitor);
+200:         }
+201:       })
+202:       .build();
+203:   }
+
+[49] com.google.javascript.rhino.jstype.UnionType#getLeastSupertype  (lines 289-300)
+289:   @Override
+290:   public JSType getLeastSupertype(JSType that) {
+291:     if (!that.isUnknownType() && !that.isUnionType()) {
+292:       for (JSType alternate : alternates) {
+293:         if (!alternate.isUnknownType() && that.isSubtype(alternate)) {
+294:           return this;
+295:         }
+296:       }
+297:     }
+298: 
+299:     return getLeastSupertype(this, that);
+300:   }
+
+[50] com.google.javascript.rhino.jstype.SimpleSlot#getName  (lines 64-67)
+64:   @Override
+65:   public String getName() {
+66:     return name;
+67:   }

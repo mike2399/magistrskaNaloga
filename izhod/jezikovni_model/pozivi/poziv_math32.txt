@@ -1,0 +1,1254 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math3.geometry.euclidean.threed.PolyhedronsSetTest::testIssue780
+java.lang.ClassCastException: org.apache.commons.math3.geometry.partitioning.BoundaryAttribute cannot be cast to java.lang.Boolean
+	at org.apache.commons.math3.geometry.euclidean.twod.PolygonsSet.computeGeometricalProperties(PolygonsSet.java:136)
+	at org.apache.commons.math3.geometry.partitioning.AbstractRegion.getSize(AbstractRegion.java:381)
+	at org.apache.commons.math3.geometry.euclidean.threed.PolyhedronsSet$FacetsContributionVisitor.addContribution(PolyhedronsSet.java:171)
+	at org.apache.commons.math3.geometry.euclidean.threed.PolyhedronsSet$FacetsContributionVisitor.visitInternalNode(PolyhedronsSet.java:153)
+	at org.apache.commons.math3.geometry.partitioning.BSPTree.visit(BSPTree.java:263)
+	at org.apache.commons.math3.geometry.partitioning.BSPTree.visit(BSPTree.java:262)
+	at org.apache.commons.math3.geometry.partitioning.BSPTree.visit(BSPTree.java:262)
+	at org.apache.commons.math3.geometry.partitioning.BSPTree.visit(BSPTree.java:264)
+	at org.apache.commons.math3.geometry.euclidean.threed.PolyhedronsSet.computeGeometricalProperties(PolyhedronsSet.java:118)
+	at org.apache.commons.math3.geometry.partitioning.AbstractRegion.getSize(AbstractRegion.java:381)
+	at org.apache.commons.math3.geometry.euclidean.threed.PolyhedronsSetTest.testIssue780(PolyhedronsSetTest.java:281)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math3.util.MathArrays#linearCombination  (lines 738-810)
+738:     public static double linearCombination(final double a1, final double b1,
+739:                                            final double a2, final double b2,
+740:                                            final double a3, final double b3) {
+741: 
+742:         // the code below is split in many additions/subtractions that may
+743:         // appear redundant. However, they should NOT be simplified, as they
+744:         // do use IEEE754 floating point arithmetic rounding properties.
+745:         // as an example, the expression "ca1 - (ca1 - a1)" is NOT the same as "a1"
+746:         // The variables naming conventions are that xyzHigh contains the most significant
+747:         // bits of xyz and xyzLow contains its least significant bits. So theoretically
+748:         // xyz is the sum xyzHigh + xyzLow, but in many cases below, this sum cannot
+749:         // be represented in only one double precision number so we preserve two numbers
+750:         // to hold it as long as we can, combining the high and low order bits together
+751:         // only at the end, after cancellation may have occurred on high order bits
+752: 
+753:         // split a1 and b1 as two 26 bits numbers
+754:         final double ca1        = SPLIT_FACTOR * a1;
+755:         final double a1High     = ca1 - (ca1 - a1);
+756:         final double a1Low      = a1 - a1High;
+757:         final double cb1        = SPLIT_FACTOR * b1;
+758:         final double b1High     = cb1 - (cb1 - b1);
+759:         final double b1Low      = b1 - b1High;
+760: 
+761:         // accurate multiplication a1 * b1
+762:         final double prod1High  = a1 * b1;
+763:         final double prod1Low   = a1Low * b1Low - (((prod1High - a1High * b1High) - a1Low * b1High) - a1High * b1Low);
+764: 
+765:         // split a2 and b2 as two 26 bits numbers
+766:         final double ca2        = SPLIT_FACTOR * a2;
+767:         final double a2High     = ca2 - (ca2 - a2);
+768:         final double a2Low      = a2 - a2High;
+769:         final double cb2        = SPLIT_FACTOR * b2;
+770:         final double b2High     = cb2 - (cb2 - b2);
+771:         final double b2Low      = b2 - b2High;
+772: 
+773:         // accurate multiplication a2 * b2
+774:         final double prod2High  = a2 * b2;
+775:         final double prod2Low   = a2Low * b2Low - (((prod2High - a2High * b2High) - a2Low * b2High) - a2High * b2Low);
+776: 
+777:         // split a3 and b3 as two 26 bits numbers
+778:         final double ca3        = SPLIT_FACTOR * a3;
+779:         final double a3High     = ca3 - (ca3 - a3);
+780:         final double a3Low      = a3 - a3High;
+781:         final double cb3        = SPLIT_FACTOR * b3;
+782:         final double b3High     = cb3 - (cb3 - b3);
+783:         final double b3Low      = b3 - b3High;
+784: 
+785:         // accurate multiplication a3 * b3
+786:         final double prod3High  = a3 * b3;
+787:         final double prod3Low   = a3Low * b3Low - (((prod3High - a3High * b3High) - a3Low * b3High) - a3High * b3Low);
+788: 
+789:         // accurate addition a1 * b1 + a2 * b2
+790:         final double s12High    = prod1High + prod2High;
+791:         final double s12Prime   = s12High - prod2High;
+792:         final double s12Low     = (prod2High - (s12High - s12Prime)) + (prod1High - s12Prime);
+793: 
+794:         // accurate addition a1 * b1 + a2 * b2 + a3 * b3
+795:         final double s123High   = s12High + prod3High;
+796:         final double s123Prime  = s123High - prod3High;
+797:         final double s123Low    = (prod3High - (s123High - s123Prime)) + (s12High - s123Prime);
+798: 
+799:         // final rounding, s123 may have suffered many cancellations, we try
+800:         // to recover some bits from the extra words we have saved up to now
+801:         double result = s123High + (prod1Low + prod2Low + prod3Low + s12Low + s123Low);
+802: 
+803:         if (Double.isNaN(result)) {
+804:             // either we have split infinite numbers or some coefficients were NaNs,
+805:             // just rely on the naive implementation and let IEEE754 handle this
+806:             result = a1 * b1 + a2 * b2 + a3 * b3;
+807:         }
+808: 
+809:         return result;
+810:     }
+
+[2] org.apache.commons.math3.geometry.euclidean.twod.PolygonsSet#computeGeometricalProperties  (lines 129-181)
+129:     @Override
+130:     protected void computeGeometricalProperties() {
+131: 
+132:         final Vector2D[][] v = getVertices();
+133: 
+134:         if (v.length == 0) {
+135:             final BSPTree<Euclidean2D> tree = getTree(false);
+136:             if ((Boolean) tree.getAttribute()) {
+137:                 // the instance covers the whole space
+138:                 setSize(Double.POSITIVE_INFINITY);
+139:                 setBarycenter(Vector2D.NaN);
+140:             } else {
+141:                 setSize(0);
+142:                 setBarycenter(new Vector2D(0, 0));
+143:             }
+144:         } else if (v[0][0] == null) {
+145:             // there is at least one open-loop: the polygon is infinite
+146:             setSize(Double.POSITIVE_INFINITY);
+147:             setBarycenter(Vector2D.NaN);
+148:         } else {
+149:             // all loops are closed, we compute some integrals around the shape
+150: 
+151:             double sum  = 0;
+152:             double sumX = 0;
+153:             double sumY = 0;
+154: 
+155:             for (Vector2D[] loop : v) {
+156:                 double x1 = loop[loop.length - 1].getX();
+157:                 double y1 = loop[loop.length - 1].getY();
+158:                 for (final Vector2D point : loop) {
+159:                     final double x0 = x1;
+160:                     final double y0 = y1;
+161:                     x1 = point.getX();
+162:                     y1 = point.getY();
+163:                     final double factor = x0 * y1 - y0 * x1;
+164:                     sum  += factor;
+165:                     sumX += factor * (x0 + x1);
+166:                     sumY += factor * (y0 + y1);
+167:                 }
+168:             }
+169: 
+170:             if (sum < 0) {
+171:                 // the polygon as a finite outside surrounded by an infinite inside
+172:                 setSize(Double.POSITIVE_INFINITY);
+173:                 setBarycenter(Vector2D.NaN);
+174:             } else {
+175:                 setSize(sum / 2);
+176:                 setBarycenter(new Vector2D(sumX / (3 * sum), sumY / (3 * sum)));
+177:             }
+178: 
+179:         }
+180: 
+181:     }
+
+[3] org.apache.commons.math3.geometry.euclidean.threed.Line#pointAt  (lines 119-121)
+119:     public Vector3D pointAt(final double abscissa) {
+120:         return new Vector3D(1.0, zero, abscissa, direction);
+121:     }
+
+[4] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#getNormSq  (lines 247-250)
+247:     public double getNormSq() {
+248:         // there are no cancellation problems here, so we use the straightforward formula
+249:         return x * x + y * y + z * z;
+250:     }
+
+[5] org.apache.commons.math3.geometry.euclidean.twod.SubLine#SubLine  (lines 55-57)
+55:     public SubLine(final Vector2D start, final Vector2D end) {
+56:         super(new Line(start, end), buildIntervalSet(start, end));
+57:     }
+
+[6] org.apache.commons.math3.geometry.euclidean.twod.SubLine#buildIntervalSet  (lines 138-142)
+138:     private static IntervalsSet buildIntervalSet(final Vector2D start, final Vector2D end) {
+139:         final Line line = new Line(start, end);
+140:         return new IntervalsSet(line.toSubSpace(start).getX(),
+141:                                 line.toSubSpace(end).getX());
+142:     }
+
+[7] org.apache.commons.math3.geometry.partitioning.utilities.AVLTree#getNotSmaller  (lines 151-168)
+151:     public Node getNotSmaller(final T reference) {
+152:         Node candidate = null;
+153:         for (Node node = top; node != null;) {
+154:             if (node.element.compareTo(reference) < 0) {
+155:                 if (node.right == null) {
+156:                     return candidate;
+157:                 }
+158:                 node = node.right;
+159:             } else {
+160:                 candidate = node;
+161:                 if (node.left == null) {
+162:                     return candidate;
+163:                 }
+164:                 node = node.left;
+165:             }
+166:         }
+167:         return null;
+168:     }
+
+[8] org.apache.commons.math3.geometry.euclidean.threed.PolyhedronsSet#computeGeometricalProperties  (lines 114-131)
+114:     @Override
+115:     protected void computeGeometricalProperties() {
+116: 
+117:         // compute the contribution of all boundary facets
+118:         getTree(true).visit(new FacetsContributionVisitor());
+119: 
+120:         if (getSize() < 0) {
+121:             // the polyhedrons set as a finite outside
+122:             // surrounded by an infinite inside
+123:             setSize(Double.POSITIVE_INFINITY);
+124:             setBarycenter(Vector3D.NaN);
+125:         } else {
+126:             // the polyhedrons set is finite, apply the remaining scaling factors
+127:             setSize(getSize() / 3.0);
+128:             setBarycenter(new Vector3D(1.0 / (4 * getSize()), (Vector3D) getBarycenter()));
+129:         }
+130: 
+131:     }
+
+[9] org.apache.commons.math3.geometry.euclidean.threed.Plane#Plane  (lines 90-96)
+90:     public Plane(final Plane plane) {
+91:         originOffset = plane.originOffset;
+92:         origin = plane.origin;
+93:         u      = plane.u;
+94:         v      = plane.v;
+95:         w      = plane.w;
+96:     }
+
+[10] org.apache.commons.math3.geometry.euclidean.threed.Line#getDirection  (lines 93-95)
+93:     public Vector3D getDirection() {
+94:         return direction;
+95:     }
+
+[11] org.apache.commons.math3.geometry.euclidean.threed.Plane#copySelf  (lines 104-106)
+104:     public Plane copySelf() {
+105:         return new Plane(this);
+106:     }
+
+[12] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#dotProduct  (lines 452-455)
+452:     public double dotProduct(final Vector<Euclidean3D> v) {
+453:         final Vector3D v3 = (Vector3D) v;
+454:         return MathArrays.linearCombination(x, v3.x, y, v3.y, z, v3.z);
+455:     }
+
+[13] org.apache.commons.math3.geometry.partitioning.AbstractRegion#insertCuts  (lines 174-217)
+174:     private void insertCuts(final BSPTree<S> node, final Collection<SubHyperplane<S>> boundary) {
+175: 
+176:         final Iterator<SubHyperplane<S>> iterator = boundary.iterator();
+177: 
+178:         // build the current level
+179:         Hyperplane<S> inserted = null;
+180:         while ((inserted == null) && iterator.hasNext()) {
+181:             inserted = iterator.next().getHyperplane();
+182:             if (!node.insertCut(inserted.copySelf())) {
+183:                 inserted = null;
+184:             }
+185:         }
+186: 
+187:         if (!iterator.hasNext()) {
+188:             return;
+189:         }
+190: 
+191:         // distribute the remaining edges in the two sub-trees
+192:         final ArrayList<SubHyperplane<S>> plusList  = new ArrayList<SubHyperplane<S>>();
+193:         final ArrayList<SubHyperplane<S>> minusList = new ArrayList<SubHyperplane<S>>();
+194:         while (iterator.hasNext()) {
+195:             final SubHyperplane<S> other = iterator.next();
+196:             switch (other.side(inserted)) {
+197:             case PLUS:
+198:                 plusList.add(other);
+199:                 break;
+200:             case MINUS:
+201:                 minusList.add(other);
+202:                 break;
+203:             case BOTH:
+204:                 final SubHyperplane.SplitSubHyperplane<S> split = other.split(inserted);
+205:                 plusList.add(split.getPlus());
+206:                 minusList.add(split.getMinus());
+207:                 break;
+208:             default:
+209:                 // ignore the sub-hyperplanes belonging to the cut hyperplane
+210:             }
+211:         }
+212: 
+213:         // recurse through lower levels
+214:         insertCuts(node.getPlus(),  plusList);
+215:         insertCuts(node.getMinus(), minusList);
+216: 
+217:     }
+
+[14] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#add  (lines 274-277)
+274:     public Vector3D add(final Vector<Euclidean3D> v) {
+275:         final Vector3D v3 = (Vector3D) v;
+276:         return new Vector3D(x + v3.x, y + v3.y, z + v3.z);
+277:     }
+
+[15] org.apache.commons.math3.geometry.euclidean.threed.PolyhedronsSet#addContribution  (lines 168-190)
+168:         private void addContribution(final SubHyperplane<Euclidean3D> facet, final boolean reversed) {
+169: 
+170:             final Region<Euclidean2D> polygon = ((SubPlane) facet).getRemainingRegion();
+171:             final double area    = polygon.getSize();
+172: 
+173:             if (Double.isInfinite(area)) {
+174:                 setSize(Double.POSITIVE_INFINITY);
+175:                 setBarycenter(Vector3D.NaN);
+176:             } else {
+177: 
+178:                 final Plane    plane  = (Plane) facet.getHyperplane();
+179:                 final Vector3D facetB = plane.toSpace(polygon.getBarycenter());
+180:                 double   scaled = area * facetB.dotProduct(plane.getNormal());
+181:                 if (reversed) {
+182:                     scaled = -scaled;
+183:                 }
+184: 
+185:                 setSize(getSize() + scaled);
+186:                 setBarycenter(new Vector3D(1.0, (Vector3D) getBarycenter(), scaled, facetB));
+187: 
+188:             }
+189: 
+190:         }
+
+[16] org.apache.commons.math3.geometry.euclidean.threed.PolyhedronsSet#visitOrder  (lines 143-145)
+143:         public Order visitOrder(final BSPTree<Euclidean3D> node) {
+144:             return Order.MINUS_SUB_PLUS;
+145:         }
+
+[17] org.apache.commons.math3.geometry.euclidean.threed.Plane#intersection  (lines 336-370)
+336:     public static Vector3D intersection(final Plane plane1, final Plane plane2, final Plane plane3) {
+337: 
+338:         // coefficients of the three planes linear equations
+339:         final double a1 = plane1.w.getX();
+340:         final double b1 = plane1.w.getY();
+341:         final double c1 = plane1.w.getZ();
+342:         final double d1 = plane1.originOffset;
+343: 
+344:         final double a2 = plane2.w.getX();
+345:         final double b2 = plane2.w.getY();
+346:         final double c2 = plane2.w.getZ();
+347:         final double d2 = plane2.originOffset;
+348: 
+349:         final double a3 = plane3.w.getX();
+350:         final double b3 = plane3.w.getY();
+351:         final double c3 = plane3.w.getZ();
+352:         final double d3 = plane3.originOffset;
+353: 
+354:         // direct Cramer resolution of the linear system
+355:         // (this is still feasible for a 3x3 system)
+356:         final double a23         = b2 * c3 - b3 * c2;
+357:         final double b23         = c2 * a3 - c3 * a2;
+358:         final double c23         = a2 * b3 - a3 * b2;
+359:         final double determinant = a1 * a23 + b1 * b23 + c1 * c23;
+360:         if (FastMath.abs(determinant) < 1.0e-10) {
+361:             return null;
+362:         }
+363: 
+364:         final double r = 1.0 / determinant;
+365:         return new Vector3D(
+366:                             (-a23 * d1 - (c1 * b3 - c3 * b1) * d2 - (c2 * b1 - c1 * b2) * d3) * r,
+367:                             (-b23 * d1 - (c3 * a1 - c1 * a3) * d2 - (c1 * a2 - c2 * a1) * d3) * r,
+368:                             (-c23 * d1 - (b1 * a3 - b3 * a1) * d2 - (b2 * a1 - b1 * a2) * d3) * r);
+369: 
+370:     }
+
+[18] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#Vector3D  (lines 137-141)
+137:     public Vector3D(double a, Vector3D u) {
+138:         this.x = a * u.x;
+139:         this.y = a * u.y;
+140:         this.z = a * u.z;
+141:     }
+
+[19] org.apache.commons.math3.geometry.euclidean.threed.Line#Line  (lines 54-56)
+54:     public Line(final Vector3D p1, final Vector3D p2) {
+55:         reset(p1, p2);
+56:     }
+
+[20] org.apache.commons.math3.geometry.euclidean.twod.PolygonsSet#followLoop  (lines 293-350)
+293:     private List<ComparableSegment> followLoop(final AVLTree<ComparableSegment>.Node node,
+294:                                                final AVLTree<ComparableSegment> sorted) {
+295: 
+296:         final ArrayList<ComparableSegment> loop = new ArrayList<ComparableSegment>();
+297:         ComparableSegment segment = node.getElement();
+298:         loop.add(segment);
+299:         final Vector2D globalStart = segment.getStart();
+300:         Vector2D end = segment.getEnd();
+301:         node.delete();
+302: 
+303:         // is this an open or a closed loop ?
+304:         final boolean open = segment.getStart() == null;
+305: 
+306:         while ((end != null) && (open || (globalStart.distance(end) > 1.0e-10))) {
+307: 
+308:             // search the sub-hyperplane starting where the previous one ended
+309:             AVLTree<ComparableSegment>.Node selectedNode = null;
+310:             ComparableSegment       selectedSegment  = null;
+311:             double                  selectedDistance = Double.POSITIVE_INFINITY;
+312:             final ComparableSegment lowerLeft        = new ComparableSegment(end, -1.0e-10, -1.0e-10);
+313:             final ComparableSegment upperRight       = new ComparableSegment(end, +1.0e-10, +1.0e-10);
+314:             for (AVLTree<ComparableSegment>.Node n = sorted.getNotSmaller(lowerLeft);
+315:                  (n != null) && (n.getElement().compareTo(upperRight) <= 0);
+316:                  n = n.getNext()) {
+317:                 segment = n.getElement();
+318:                 final double distance = end.distance(segment.getStart());
+319:                 if (distance < selectedDistance) {
+320:                     selectedNode     = n;
+321:                     selectedSegment  = segment;
+322:                     selectedDistance = distance;
+323:                 }
+324:             }
+325: 
+326:             if (selectedDistance > 1.0e-10) {
+327:                 // this is a degenerated loop, it probably comes from a very
+328:                 // tiny region with some segments smaller than the threshold, we
+329:                 // simply ignore it
+330:                 return null;
+331:             }
+332: 
+333:             end = selectedSegment.getEnd();
+334:             loop.add(selectedSegment);
+335:             selectedNode.delete();
+336: 
+337:         }
+338: 
+339:         if ((loop.size() == 2) && !open) {
+340:             // this is a degenerated infinitely thin loop, we simply ignore it
+341:             return null;
+342:         }
+343: 
+344:         if ((end == null) && !open) {
+345:             throw new MathInternalError();
+346:         }
+347: 
+348:         return loop;
+349: 
+350:     }
+
+[21] org.apache.commons.math3.util.FastMath#cosQ  (lines 1750-1759)
+1750:     private static double cosQ(double xa, double xb) {
+1751:         final double pi2a = 1.5707963267948966;
+1752:         final double pi2b = 6.123233995736766E-17;
+1753: 
+1754:         final double a = pi2a - xa;
+1755:         double b = -(a - pi2a + xa);
+1756:         b += pi2b - xb;
+1757: 
+1758:         return sinQ(a, b);
+1759:     }
+
+[22] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#Vector3D  (lines 151-155)
+151:     public Vector3D(double a1, Vector3D u1, double a2, Vector3D u2) {
+152:         this.x = MathArrays.linearCombination(a1, u1.x, a2, u2.x);
+153:         this.y = MathArrays.linearCombination(a1, u1.y, a2, u2.y);
+154:         this.z = MathArrays.linearCombination(a1, u1.z, a2, u2.z);
+155:     }
+
+[23] org.apache.commons.math3.geometry.euclidean.threed.Plane#setFrame  (lines 146-150)
+146:     private void setFrame() {
+147:         origin = new Vector3D(-originOffset, w);
+148:         u = w.orthogonal();
+149:         v = Vector3D.crossProduct(w, u);
+150:     }
+
+[24] org.apache.commons.math3.geometry.euclidean.threed.Plane#toSubSpace  (lines 224-226)
+224:     public Vector2D toSubSpace(final Vector<Euclidean3D> point) {
+225:         return new Vector2D(point.dotProduct(u), point.dotProduct(v));
+226:     }
+
+[25] org.apache.commons.math3.geometry.euclidean.twod.PolygonsSet#getVertices  (lines 206-284)
+206:     public Vector2D[][] getVertices() {
+207:         if (vertices == null) {
+208:             if (getTree(false).getCut() == null) {
+209:                 vertices = new Vector2D[0][];
+210:             } else {
+211: 
+212:                 // sort the segments according to their start point
+213:                 final SegmentsBuilder visitor = new SegmentsBuilder();
+214:                 getTree(true).visit(visitor);
+215:                 final AVLTree<ComparableSegment> sorted = visitor.getSorted();
+216: 
+217:                 // identify the loops, starting from the open ones
+218:                 // (their start segments are naturally at the sorted set beginning)
+219:                 final ArrayList<List<ComparableSegment>> loops = new ArrayList<List<ComparableSegment>>();
+220:                 while (!sorted.isEmpty()) {
+221:                     final AVLTree<ComparableSegment>.Node node = sorted.getSmallest();
+222:                     final List<ComparableSegment> loop = followLoop(node, sorted);
+223:                     if (loop != null) {
+224:                         loops.add(loop);
+225:                     }
+226:                 }
+227: 
+228:                 // tranform the loops in an array of arrays of points
+229:                 vertices = new Vector2D[loops.size()][];
+230:                 int i = 0;
+231: 
+232:                 for (final List<ComparableSegment> loop : loops) {
+233:                     if (loop.size() < 2) {
+234:                         // single infinite line
+235:                         final Line line = loop.get(0).getLine();
+236:                         vertices[i++] = new Vector2D[] {
+237:                             null,
+238:                             line.toSpace(new Vector1D(-Float.MAX_VALUE)),
+239:                             line.toSpace(new Vector1D(+Float.MAX_VALUE))
+240:                         };
+241:                     } else if (loop.get(0).getStart() == null) {
+242:                         // open loop with at least one real point
+243:                         final Vector2D[] array = new Vector2D[loop.size() + 2];
+244:                         int j = 0;
+245:                         for (Segment segment : loop) {
+246: 
+247:                             if (j == 0) {
+248:                                 // null point and first dummy point
+249:                                 double x = segment.getLine().toSubSpace(segment.getEnd()).getX();
+250:                                 x -= FastMath.max(1.0, FastMath.abs(x / 2));
+251:                                 array[j++] = null;
+252:                                 array[j++] = segment.getLine().toSpace(new Vector1D(x));
+253:                             }
+254: 
+255:                             if (j < (array.length - 1)) {
+256:                                 // current point
+257:                                 array[j++] = segment.getEnd();
+258:                             }
+259: 
+260:                             if (j == (array.length - 1)) {
+261:                                 // last dummy point
+262:                                 double x = segment.getLine().toSubSpace(segment.getStart()).getX();
+263:                                 x += FastMath.max(1.0, FastMath.abs(x / 2));
+264:                                 array[j++] = segment.getLine().toSpace(new Vector1D(x));
+265:                             }
+266: 
+267:                         }
+268:                         vertices[i++] = array;
+269:                     } else {
+270:                         final Vector2D[] array = new Vector2D[loop.size()];
+271:                         int j = 0;
+272:                         for (Segment segment : loop) {
+273:                             array[j++] = segment.getStart();
+274:                         }
+275:                         vertices[i++] = array;
+276:                     }
+277:                 }
+278: 
+279:             }
+280:         }
+281: 
+282:         return vertices.clone();
+283: 
+284:     }
+
+[26] org.apache.commons.math3.geometry.euclidean.threed.Plane#wholeHyperplane  (lines 375-377)
+375:     public SubPlane wholeHyperplane() {
+376:         return new SubPlane(this, new PolygonsSet());
+377:     }
+
+[27] org.apache.commons.math3.geometry.euclidean.threed.Plane#getNormal  (lines 170-172)
+170:     public Vector3D getNormal() {
+171:         return w;
+172:     }
+
+[28] org.apache.commons.math3.geometry.euclidean.threed.PolyhedronsSet#PolyhedronsSet  (lines 82-84)
+82:     public PolyhedronsSet(final Collection<SubHyperplane<Euclidean3D>> boundary) {
+83:         super(boundary);
+84:     }
+
+[29] org.apache.commons.math3.util.FastMath#sin  (lines 2134-2225)
+2134:     public static double sin(double x) {
+2135:         boolean negative = false;
+2136:         int quadrant = 0;
+2137:         double xa;
+2138:         double xb = 0.0;
+2139: 
+2140:         /* Take absolute value of the input */
+2141:         xa = x;
+2142:         if (x < 0) {
+2143:             negative = true;
+2144:             xa = -xa;
+2145:         }
+2146: 
+2147:         /* Check for zero and negative zero */
+2148:         if (xa == 0.0) {
+2149:             long bits = Double.doubleToLongBits(x);
+2150:             if (bits < 0) {
+2151:                 return -0.0;
+2152:             }
+2153:             return 0.0;
+2154:         }
+2155: 
+2156:         if (xa != xa || xa == Double.POSITIVE_INFINITY) {
+2157:             return Double.NaN;
+2158:         }
+2159: 
+2160:         /* Perform any argument reduction */
+2161:         if (xa > 3294198.0) {
+2162:             // PI * (2**20)
+2163:             // Argument too big for CodyWaite reduction.  Must use
+2164:             // PayneHanek.
+2165:             double reduceResults[] = new double[3];
+2166:             reducePayneHanek(xa, reduceResults);
+2167:             quadrant = ((int) reduceResults[0]) & 3;
+2168:             xa = reduceResults[1];
+2169:             xb = reduceResults[2];
+2170:         } else if (xa > 1.5707963267948966) {
+2171:             /* Inline the Cody/Waite reduction for performance */
+2172: 
+2173:             // Estimate k
+2174:             //k = (int)(xa / 1.5707963267948966);
+2175:             int k = (int)(xa * 0.6366197723675814);
+2176: 
+2177:             // Compute remainder
+2178:             double remA;
+2179:             double remB;
+2180:             while (true) {
+2181:                 double a = -k * 1.570796251296997;
+2182:                 remA = xa + a;
+2183:                 remB = -(remA - xa - a);
+2184: 
+2185:                 a = -k * 7.549789948768648E-8;
+2186:                 double b = remA;
+2187:                 remA = a + b;
+2188:                 remB += -(remA - b - a);
+2189: 
+2190:                 a = -k * 6.123233995736766E-17;
+2191:                 b = remA;
+2192:                 remA = a + b;
+2193:                 remB += -(remA - b - a);
+2194: 
+2195:                 if (remA > 0.0) {
+2196:                     break;
+2197:                 }
+2198: 
+2199:                 // Remainder is negative, so decrement k and try again.
+2200:                 // This should only happen if the input is very close
+2201:                 // to an even multiple of pi/2
+2202:                 k--;
+2203:             }
+2204:             quadrant = k & 3;
+2205:             xa = remA;
+2206:             xb = remB;
+2207:         }
+2208: 
+2209:         if (negative) {
+2210:             quadrant ^= 2;  // Flip bit 1
+2211:         }
+2212: 
+2213:         switch (quadrant) {
+2214:             case 0:
+2215:                 return sinQ(xa, xb);
+2216:             case 1:
+2217:                 return cosQ(xa, xb);
+2218:             case 2:
+2219:                 return -sinQ(xa, xb);
+2220:             case 3:
+2221:                 return -cosQ(xa, xb);
+2222:             default:
+2223:                 return Double.NaN;
+2224:         }
+2225:     }
+
+[30] org.apache.commons.math3.geometry.euclidean.threed.PolyhedronsSet#visitInternalNode  (lines 148-158)
+148:         public void visitInternalNode(final BSPTree<Euclidean3D> node) {
+149:             @SuppressWarnings("unchecked")
+150:             final BoundaryAttribute<Euclidean3D> attribute =
+151:                 (BoundaryAttribute<Euclidean3D>) node.getAttribute();
+152:             if (attribute.getPlusOutside() != null) {
+153:                 addContribution(attribute.getPlusOutside(), false);
+154:             }
+155:             if (attribute.getPlusInside() != null) {
+156:                 addContribution(attribute.getPlusInside(), true);
+157:             }
+158:         }
+
+[31] org.apache.commons.math3.geometry.euclidean.threed.Line#reset  (lines 73-81)
+73:     public void reset(final Vector3D p1, final Vector3D p2) {
+74:         final Vector3D delta = p2.subtract(p1);
+75:         final double norm2 = delta.getNormSq();
+76:         if (norm2 == 0.0) {
+77:             throw new MathIllegalArgumentException(LocalizedFormats.ZERO_NORM);
+78:         }
+79:         this.direction = new Vector3D(1.0 / FastMath.sqrt(norm2), delta);
+80:         zero = new Vector3D(1.0, p1, -p1.dotProduct(delta) / norm2, delta);
+81:     }
+
+[32] org.apache.commons.math3.geometry.euclidean.threed.Plane#intersection  (lines 321-328)
+321:     public Line intersection(final Plane other) {
+322:         final Vector3D direction = Vector3D.crossProduct(w, other.w);
+323:         if (direction.getNorm() < 1.0e-10) {
+324:             return null;
+325:         }
+326:         final Vector3D point = intersection(this, other, new Plane(direction));
+327:         return new Line(point, point.add(direction));
+328:     }
+
+[33] org.apache.commons.math3.geometry.partitioning.AbstractRegion#compare  (lines 102-106)
+102:                 public int compare(final SubHyperplane<S> o1, final SubHyperplane<S> o2) {
+103:                     final double size1 = o1.getSize();
+104:                     final double size2 = o2.getSize();
+105:                     return (size2 < size1) ? -1 : ((o1 == o2) ? 0 : +1);
+106:                 }
+
+[34] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#getNorm  (lines 241-244)
+241:     public double getNorm() {
+242:         // there are no cancellation problems here, so we use the straightforward formula
+243:         return FastMath.sqrt (x * x + y * y + z * z);
+244:     }
+
+[35] org.apache.commons.math3.util.MathArrays#linearCombination  (lines 659-713)
+659:     public static double linearCombination(final double a1, final double b1,
+660:                                            final double a2, final double b2) {
+661: 
+662:         // the code below is split in many additions/subtractions that may
+663:         // appear redundant. However, they should NOT be simplified, as they
+664:         // use IEEE754 floating point arithmetic rounding properties.
+665:         // as an example, the expression "ca1 - (ca1 - a1)" is NOT the same as "a1"
+666:         // The variable naming conventions are that xyzHigh contains the most significant
+667:         // bits of xyz and xyzLow contains its least significant bits. So theoretically
+668:         // xyz is the sum xyzHigh + xyzLow, but in many cases below, this sum cannot
+669:         // be represented in only one double precision number so we preserve two numbers
+670:         // to hold it as long as we can, combining the high and low order bits together
+671:         // only at the end, after cancellation may have occurred on high order bits
+672: 
+673:         // split a1 and b1 as two 26 bits numbers
+674:         final double ca1        = SPLIT_FACTOR * a1;
+675:         final double a1High     = ca1 - (ca1 - a1);
+676:         final double a1Low      = a1 - a1High;
+677:         final double cb1        = SPLIT_FACTOR * b1;
+678:         final double b1High     = cb1 - (cb1 - b1);
+679:         final double b1Low      = b1 - b1High;
+680: 
+681:         // accurate multiplication a1 * b1
+682:         final double prod1High  = a1 * b1;
+683:         final double prod1Low   = a1Low * b1Low - (((prod1High - a1High * b1High) - a1Low * b1High) - a1High * b1Low);
+684: 
+685:         // split a2 and b2 as two 26 bits numbers
+686:         final double ca2        = SPLIT_FACTOR * a2;
+687:         final double a2High     = ca2 - (ca2 - a2);
+688:         final double a2Low      = a2 - a2High;
+689:         final double cb2        = SPLIT_FACTOR * b2;
+690:         final double b2High     = cb2 - (cb2 - b2);
+691:         final double b2Low      = b2 - b2High;
+692: 
+693:         // accurate multiplication a2 * b2
+694:         final double prod2High  = a2 * b2;
+695:         final double prod2Low   = a2Low * b2Low - (((prod2High - a2High * b2High) - a2Low * b2High) - a2High * b2Low);
+696: 
+697:         // accurate addition a1 * b1 + a2 * b2
+698:         final double s12High    = prod1High + prod2High;
+699:         final double s12Prime   = s12High - prod2High;
+700:         final double s12Low     = (prod2High - (s12High - s12Prime)) + (prod1High - s12Prime);
+701: 
+702:         // final rounding, s12 may have suffered many cancellations, we try
+703:         // to recover some bits from the extra words we have saved up to now
+704:         double result = s12High + (prod1Low + prod2Low + s12Low);
+705: 
+706:         if (Double.isNaN(result)) {
+707:             // either we have split infinite numbers or some coefficients were NaNs,
+708:             // just rely on the naive implementation and let IEEE754 handle this
+709:             result = a1 * b1 + a2 * b2;
+710:         }
+711: 
+712:         return result;
+713:     }
+
+[36] org.apache.commons.math3.util.FastMath#sinQ  (lines 1626-1741)
+1626:     private static double sinQ(double xa, double xb) {
+1627:         int idx = (int) ((xa * 8.0) + 0.5);
+1628:         final double epsilon = xa - EIGHTHS[idx]; //idx*0.125;
+1629: 
+1630:         // Table lookups
+1631:         final double sintA = SINE_TABLE_A[idx];
+1632:         final double sintB = SINE_TABLE_B[idx];
+1633:         final double costA = COSINE_TABLE_A[idx];
+1634:         final double costB = COSINE_TABLE_B[idx];
+1635: 
+1636:         // Polynomial eval of sin(epsilon), cos(epsilon)
+1637:         double sinEpsA = epsilon;
+1638:         double sinEpsB = polySine(epsilon);
+1639:         final double cosEpsA = 1.0;
+1640:         final double cosEpsB = polyCosine(epsilon);
+1641: 
+1642:         // Split epsilon   xa + xb = x
+1643:         final double temp = sinEpsA * HEX_40000000;
+1644:         double temp2 = (sinEpsA + temp) - temp;
+1645:         sinEpsB +=  sinEpsA - temp2;
+1646:         sinEpsA = temp2;
+1647: 
+1648:         /* Compute sin(x) by angle addition formula */
+1649:         double result;
+1650: 
+1651:         /* Compute the following sum:
+1652:          *
+1653:          * result = sintA + costA*sinEpsA + sintA*cosEpsB + costA*sinEpsB +
+1654:          *          sintB + costB*sinEpsA + sintB*cosEpsB + costB*sinEpsB;
+1655:          *
+1656:          * Ranges of elements
+1657:          *
+1658:          * xxxtA   0            PI/2
+1659:          * xxxtB   -1.5e-9      1.5e-9
+1660:          * sinEpsA -0.0625      0.0625
+1661:          * sinEpsB -6e-11       6e-11
+1662:          * cosEpsA  1.0
+1663:          * cosEpsB  0           -0.0625
+1664:          *
+1665:          */
+1666: 
+1667:         //result = sintA + costA*sinEpsA + sintA*cosEpsB + costA*sinEpsB +
+1668:         //          sintB + costB*sinEpsA + sintB*cosEpsB + costB*sinEpsB;
+1669: 
+1670:         //result = sintA + sintA*cosEpsB + sintB + sintB * cosEpsB;
+1671:         //result += costA*sinEpsA + costA*sinEpsB + costB*sinEpsA + costB * sinEpsB;
+1672:         double a = 0;
+1673:         double b = 0;
+1674: 
+1675:         double t = sintA;
+1676:         double c = a + t;
+1677:         double d = -(c - a - t);
+1678:         a = c;
+1679:         b = b + d;
+1680: 
+1681:         t = costA * sinEpsA;
+1682:         c = a + t;
+1683:         d = -(c - a - t);
+1684:         a = c;
+1685:         b = b + d;
+1686: 
+1687:         b = b + sintA * cosEpsB + costA * sinEpsB;
+1688:         /*
+1689:     t = sintA*cosEpsB;
+1690:     c = a + t;
+1691:     d = -(c - a - t);
+1692:     a = c;
+1693:     b = b + d;
+1694: 
+1695:     t = costA*sinEpsB;
+1696:     c = a + t;
+1697:     d = -(c - a - t);
+1698:     a = c;
+1699:     b = b + d;
+1700:          */
+1701: 
+1702:         b = b + sintB + costB * sinEpsA + sintB * cosEpsB + costB * sinEpsB;
+1703:         /*
+1704:     t = sintB;
+1705:     c = a + t;
+1706:     d = -(c - a - t);
+1707:     a = c;
+1708:     b = b + d;
+1709: 
+1710:     t = costB*sinEpsA;
+1711:     c = a + t;
+1712:     d = -(c - a - t);
+1713:     a = c;
+1714:     b = b + d;
+1715: 
+1716:     t = sintB*cosEpsB;
+1717:     c = a + t;
+1718:     d = -(c - a - t);
+1719:     a = c;
+1720:     b = b + d;
+1721: 
+1722:     t = costB*sinEpsB;
+1723:     c = a + t;
+1724:     d = -(c - a - t);
+1725:     a = c;
+1726:     b = b + d;
+1727:          */
+1728: 
+1729:         if (xb != 0.0) {
+1730:             t = ((costA + costB) * (cosEpsA + cosEpsB) -
+1731:                  (sintA + sintB) * (sinEpsA + sinEpsB)) * xb;  // approximate cosine*xb
+1732:             c = a + t;
+1733:             d = -(c - a - t);
+1734:             a = c;
+1735:             b = b + d;
+1736:         }
+1737: 
+1738:         result = a + b;
+1739: 
+1740:         return result;
+1741:     }
+
+[37] org.apache.commons.math3.geometry.euclidean.threed.Plane#setNormal  (lines 136-142)
+136:     private void setNormal(final Vector3D normal) {
+137:         final double norm = normal.getNorm();
+138:         if (norm < 1.0e-10) {
+139:             throw new MathArithmeticException(LocalizedFormats.ZERO_NORM);
+140:         }
+141:         w = new Vector3D(1.0 / norm, normal);
+142:     }
+
+[38] org.apache.commons.math3.geometry.euclidean.threed.Plane#Plane  (lines 55-59)
+55:     public Plane(final Vector3D normal) {
+56:         setNormal(normal);
+57:         originOffset = 0;
+58:         setFrame();
+59:     }
+
+[39] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#crossProduct  (lines 518-520)
+518:     public static Vector3D crossProduct(final Vector3D v1, final Vector3D v2) {
+519:         return v1.crossProduct(v2);
+520:     }
+
+[40] org.apache.commons.math3.geometry.euclidean.threed.Line#toSpace  (lines 133-135)
+133:     public Vector3D toSpace(final Vector<Euclidean1D> point) {
+134:         return pointAt(((Vector1D) point).getX());
+135:     }
+
+[41] org.apache.commons.math3.geometry.partitioning.utilities.AVLTree#rebalanceRightGrown  (lines 454-488)
+454:         private boolean rebalanceRightGrown() {
+455:             switch (skew) {
+456:             case LEFT_HIGH:
+457:                 skew = Skew.BALANCED;
+458:                 return false;
+459:             case RIGHT_HIGH:
+460:                 if (right.skew == Skew.RIGHT_HIGH) {
+461:                     rotateCCW();
+462:                     skew      = Skew.BALANCED;
+463:                     left.skew = Skew.BALANCED;
+464:                 } else {
+465:                     final Skew s = right.left.skew;
+466:                     right.rotateCW();
+467:                     rotateCCW();
+468:                     switch (s) {
+469:                     case LEFT_HIGH:
+470:                         left.skew  = Skew.BALANCED;
+471:                         right.skew = Skew.RIGHT_HIGH;
+472:                         break;
+473:                     case RIGHT_HIGH:
+474:                         left.skew  = Skew.LEFT_HIGH;
+475:                         right.skew = Skew.BALANCED;
+476:                         break;
+477:                     default:
+478:                         left.skew  = Skew.BALANCED;
+479:                         right.skew = Skew.BALANCED;
+480:                     }
+481:                     skew = Skew.BALANCED;
+482:                 }
+483:                 return false;
+484:             default:
+485:                 skew = Skew.RIGHT_HIGH;
+486:                 return true;
+487:             }
+488:         }
+
+[42] org.apache.commons.math3.util.FastMath#atan  (lines 2435-2574)
+2435:     private static double atan(double xa, double xb, boolean leftPlane) {
+2436:         boolean negate = false;
+2437:         int idx;
+2438: 
+2439:         if (xa == 0.0) { // Matches +/- 0.0; return correct sign
+2440:             return leftPlane ? copySign(Math.PI, xa) : xa;
+2441:         }
+2442: 
+2443:         if (xa < 0) {
+2444:             // negative
+2445:             xa = -xa;
+2446:             xb = -xb;
+2447:             negate = true;
+2448:         }
+2449: 
+2450:         if (xa > 1.633123935319537E16) { // Very large input
+2451:             return (negate ^ leftPlane) ? (-Math.PI * F_1_2) : (Math.PI * F_1_2);
+2452:         }
+2453: 
+2454:         /* Estimate the closest tabulated arctan value, compute eps = xa-tangentTable */
+2455:         if (xa < 1) {
+2456:             idx = (int) (((-1.7168146928204136 * xa * xa + 8.0) * xa) + 0.5);
+2457:         } else {
+2458:             final double oneOverXa = 1 / xa;
+2459:             idx = (int) (-((-1.7168146928204136 * oneOverXa * oneOverXa + 8.0) * oneOverXa) + 13.07);
+2460:         }
+2461:         double epsA = xa - TANGENT_TABLE_A[idx];
+2462:         double epsB = -(epsA - xa + TANGENT_TABLE_A[idx]);
+2463:         epsB += xb - TANGENT_TABLE_B[idx];
+2464: 
+2465:         double temp = epsA + epsB;
+2466:         epsB = -(temp - epsA - epsB);
+2467:         epsA = temp;
+2468: 
+2469:         /* Compute eps = eps / (1.0 + xa*tangent) */
+2470:         temp = xa * HEX_40000000;
+2471:         double ya = xa + temp - temp;
+2472:         double yb = xb + xa - ya;
+2473:         xa = ya;
+2474:         xb += yb;
+2475: 
+2476:         //if (idx > 8 || idx == 0)
+2477:         if (idx == 0) {
+2478:             /* If the slope of the arctan is gentle enough (< 0.45), this approximation will suffice */
+2479:             //double denom = 1.0 / (1.0 + xa*tangentTableA[idx] + xb*tangentTableA[idx] + xa*tangentTableB[idx] + xb*tangentTableB[idx]);
+2480:             final double denom = 1d / (1d + (xa + xb) * (TANGENT_TABLE_A[idx] + TANGENT_TABLE_B[idx]));
+2481:             //double denom = 1.0 / (1.0 + xa*tangentTableA[idx]);
+2482:             ya = epsA * denom;
+2483:             yb = epsB * denom;
+2484:         } else {
+2485:             double temp2 = xa * TANGENT_TABLE_A[idx];
+2486:             double za = 1d + temp2;
+2487:             double zb = -(za - 1d - temp2);
+2488:             temp2 = xb * TANGENT_TABLE_A[idx] + xa * TANGENT_TABLE_B[idx];
+2489:             temp = za + temp2;
+2490:             zb += -(temp - za - temp2);
+2491:             za = temp;
+2492: 
+2493:             zb += xb * TANGENT_TABLE_B[idx];
+2494:             ya = epsA / za;
+2495: 
+2496:             temp = ya * HEX_40000000;
+2497:             final double yaa = (ya + temp) - temp;
+2498:             final double yab = ya - yaa;
+2499: 
+2500:             temp = za * HEX_40000000;
+2501:             final double zaa = (za + temp) - temp;
+2502:             final double zab = za - zaa;
+2503: 
+2504:             /* Correct for rounding in division */
+2505:             yb = (epsA - yaa * zaa - yaa * zab - yab * zaa - yab * zab) / za;
+2506: 
+2507:             yb += -epsA * zb / za / za;
+2508:             yb += epsB / za;
+2509:         }
+2510: 
+2511: 
+2512:         epsA = ya;
+2513:         epsB = yb;
+2514: 
+2515:         /* Evaluate polynomial */
+2516:         final double epsA2 = epsA * epsA;
+2517: 
+2518:         /*
+2519:     yb = -0.09001346640161823;
+2520:     yb = yb * epsA2 + 0.11110718400605211;
+2521:     yb = yb * epsA2 + -0.1428571349122913;
+2522:     yb = yb * epsA2 + 0.19999999999273194;
+2523:     yb = yb * epsA2 + -0.33333333333333093;
+2524:     yb = yb * epsA2 * epsA;
+2525:          */
+2526: 
+2527:         yb = 0.07490822288864472;
+2528:         yb = yb * epsA2 + -0.09088450866185192;
+2529:         yb = yb * epsA2 + 0.11111095942313305;
+2530:         yb = yb * epsA2 + -0.1428571423679182;
+2531:         yb = yb * epsA2 + 0.19999999999923582;
+2532:         yb = yb * epsA2 + -0.33333333333333287;
+2533:         yb = yb * epsA2 * epsA;
+2534: 
+2535: 
+2536:         ya = epsA;
+2537: 
+2538:         temp = ya + yb;
+2539:         yb = -(temp - ya - yb);
+2540:         ya = temp;
+2541: 
+2542:         /* Add in effect of epsB.   atan'(x) = 1/(1+x^2) */
+2543:         yb += epsB / (1d + epsA * epsA);
+2544: 
+2545:         //result = yb + eighths[idx] + ya;
+2546:         double za = EIGHTHS[idx] + ya;
+2547:         double zb = -(za - EIGHTHS[idx] - ya);
+2548:         temp = za + yb;
+2549:         zb += -(temp - za - yb);
+2550:         za = temp;
+2551: 
+2552:         double result = za + zb;
+2553:         double resultb = -(result - za - zb);
+2554: 
+2555:         if (leftPlane) {
+2556:             // Result is in the left plane
+2557:             final double pia = 1.5707963267948966 * 2;
+2558:             final double pib = 6.123233995736766E-17 * 2;
+2559: 
+2560:             za = pia - result;
+2561:             zb = -(za - pia + result);
+2562:             zb += pib - resultb;
+2563: 
+2564:             result = za + zb;
+2565:             resultb = -(result - za - zb);
+2566:         }
+2567: 
+2568: 
+2569:         if (negate ^ leftPlane) {
+2570:             result = -result;
+2571:         }
+2572: 
+2573:         return result;
+2574:     }
+
+[43] org.apache.commons.math3.geometry.euclidean.threed.SubPlane#buildNew  (lines 46-50)
+46:     @Override
+47:     protected AbstractSubHyperplane<Euclidean3D, Euclidean2D> buildNew(final Hyperplane<Euclidean3D> hyperplane,
+48:                                                                        final Region<Euclidean2D> remainingRegion) {
+49:         return new SubPlane(hyperplane, remainingRegion);
+50:     }
+
+[44] org.apache.commons.math3.geometry.euclidean.threed.Plane#Plane  (lines 66-70)
+66:     public Plane(final Vector3D p, final Vector3D normal) {
+67:         setNormal(normal);
+68:         originOffset = -p.dotProduct(w);
+69:         setFrame();
+70:     }
+
+[45] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#crossProduct  (lines 461-466)
+461:     public Vector3D crossProduct(final Vector<Euclidean3D> v) {
+462:         final Vector3D v3 = (Vector3D) v;
+463:         return new Vector3D(MathArrays.linearCombination(y, v3.z, -z, v3.y),
+464:                             MathArrays.linearCombination(z, v3.x, -x, v3.z),
+465:                             MathArrays.linearCombination(x, v3.y, -y, v3.x));
+466:     }
+
+[46] org.apache.commons.math3.geometry.partitioning.BSPTree#visit  (lines 241-281)
+241:     public void visit(final BSPTreeVisitor<S> visitor) {
+242:         if (cut == null) {
+243:             visitor.visitLeafNode(this);
+244:         } else {
+245:             switch (visitor.visitOrder(this)) {
+246:             case PLUS_MINUS_SUB:
+247:                 plus.visit(visitor);
+248:                 minus.visit(visitor);
+249:                 visitor.visitInternalNode(this);
+250:                 break;
+251:             case PLUS_SUB_MINUS:
+252:                 plus.visit(visitor);
+253:                 visitor.visitInternalNode(this);
+254:                 minus.visit(visitor);
+255:                 break;
+256:             case MINUS_PLUS_SUB:
+257:                 minus.visit(visitor);
+258:                 plus.visit(visitor);
+259:                 visitor.visitInternalNode(this);
+260:                 break;
+261:             case MINUS_SUB_PLUS:
+262:                 minus.visit(visitor);
+263:                 visitor.visitInternalNode(this);
+264:                 plus.visit(visitor);
+265:                 break;
+266:             case SUB_PLUS_MINUS:
+267:                 visitor.visitInternalNode(this);
+268:                 plus.visit(visitor);
+269:                 minus.visit(visitor);
+270:                 break;
+271:             case SUB_MINUS_PLUS:
+272:                 visitor.visitInternalNode(this);
+273:                 minus.visit(visitor);
+274:                 plus.visit(visitor);
+275:                 break;
+276:             default:
+277:                 throw new MathInternalError();
+278:             }
+279: 
+280:         }
+281:     }
+
+[47] org.apache.commons.math3.geometry.euclidean.threed.SubPlane#split  (lines 96-139)
+96:     @Override
+97:     public SplitSubHyperplane<Euclidean3D> split(Hyperplane<Euclidean3D> hyperplane) {
+98: 
+99:         final Plane otherPlane = (Plane) hyperplane;
+100:         final Plane thisPlane  = (Plane) getHyperplane();
+101:         final Line  inter      = otherPlane.intersection(thisPlane);
+102: 
+103:         if (inter == null) {
+104:             // the hyperplanes are parallel
+105:             final double global = otherPlane.getOffset(thisPlane);
+106:             return (global < -1.0e-10) ?
+107:                    new SplitSubHyperplane<Euclidean3D>(null, this) :
+108:                    new SplitSubHyperplane<Euclidean3D>(this, null);
+109:         }
+110: 
+111:         // the hyperplanes do intersect
+112:         Vector2D p = thisPlane.toSubSpace(inter.toSpace(Vector1D.ZERO));
+113:         Vector2D q = thisPlane.toSubSpace(inter.toSpace(Vector1D.ONE));
+114:         Vector3D crossP = Vector3D.crossProduct(inter.getDirection(), thisPlane.getNormal());
+115:         if (crossP.dotProduct(otherPlane.getNormal()) < 0) {
+116:             final Vector2D tmp = p;
+117:             p           = q;
+118:             q           = tmp;
+119:         }
+120:         final SubHyperplane<Euclidean2D> l2DMinus =
+121:             new org.apache.commons.math3.geometry.euclidean.twod.Line(p, q).wholeHyperplane();
+122:         final SubHyperplane<Euclidean2D> l2DPlus =
+123:             new org.apache.commons.math3.geometry.euclidean.twod.Line(q, p).wholeHyperplane();
+124: 
+125:         final BSPTree<Euclidean2D> splitTree = getRemainingRegion().getTree(false).split(l2DMinus);
+126:         final BSPTree<Euclidean2D> plusTree  = getRemainingRegion().isEmpty(splitTree.getPlus()) ?
+127:                                                new BSPTree<Euclidean2D>(Boolean.FALSE) :
+128:                                                new BSPTree<Euclidean2D>(l2DPlus, new BSPTree<Euclidean2D>(Boolean.FALSE),
+129:                                                                         splitTree.getPlus(), null);
+130: 
+131:         final BSPTree<Euclidean2D> minusTree = getRemainingRegion().isEmpty(splitTree.getMinus()) ?
+132:                                                new BSPTree<Euclidean2D>(Boolean.FALSE) :
+133:                                                    new BSPTree<Euclidean2D>(l2DMinus, new BSPTree<Euclidean2D>(Boolean.FALSE),
+134:                                                                             splitTree.getMinus(), null);
+135: 
+136:         return new SplitSubHyperplane<Euclidean3D>(new SubPlane(thisPlane.copySelf(), new PolygonsSet(plusTree)),
+137:                                                    new SubPlane(thisPlane.copySelf(), new PolygonsSet(minusTree)));
+138: 
+139:     }
+
+[48] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#Vector3D  (lines 95-99)
+95:     public Vector3D(double x, double y, double z) {
+96:         this.x = x;
+97:         this.y = y;
+98:         this.z = z;
+99:     }
+
+[49] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#orthogonal  (lines 319-336)
+319:     public Vector3D orthogonal() {
+320: 
+321:         double threshold = 0.6 * getNorm();
+322:         if (threshold == 0) {
+323:             throw new MathArithmeticException(LocalizedFormats.ZERO_NORM);
+324:         }
+325: 
+326:         if ((x >= -threshold) && (x <= threshold)) {
+327:             double inverse  = 1 / FastMath.sqrt(y * y + z * z);
+328:             return new Vector3D(0, inverse * z, -inverse * y);
+329:         } else if ((y >= -threshold) && (y <= threshold)) {
+330:             double inverse  = 1 / FastMath.sqrt(x * x + z * z);
+331:             return new Vector3D(-inverse * z, 0, inverse * x);
+332:         }
+333:         double inverse  = 1 / FastMath.sqrt(x * x + y * y);
+334:         return new Vector3D(inverse * y, -inverse * x, 0);
+335: 
+336:     }
+
+[50] org.apache.commons.math3.geometry.euclidean.threed.SubPlane#side  (lines 53-88)
+53:     @Override
+54:     public Side side(Hyperplane<Euclidean3D> hyperplane) {
+55: 
+56:         final Plane otherPlane = (Plane) hyperplane;
+57:         final Plane thisPlane  = (Plane) getHyperplane();
+58:         final Line  inter      = otherPlane.intersection(thisPlane);
+59: 
+60:         if (inter == null) {
+61:             // the hyperplanes are parallel,
+62:             // any point can be used to check their relative position
+63:             final double global = otherPlane.getOffset(thisPlane);
+64:             return (global < -1.0e-10) ? Side.MINUS : ((global > 1.0e-10) ? Side.PLUS : Side.HYPER);
+65:         }
+66: 
+67:         // create a 2D line in the otherPlane canonical 2D frame such that:
+68:         //   - the line is the crossing line of the two planes in 3D
+69:         //   - the line splits the otherPlane in two half planes with an
+70:         //     orientation consistent with the orientation of the instance
+71:         //     (i.e. the 3D half space on the plus side (resp. minus side)
+72:         //      of the instance contains the 2D half plane on the plus side
+73:         //      (resp. minus side) of the 2D line
+74:         Vector2D p = thisPlane.toSubSpace(inter.toSpace(Vector1D.ZERO));
+75:         Vector2D q = thisPlane.toSubSpace(inter.toSpace(Vector1D.ONE));
+76:         Vector3D crossP = Vector3D.crossProduct(inter.getDirection(), thisPlane.getNormal());
+77:         if (crossP.dotProduct(otherPlane.getNormal()) < 0) {
+78:             final Vector2D tmp = p;
+79:             p           = q;
+80:             q           = tmp;
+81:         }
+82:         final org.apache.commons.math3.geometry.euclidean.twod.Line line2D =
+83:             new org.apache.commons.math3.geometry.euclidean.twod.Line(p, q);
+84: 
+85:         // check the side on the 2D plane
+86:         return getRemainingRegion().side(line2D);
+87: 
+88:     }

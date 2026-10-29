@@ -1,0 +1,2216 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.NodeUtilTest::testLocalValue1
+junit.framework.AssertionFailedError
+	at com.google.javascript.jscomp.NodeUtilTest.testLocalValue1(NodeUtilTest.java:1023)
+--- com.google.javascript.jscomp.PureFunctionIdentifierTest::testLocalizedSideEffects8
+junit.framework.AssertionFailedError: expected:<[A]> but was:<[A, f]>
+	at com.google.javascript.jscomp.PureFunctionIdentifierTest.checkMarkedCalls(PureFunctionIdentifierTest.java:1206)
+	at com.google.javascript.jscomp.PureFunctionIdentifierTest.testLocalizedSideEffects8(PureFunctionIdentifierTest.java:772)
+--- com.google.javascript.jscomp.PureFunctionIdentifierTest::testLocalizedSideEffects9
+junit.framework.AssertionFailedError: expected:<[A]> but was:<[A, f]>
+	at com.google.javascript.jscomp.PureFunctionIdentifierTest.checkMarkedCalls(PureFunctionIdentifierTest.java:1206)
+	at com.google.javascript.jscomp.PureFunctionIdentifierTest.testLocalizedSideEffects9(PureFunctionIdentifierTest.java:785)
+--- com.google.javascript.jscomp.PureFunctionIdentifierTest::testAnnotationInExterns_new4
+junit.framework.AssertionFailedError: expected:<[externObjSEThis]> but was:<[externObjSEThis, NEW STRING externObjSEThisMethod]>
+	at com.google.javascript.jscomp.PureFunctionIdentifierTest.checkMarkedCalls(PureFunctionIdentifierTest.java:1206)
+	at com.google.javascript.jscomp.PureFunctionIdentifierTest.testAnnotationInExterns_new4(PureFunctionIdentifierTest.java:241)
+... (3 more triggering tests omitted)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.PureFunctionIdentifier#getDebugReport  (lines 124-176)
+124:   String getDebugReport() {
+125:     Preconditions.checkNotNull(externs);
+126:     Preconditions.checkNotNull(root);
+127: 
+128:     StringBuilder sb = new StringBuilder();
+129: 
+130:     FunctionNames functionNames = new FunctionNames(compiler);
+131:     functionNames.process(null, externs);
+132:     functionNames.process(null, root);
+133: 
+134:     sb.append("Pure functions:\n");
+135:     for (Map.Entry<Node, FunctionInformation> entry :
+136:              functionSideEffectMap.entrySet()) {
+137:       Node function = entry.getKey();
+138:       FunctionInformation functionInfo = entry.getValue();
+139: 
+140:       boolean isPure =
+141:           functionInfo.mayBePure() && !functionInfo.mayHaveSideEffects();
+142:       if (isPure) {
+143:         sb.append("  " + functionNames.getFunctionName(function) + "\n");
+144:       }
+145:     }
+146:     sb.append("\n");
+147: 
+148:     for (Map.Entry<Node, FunctionInformation> entry :
+149:              functionSideEffectMap.entrySet()) {
+150:       Node function = entry.getKey();
+151:       FunctionInformation functionInfo = entry.getValue();
+152: 
+153:       Set<String> depFunctionNames = Sets.newHashSet();
+154:       for (Node callSite : functionInfo.getCallsInFunctionBody()) {
+155:         Collection<Definition> defs =
+156:             getCallableDefinitions(definitionProvider,
+157:                                    callSite.getFirstChild());
+158: 
+159:         if (defs == null) {
+160:           depFunctionNames.add("<null def list>");
+161:           continue;
+162:         }
+163: 
+164:         for (Definition def : defs) {
+165:           depFunctionNames.add(
+166:               functionNames.getFunctionName(def.getRValue()));
+167:         }
+168:       }
+169: 
+170:       sb.append(functionNames.getFunctionName(function) + " " +
+171:                 functionInfo.toString() +
+172:                 " Calls: " + depFunctionNames + "\n");
+173:     }
+174: 
+175:     return sb.toString();
+176:   }
+
+[2] com.google.javascript.jscomp.NodeUtil#evaluatesToLocalValue  (lines 2415-2417)
+2415:   static boolean evaluatesToLocalValue(Node value) {
+2416:     return evaluatesToLocalValue(value, Predicates.<Node>alwaysFalse());
+2417:   }
+
+[3] com.google.javascript.jscomp.NodeUtil#functionCallHasSideEffects  (lines 734-790)
+734:   static boolean functionCallHasSideEffects(
+735:       Node callNode, @Nullable AbstractCompiler compiler) {
+736:     if (callNode.getType() != Token.CALL) {
+737:       throw new IllegalStateException(
+738:           "Expected CALL node, got " + Token.name(callNode.getType()));
+739:     }
+740: 
+741:     if (callNode.isNoSideEffectsCall()) {
+742:       return false;
+743:     }
+744: 
+745:     Node nameNode = callNode.getFirstChild();
+746: 
+747:     // Built-in functions with no side effects.
+748:     if (nameNode.getType() == Token.NAME) {
+749:       String name = nameNode.getString();
+750:       if (BUILTIN_FUNCTIONS_WITHOUT_SIDEEFFECTS.contains(name)) {
+751:         return false;
+752:       }
+753:     } else if (nameNode.getType() == Token.GETPROP) {
+754:       if (callNode.hasOneChild()
+755:           && OBJECT_METHODS_WITHOUT_SIDEEFFECTS.contains(
+756:                 nameNode.getLastChild().getString())) {
+757:         return false;
+758:       }
+759: 
+760:       if (callNode.isOnlyModifiesThisCall()
+761:           && evaluatesToLocalValue(nameNode.getFirstChild())) {
+762:         return false;
+763:       }
+764: 
+765:       // Functions in the "Math" namespace have no side effects.
+766:       if (nameNode.getFirstChild().getType() == Token.NAME) {
+767:         String namespaceName = nameNode.getFirstChild().getString();
+768:         if (namespaceName.equals("Math")) {
+769:           return false;
+770:         }
+771:       }
+772: 
+773:       if (compiler != null && !compiler.hasRegExpGlobalReferences()) {
+774:         if (nameNode.getFirstChild().getType() == Token.REGEXP
+775:             && REGEXP_METHODS.contains(nameNode.getLastChild().getString())) {
+776:           return false;
+777:         } else if (nameNode.getFirstChild().getType() == Token.STRING
+778:             && STRING_REGEXP_METHODS.contains(
+779:                 nameNode.getLastChild().getString())) {
+780:           Node param = nameNode.getNext();
+781:           if (param != null &&
+782:               (param.getType() == Token.STRING
+783:                   || param.getType() == Token.REGEXP))
+784:           return false;
+785:         }
+786:       }
+787:     }
+788: 
+789:     return true;
+790:   }
+
+[4] com.google.javascript.jscomp.PureFunctionIdentifier#getCallableDefinitions  (lines 189-244)
+189:   private static Collection<Definition> getCallableDefinitions(
+190:       DefinitionProvider definitionProvider, Node name) {
+191:     if (NodeUtil.isGetProp(name) || NodeUtil.isName(name)) {
+192:       List<Definition> result = Lists.newArrayList();
+193: 
+194:       Collection<Definition> decls =
+195:           definitionProvider.getDefinitionsReferencedAt(name);
+196:       if (decls == null) {
+197:         return null;
+198:       }
+199: 
+200:       for (Definition current : decls) {
+201:         Node rValue = current.getRValue();
+202:         if ((rValue != null) && NodeUtil.isFunction(rValue)) {
+203:           result.add(current);
+204:         } else {
+205:           return null;
+206:         }
+207:       }
+208: 
+209:       return result;
+210:     } else if (name.getType() == Token.OR || name.getType() == Token.HOOK) {
+211:       Node firstVal;
+212:       if (name.getType() == Token.HOOK) {
+213:         firstVal = name.getFirstChild().getNext();
+214:       } else {
+215:         firstVal = name.getFirstChild();
+216:       }
+217: 
+218:       Collection<Definition> defs1 = getCallableDefinitions(definitionProvider,
+219:                                                             firstVal);
+220:       Collection<Definition> defs2 = getCallableDefinitions(definitionProvider,
+221:                                                             firstVal.getNext());
+222:       if (defs1 != null && defs2 != null) {
+223:         defs1.addAll(defs2);
+224:         return defs1;
+225:       } else {
+226:         return null;
+227:       }
+228:     } else if (NodeUtil.isFunctionExpression(name)) {
+229:       // The anonymous function reference is also the definition.
+230:       // TODO(user) Change SimpleDefinitionFinder so it is possible to query for
+231:       // function expressions by function node.
+232: 
+233:       // isExtern is false in the call to the constructor for the
+234:       // FunctionExpressionDefinition below because we know that
+235:       // getCallableDefinitions() will only be called on the first
+236:       // child of a call and thus the function expression
+237:       // definition will never be an extern.
+238:       return Lists.newArrayList(
+239:           (Definition)
+240:               new DefinitionsRemover.FunctionExpressionDefinition(name, false));
+241:     } else {
+242:       return null;
+243:     }
+244:   }
+
+[5] com.google.javascript.jscomp.PureFunctionIdentifier#setTaintsArguments  (lines 962-965)
+962:     void setTaintsArguments() {
+963:       taintsArguments = true;
+964:       checkInvariant();
+965:     }
+
+[6] com.google.javascript.jscomp.PureFunctionIdentifier#functionThrows  (lines 1011-1013)
+1011:     boolean functionThrows() {
+1012:       return functionThrows;
+1013:     }
+
+[7] com.google.javascript.jscomp.PureFunctionIdentifier#appendCall  (lines 1029-1031)
+1029:     void appendCall(Node callNode) {
+1030:       callsInFunctionBody.add(callNode);
+1031:     }
+
+[8] com.google.javascript.jscomp.NodeUtil#nodeTypeMayHaveSideEffects  (lines 811-832)
+811:   static boolean nodeTypeMayHaveSideEffects(Node n, AbstractCompiler compiler) {
+812:     if (isAssignmentOp(n)) {
+813:       return true;
+814:     }
+815: 
+816:     switch(n.getType()) {
+817:       case Token.DELPROP:
+818:       case Token.DEC:
+819:       case Token.INC:
+820:       case Token.THROW:
+821:         return true;
+822:       case Token.CALL:
+823:         return NodeUtil.functionCallHasSideEffects(n, compiler);
+824:       case Token.NEW:
+825:         return NodeUtil.constructorCallHasSideEffects(n, compiler);
+826:       case Token.NAME:
+827:         // A variable definition.
+828:         return n.hasChildren();
+829:       default:
+830:         return false;
+831:     }
+832:   }
+
+[9] com.google.javascript.jscomp.FunctionNames#setFunctionName  (lines 163-169)
+163:     @Override
+164:     public final void setFunctionName(String name, Node fnNode) {
+165:       FunctionRecord record = functionMap.get(fnNode);
+166:       assert(record != null);
+167:       assert(record.name.isEmpty());
+168:       record.name = name;
+169:     }
+
+[10] com.google.javascript.jscomp.PureFunctionIdentifier#setTaintsUnknown  (lines 979-982)
+979:     void setTaintsUnknown() {
+980:       taintsUnknown = true;
+981:       checkInvariant();
+982:     }
+
+[11] com.google.javascript.jscomp.PureFunctionIdentifier#isLocalValueType  (lines 667-674)
+667:     private boolean isLocalValueType(JSType jstype, boolean recurse) {
+668:       Preconditions.checkNotNull(jstype);
+669:       JSType subtype =  jstype.getGreatestSubtype(
+670:           compiler.getTypeRegistry().getNativeType(JSTypeNative.OBJECT_TYPE));
+671:       // If the type includes anything related to a object type, don't assume
+672:       // anything about the locality of the value.
+673:       return subtype.isNoType();
+674:     }
+
+[12] com.google.javascript.jscomp.PureFunctionIdentifier#visitFunction  (lines 601-662)
+601:     private void visitFunction(NodeTraversal traversal,
+602:                                Node node,
+603:                                Node parent,
+604:                                Node gramp) {
+605:       Preconditions.checkArgument(!functionSideEffectMap.containsKey(node));
+606: 
+607:       FunctionInformation sideEffectInfo = new FunctionInformation(inExterns);
+608:       functionSideEffectMap.put(node, sideEffectInfo);
+609: 
+610:       if (inExterns) {
+611:         JSType jstype = node.getJSType();
+612:         boolean knownLocalResult = false;
+613:         if (jstype != null && jstype.isFunctionType()) {
+614:           FunctionType functionType = (FunctionType) jstype;
+615:           JSType jstypeReturn = functionType.getReturnType();
+616:           if (isLocalValueType(jstypeReturn, true)) {
+617:             knownLocalResult = true;
+618:           }
+619:         }
+620:         if (!knownLocalResult) {
+621:           sideEffectInfo.setTaintsReturn();
+622:         }
+623:       }
+624: 
+625:       JSDocInfo info = getJSDocInfoForFunction(node, parent, gramp);
+626:       if (info != null) {
+627:         boolean hasSpecificSideEffects = false;
+628:         if (hasSideEffectsThisAnnotation(info)) {
+629:           if (inExterns) {
+630:             hasSpecificSideEffects = true;
+631:             sideEffectInfo.setTaintsThis();
+632:           } else {
+633:             traversal.report(node, INVALID_MODIFIES_ANNOTATION);
+634:           }
+635:         }
+636: 
+637:         if (hasSideEffectsArgumentsAnnotation(info)) {
+638:           if (inExterns) {
+639:             hasSpecificSideEffects = true;
+640:             sideEffectInfo.setTaintsArguments();
+641:           } else {
+642:             traversal.report(node, INVALID_MODIFIES_ANNOTATION);
+643:           }
+644:         }
+645: 
+646:         if (!hasSpecificSideEffects) {
+647:           if (hasNoSideEffectsAnnotation(info)) {
+648:             if (inExterns) {
+649:               sideEffectInfo.setIsPure();
+650:             } else {
+651:               traversal.report(node, INVALID_NO_SIDE_EFFECT_ANNOTATION);
+652:             }
+653:           } else if (inExterns) {
+654:             sideEffectInfo.setTaintsGlobalState();
+655:           }
+656:         }
+657:       } else {
+658:         if (inExterns) {
+659:           sideEffectInfo.setTaintsGlobalState();
+660:         }
+661:       }
+662:     }
+
+[13] com.google.javascript.jscomp.parsing.JsDocInfoParser#parseModifiesTag  (lines 928-967)
+928:   private JsDocToken parseModifiesTag(JsDocToken token) {
+929:     if (token == JsDocToken.LC) {
+930:       Set<String> modifies = new HashSet<String>();
+931:       while (true) {
+932:         if (match(JsDocToken.STRING)) {
+933:           String name = stream.getString();
+934:           if (!modifiesAnnotationKeywords.contains(name)
+935:               && !jsdocBuilder.hasParameter(name)) {
+936:               parser.addWarning("msg.jsdoc.modifies.unknown", name,
+937:                   stream.getLineno(), stream.getCharno());
+938:           }
+939: 
+940:           modifies.add(stream.getString());
+941:           token = next();
+942:         } else {
+943:           parser.addWarning("msg.jsdoc.modifies",
+944:               stream.getLineno(), stream.getCharno());
+945:           return token;
+946:         }
+947: 
+948:         if (match(JsDocToken.PIPE)) {
+949:           token = next();
+950:         } else {
+951:           break;
+952:         }
+953:       }
+954: 
+955:       if (!match(JsDocToken.RC)) {
+956:         parser.addWarning("msg.jsdoc.modifies",
+957:             stream.getLineno(), stream.getCharno());
+958:       } else {
+959:         token = next();
+960:         if (!jsdocBuilder.recordModifies(modifies)) {
+961:           parser.addWarning("msg.jsdoc.modifies.duplicate",
+962:               stream.getLineno(), stream.getCharno());
+963:         }
+964:       }
+965:     }
+966:     return token;
+967:   }
+
+[14] com.google.javascript.jscomp.PureFunctionIdentifier#markPureFunctionCalls  (lines 307-365)
+307:   private void markPureFunctionCalls() {
+308:     for (Node callNode : allFunctionCalls) {
+309:       Node name = callNode.getFirstChild();
+310:       Collection<Definition> defs =
+311:           getCallableDefinitions(definitionProvider, name);
+312:       // Default to side effects, non-local results
+313:       Node.SideEffectFlags flags = new Node.SideEffectFlags();
+314:       if (defs == null) {
+315:         flags.setMutatesGlobalState();
+316:         flags.setThrows();
+317:         flags.setReturnsTainted();
+318:       } else {
+319:         flags.clearAllFlags();
+320:         for (Definition def : defs) {
+321:           FunctionInformation functionInfo =
+322:               functionSideEffectMap.get(def.getRValue());
+323:           Preconditions.checkNotNull(functionInfo);
+324:           // TODO(johnlenz): set the arguments separately from the
+325:           // global state flag.
+326:           if (functionInfo.mutatesGlobalState()) {
+327:             flags.setMutatesGlobalState();
+328:           }
+329: 
+330:           if (functionInfo.functionThrows) {
+331:             flags.setThrows();
+332:           }
+333: 
+334:           if (!NodeUtil.isNew(callNode)) {
+335:             if (functionInfo.taintsThis) {
+336:               flags.setMutatesThis();
+337:             }
+338:           }
+339: 
+340:           if (functionInfo.taintsReturn) {
+341:             flags.setReturnsTainted();
+342:           }
+343: 
+344:           if (flags.areAllFlagsSet()) {
+345:             break;
+346:           }
+347:         }
+348:       }
+349: 
+350:       // Handle special cases (Math, RegEx)
+351:       if (NodeUtil.isCall(callNode)) {
+352:         Preconditions.checkState(compiler != null);
+353:         if (!NodeUtil.functionCallHasSideEffects(callNode, compiler)) {
+354:           flags.clearSideEffectFlags();
+355:         }
+356:       } else if (NodeUtil.isNew(callNode)) {
+357:         // Handle known cases now (Object, Date, RegExp, etc)
+358:         if (!NodeUtil.constructorCallHasSideEffects(callNode)) {
+359:           flags.clearSideEffectFlags();
+360:         }
+361:       }
+362: 
+363:       callNode.setSideEffectFlags(flags.valueOf());
+364:     }
+365:   }
+
+[15] com.google.javascript.jscomp.PureFunctionIdentifier#setTaintsThis  (lines 954-957)
+954:     void setTaintsThis() {
+955:       taintsThis = true;
+956:       checkInvariant();
+957:     }
+
+[16] com.google.javascript.jscomp.PureFunctionIdentifier#visitAssignmentOrUnaryOperator  (lines 526-577)
+526:     private void visitAssignmentOrUnaryOperator(
+527:         FunctionInformation sideEffectInfo,
+528:         Scope scope, Node op, Node lhs, Node rhs) {
+529:       if (NodeUtil.isName(lhs)) {
+530:         Var var = scope.getVar(lhs.getString());
+531:         if (var == null || var.scope != scope) {
+532:           sideEffectInfo.setTaintsGlobalState();
+533:         } else {
+534:           // Assignment to local, if the value isn't a safe local value,
+535:           // a literal or new object creation, add it to the local blacklist.
+536:           // parameter values depend on the caller.
+537: 
+538:           // Note: other ops result in the name or prop being assigned a local
+539:           // value (x++ results in a number, for instance)
+540:           Preconditions.checkState(
+541:               NodeUtil.isAssignmentOp(op)
+542:               || isIncDec(op) || op.getType() == Token.DELPROP);
+543:           if (rhs != null
+544:               && NodeUtil.isAssign(op)
+545:               && !NodeUtil.evaluatesToLocalValue(rhs)) {
+546:             sideEffectInfo.blacklistLocal(var);
+547:           }
+548:         }
+549:       } else if (NodeUtil.isGet(lhs)) {
+550:         if (NodeUtil.isThis(lhs.getFirstChild())) {
+551:           sideEffectInfo.setTaintsThis();
+552:         } else {
+553:           Var var = null;
+554:           Node objectNode = lhs.getFirstChild();
+555:           if (NodeUtil.isName(objectNode)) {
+556:             var = scope.getVar(objectNode.getString());
+557:           }
+558:           if (var == null || var.scope != scope) {
+559:             sideEffectInfo.setTaintsUnknown();
+560:           } else {
+561:             // Maybe a local object modification.  We won't know for sure until
+562:             // we exit the scope and can validate the value of the local.
+563:             //
+564:             sideEffectInfo.addTaintedLocalObject(var);
+565:           }
+566:         }
+567:       } else {
+568:         // TODO(johnlenz): track down what is inserting NULL on the lhs
+569:         // of an assign.
+570: 
+571:         // The only valid lhs expressions are NAME, GETELEM, or GETPROP.
+572:         // throw new IllegalStateException(
+573:         //     "Unexpected lhs expression:" + lhs.toStringTree()
+574:         //    + ", parent: " + op.toStringTree() );
+575:         sideEffectInfo.setTaintsUnknown();
+576:       }
+577:     }
+
+[17] com.google.javascript.jscomp.NodeUtil#constructorCallHasSideEffects  (lines 684-702)
+684:   static boolean constructorCallHasSideEffects(
+685:       Node callNode, AbstractCompiler compiler) {
+686:     if (callNode.getType() != Token.NEW) {
+687:       throw new IllegalStateException(
+688:           "Expected NEW node, got " + Token.name(callNode.getType()));
+689:     }
+690: 
+691:     if (callNode.isNoSideEffectsCall()) {
+692:       return false;
+693:     }
+694: 
+695:     Node nameNode = callNode.getFirstChild();
+696:     if (nameNode.getType() == Token.NAME &&
+697:         CONSTRUCTORS_WITHOUT_SIDE_EFFECTS.contains(nameNode.getString())) {
+698:       return false;
+699:     }
+700: 
+701:     return true;
+702:   }
+
+[18] com.google.javascript.jscomp.PureFunctionIdentifier#getJSDocInfoForFunction  (lines 686-698)
+686:     private JSDocInfo getJSDocInfoForFunction(
+687:         Node node, Node parent, Node gramp) {
+688:       JSDocInfo info = node.getJSDocInfo();
+689:       if (info != null) {
+690:         return info;
+691:       } else if (NodeUtil.isName(parent)) {
+692:         return gramp.hasOneChild() ? gramp.getJSDocInfo() : null;
+693:       } else if (NodeUtil.isAssign(parent)) {
+694:         return parent.getJSDocInfo();
+695:       } else {
+696:         return null;
+697:       }
+698:     }
+
+[19] com.google.javascript.jscomp.NodeUtil#evaluatesToLocalValue  (lines 2424-2489)
+2424:   static boolean evaluatesToLocalValue(Node value, Predicate<Node> locals) {
+2425:     switch (value.getType()) {
+2426:       case Token.ASSIGN:
+2427:         // A result that is aliased by a non-local name, is the effectively the
+2428:         // same as returning a non-local name, but this doesn't matter if the
+2429:         // value is immutable.
+2430:         return NodeUtil.isImmutableValue(value.getLastChild())
+2431:             || (locals.apply(value)
+2432:                 && evaluatesToLocalValue(value.getLastChild(), locals));
+2433:       case Token.COMMA:
+2434:         return evaluatesToLocalValue(value.getLastChild(), locals);
+2435:       case Token.AND:
+2436:       case Token.OR:
+2437:         return evaluatesToLocalValue(value.getFirstChild(), locals)
+2438:            && evaluatesToLocalValue(value.getLastChild(), locals);
+2439:       case Token.HOOK:
+2440:         return evaluatesToLocalValue(value.getFirstChild().getNext(), locals)
+2441:            && evaluatesToLocalValue(value.getLastChild(), locals);
+2442:       case Token.INC:
+2443:       case Token.DEC:
+2444:         if (value.getBooleanProp(Node.INCRDECR_PROP)) {
+2445:           return evaluatesToLocalValue(value.getFirstChild(), locals);
+2446:         } else {
+2447:           return true;
+2448:         }
+2449:       case Token.THIS:
+2450:         return locals.apply(value);
+2451:       case Token.NAME:
+2452:         return isImmutableValue(value) || locals.apply(value);
+2453:       case Token.GETELEM:
+2454:       case Token.GETPROP:
+2455:         // There is no information about the locality of object properties.
+2456:         return locals.apply(value);
+2457:       case Token.CALL:
+2458:         return callHasLocalResult(value)
+2459:             || isToStringMethodCall(value)
+2460:             || locals.apply(value);
+2461:       case Token.NEW:
+2462:         // TODO(nicksantos): This needs to be changed so that it
+2463:         // returns true iff we're sure the value was never aliased from inside
+2464:         // the constructor (similar to callHasLocalResult)
+2465:         return true;
+2466:       case Token.FUNCTION:
+2467:       case Token.REGEXP:
+2468:       case Token.ARRAYLIT:
+2469:       case Token.OBJECTLIT:
+2470:         // Literals objects with non-literal children are allowed.
+2471:         return true;
+2472:       case Token.IN:
+2473:         // TODO(johnlenz): should IN operator be included in #isSimpleOperator?
+2474:         return true;
+2475:       default:
+2476:         // Other op force a local value:
+2477:         //  x = '' + g (x is now an local string)
+2478:         //  x -= g (x is now an local number)
+2479:         if (isAssignmentOp(value)
+2480:             || isSimpleOperator(value)
+2481:             || isImmutableValue(value)) {
+2482:           return true;
+2483:         }
+2484: 
+2485:         throw new IllegalStateException(
+2486:             "Unexpected expression node" + value +
+2487:             "\n parent:" + value.getParent());
+2488:     }
+2489:   }
+
+[20] com.google.javascript.jscomp.PureFunctionIdentifier#blacklistLocal  (lines 913-915)
+913:     public void blacklistLocal(Var var) {
+914:       blacklisted.add(var);
+915:     }
+
+[21] com.google.javascript.jscomp.PureFunctionIdentifier#visitCall  (lines 582-596)
+582:     private void visitCall(FunctionInformation sideEffectInfo, Node node) {
+583:       // Handle special cases (Math, RegEx)
+584:       if (NodeUtil.isCall(node)
+585:           && !NodeUtil.functionCallHasSideEffects(node, compiler)) {
+586:         return;
+587:       }
+588: 
+589:       // Handle known cases now (Object, Date, RegExp, etc)
+590:       if (NodeUtil.isNew(node)
+591:           && !NodeUtil.constructorCallHasSideEffects(node)) {
+592:         return;
+593:       }
+594: 
+595:       sideEffectInfo.appendCall(node);
+596:     }
+
+[22] com.google.javascript.jscomp.PureFunctionIdentifier#traverseEdge  (lines 777-835)
+777:     public boolean traverseEdge(FunctionInformation callee,
+778:                                 Node callSite,
+779:                                 FunctionInformation caller) {
+780:       Preconditions.checkArgument(callSite.getType() == Token.CALL ||
+781:                                   callSite.getType() == Token.NEW);
+782: 
+783:       boolean changed = false;
+784:       if (!caller.mutatesGlobalState() && callee.mutatesGlobalState()) {
+785:         caller.setTaintsGlobalState();
+786:         changed = true;
+787:       }
+788: 
+789:       if (!caller.functionThrows() && callee.functionThrows()) {
+790:         caller.setFunctionThrows();
+791:         changed = true;
+792:       }
+793: 
+794:       if (callee.mutatesThis()) {
+795:         // Side effects only propagate via regular calls.
+796:         // Calling a constructor that modifies "this" has no side effects.
+797:         if (callSite.getType() != Token.NEW) {
+798:           Node objectNode = getCallThisObject(callSite);
+799:           if (objectNode != null && NodeUtil.isName(objectNode)
+800:               && !isCallOrApply(callSite)) {
+801:             // Exclude ".call" and ".apply" as the value may still be may be
+802:             // null or undefined. We don't need to worry about this with a
+803:             // direct method call because null and undefined don't have any
+804:             // properties.
+805:             String name = objectNode.getString();
+806: 
+807:             // TODO(nicksantos): Turn this back on when locals-tracking
+808:             // is fixed. See testLocalizedSideEffects11.
+809:             //if (!caller.knownLocals.contains(name)) {
+810:               if (!caller.mutatesGlobalState()) {
+811:                 caller.setTaintsGlobalState();
+812:                 changed = true;
+813:               }
+814:             //}
+815:           } else if (objectNode != null && NodeUtil.isThis(objectNode)) {
+816:             if (!caller.mutatesThis()) {
+817:               caller.setTaintsThis();
+818:               changed = true;
+819:             }
+820:           } else if (objectNode != null
+821:               && NodeUtil.evaluatesToLocalValue(objectNode)
+822:               && !isCallOrApply(callSite)) {
+823:             // Modifying 'this' on a known local object doesn't change any
+824:             // significant state.
+825:             // TODO(johnlenz): We can improve this by including literal values
+826:             // that we know for sure are not null.
+827:           } else if (!caller.mutatesGlobalState()) {
+828:             caller.setTaintsGlobalState();
+829:             changed = true;
+830:           }
+831:         }
+832:       }
+833: 
+834:       return changed;
+835:     }
+
+[23] com.google.javascript.rhino.Node#setMutatesThis  (lines 2165-2167)
+2165:     public void setMutatesThis() {
+2166:       removeFlag(Node.FLAG_THIS_UNMODIFIED);
+2167:     }
+
+[24] com.google.javascript.jscomp.PureFunctionIdentifier#getCallThisObject  (lines 847-861)
+847:   private static Node getCallThisObject(Node callSite) {
+848:     Node callTarget = callSite.getFirstChild();
+849:     if (!NodeUtil.isGet(callTarget)) {
+850: 
+851:       // "this" is not specified explicitly; call modifies global "this".
+852:       return null;
+853:     }
+854: 
+855:     String propString = callTarget.getLastChild().getString();
+856:     if (propString.equals("call") || propString.equals("apply")) {
+857:       return callTarget.getNext();
+858:     } else {
+859:       return callTarget.getFirstChild();
+860:     }
+861:   }
+
+[25] com.google.javascript.rhino.JSDocInfoBuilder#recordModifies  (lines 352-360)
+352:   public boolean recordModifies(Set<String> modifies) {
+353:     if (!hasAnySingletonSideEffectTags()
+354:         && currentInfo.setModifies(modifies)) {
+355:       populated = true;
+356:       return true;
+357:     } else {
+358:       return false;
+359:     }
+360:   }
+
+[26] com.google.javascript.jscomp.NodeUtil#callHasLocalResult  (lines 795-798)
+795:   static boolean callHasLocalResult(Node n) {
+796:     Preconditions.checkState(n.getType() == Token.CALL);
+797:     return (n.getSideEffectFlags() & Node.FLAG_LOCAL_RESULTS) > 0;
+798:   }
+
+[27] com.google.javascript.jscomp.PureFunctionIdentifier#exitScope  (lines 474-513)
+474:     @Override
+475:     public void exitScope(NodeTraversal t) {
+476:       if (t.inGlobalScope()) {
+477:         return;
+478:       }
+479: 
+480:       // Handle deferred local variable modifications:
+481:       //
+482:       FunctionInformation sideEffectInfo =
+483:         functionSideEffectMap.get(t.getScopeRoot());
+484:       if (sideEffectInfo.mutatesGlobalState()){
+485:         sideEffectInfo.resetLocalVars();
+486:         return;
+487:       }
+488: 
+489:       for (Iterator<Var> i = t.getScope().getVars(); i.hasNext();) {
+490:         Var v = i.next();
+491:         boolean localVar = false;
+492:         // Parameters and catch values come can from other scopes.
+493:         if (v.getParentNode().getType() == Token.VAR) {
+494:           // TODO(johnlenz): create a useful parameter list
+495:           sideEffectInfo.knownLocals.add(v.getName());
+496:           localVar = true;
+497:         }
+498: 
+499:         // Take care of locals that might have been tainted.
+500:         if (!localVar || sideEffectInfo.blacklisted.contains(v)) {
+501:           if (sideEffectInfo.taintedLocals.contains(v)) {
+502:             // If the function has global side-effects
+503:             // don't bother with the local side-effects.
+504:             sideEffectInfo.setTaintsUnknown();
+505:             sideEffectInfo.resetLocalVars();
+506:             break;
+507:           }
+508:         }
+509:       }
+510: 
+511:       sideEffectInfo.taintedLocals = null;
+512:       sideEffectInfo.blacklisted = null;
+513:     }
+
+[28] com.google.javascript.rhino.Node#removeFlag  (lines 2177-2179)
+2177:     private void removeFlag(int flag) {
+2178:       value &= ~flag;
+2179:     }
+
+[29] com.google.javascript.rhino.Node#setReturnsTainted  (lines 2173-2175)
+2173:     public void setReturnsTainted() {
+2174:       removeFlag(Node.FLAG_LOCAL_RESULTS);
+2175:     }
+
+[30] com.google.javascript.jscomp.FunctionNames#getFunctionName  (lines 83-109)
+83:   public String getFunctionName(Node f) {
+84:     FunctionRecord record = functionMap.get(f);
+85:     if (record == null) {
+86:       // Function node was added during compilation and has no name.
+87:       return null;
+88:     }
+89: 
+90:     String str = record.name;
+91:     if (str.isEmpty()) {
+92:       str = "<anonymous>";
+93:     }
+94: 
+95:     Node parent = record.parent;
+96:     if (parent != null) {
+97:       str = getFunctionName(parent) + "::" + str;
+98:     }
+99: 
+100:     // this.foo -> foo
+101:     str = str.replaceAll("::this\\.", ".");
+102:     // foo.prototype.bar -> foo.bar
+103:     // AnonymousFunctionNamingCallback already replaces ".prototype."
+104:     // with "..", just remove the extra dot.
+105:     str = str.replaceAll("\\.\\.", ".");
+106:     // remove toplevel anonymous blocks, if they exists.
+107:     str = str.replaceFirst("^(<anonymous>::)*", "");
+108:     return str;
+109:   }
+
+[31] com.google.javascript.jscomp.PureFunctionIdentifier#addTaintedLocalObject  (lines 900-902)
+900:     void addTaintedLocalObject(Var var) {
+901:       taintedLocals.add(var);
+902:     }
+
+[32] com.google.javascript.rhino.Token#name  (lines 268-440)
+268:   public static String name(int token)
+269:     {
+270:         if (!printNames) {
+271:             return String.valueOf(token);
+272:         }
+273:         switch (token) {
+274:           case ERROR:           return "ERROR";
+275:           case EOF:             return "EOF";
+276:           case EOL:             return "EOL";
+277:           case ENTERWITH:       return "ENTERWITH";
+278:           case LEAVEWITH:       return "LEAVEWITH";
+279:           case RETURN:          return "RETURN";
+280:           case GOTO:            return "GOTO";
+281:           case IFEQ:            return "IFEQ";
+282:           case IFNE:            return "IFNE";
+283:           case SETNAME:         return "SETNAME";
+284:           case BITOR:           return "BITOR";
+285:           case BITXOR:          return "BITXOR";
+286:           case BITAND:          return "BITAND";
+287:           case EQ:              return "EQ";
+288:           case NE:              return "NE";
+289:           case LT:              return "LT";
+290:           case LE:              return "LE";
+291:           case GT:              return "GT";
+292:           case GE:              return "GE";
+293:           case LSH:             return "LSH";
+294:           case RSH:             return "RSH";
+295:           case URSH:            return "URSH";
+296:           case ADD:             return "ADD";
+297:           case SUB:             return "SUB";
+298:           case MUL:             return "MUL";
+299:           case DIV:             return "DIV";
+300:           case MOD:             return "MOD";
+301:           case NOT:             return "NOT";
+302:           case BITNOT:          return "BITNOT";
+303:           case POS:             return "POS";
+304:           case NEG:             return "NEG";
+305:           case NEW:             return "NEW";
+306:           case DELPROP:         return "DELPROP";
+307:           case TYPEOF:          return "TYPEOF";
+308:           case GETPROP:         return "GETPROP";
+309:           case SETPROP:         return "SETPROP";
+310:           case GETELEM:         return "GETELEM";
+311:           case SETELEM:         return "SETELEM";
+312:           case CALL:            return "CALL";
+313:           case NAME:            return "NAME";
+314:           case LABEL_NAME:      return "LABEL_NAME";
+315:           case NUMBER:          return "NUMBER";
+316:           case STRING:          return "STRING";
+317:           case NULL:            return "NULL";
+318:           case THIS:            return "THIS";
+319:           case FALSE:           return "FALSE";
+320:           case TRUE:            return "TRUE";
+321:           case SHEQ:            return "SHEQ";
+322:           case SHNE:            return "SHNE";
+323:           case REGEXP:          return "REGEXP";
+324:           case BINDNAME:        return "BINDNAME";
+325:           case THROW:           return "THROW";
+326:           case RETHROW:         return "RETHROW";
+327:           case IN:              return "IN";
+328:           case INSTANCEOF:      return "INSTANCEOF";
+329:           case LOCAL_LOAD:      return "LOCAL_LOAD";
+330:           case GETVAR:          return "GETVAR";
+331:           case SETVAR:          return "SETVAR";
+332:           case CATCH_SCOPE:     return "CATCH_SCOPE";
+333:           case ENUM_INIT_KEYS:  return "ENUM_INIT_KEYS";
+334:           case ENUM_INIT_VALUES:  return "ENUM_INIT_VALUES";
+335:           case ENUM_NEXT:       return "ENUM_NEXT";
+336:           case ENUM_ID:         return "ENUM_ID";
+337:           case THISFN:          return "THISFN";
+338:           case RETURN_RESULT:   return "RETURN_RESULT";
+339:           case ARRAYLIT:        return "ARRAYLIT";
+340:           case OBJECTLIT:       return "OBJECTLIT";
+341:           case GET_REF:         return "GET_REF";
+342:           case SET_REF:         return "SET_REF";
+343:           case DEL_REF:         return "DEL_REF";
+344:           case REF_CALL:        return "REF_CALL";
+345:           case REF_SPECIAL:     return "REF_SPECIAL";
+346:           case DEFAULTNAMESPACE:return "DEFAULTNAMESPACE";
+347:           case ESCXMLTEXT:      return "ESCXMLTEXT";
+348:           case ESCXMLATTR:      return "ESCXMLATTR";
+349:           case REF_MEMBER:      return "REF_MEMBER";
+350:           case REF_NS_MEMBER:   return "REF_NS_MEMBER";
+351:           case REF_NAME:        return "REF_NAME";
+352:           case REF_NS_NAME:     return "REF_NS_NAME";
+353:           case TRY:             return "TRY";
+354:           case SEMI:            return "SEMI";
+355:           case LB:              return "LB";
+356:           case RB:              return "RB";
+357:           case LC:              return "LC";
+358:           case RC:              return "RC";
+359:           case LP:              return "LP";
+360:           case RP:              return "RP";
+361:           case COMMA:           return "COMMA";
+362:           case ASSIGN:          return "ASSIGN";
+363:           case ASSIGN_BITOR:    return "ASSIGN_BITOR";
+364:           case ASSIGN_BITXOR:   return "ASSIGN_BITXOR";
+365:           case ASSIGN_BITAND:   return "ASSIGN_BITAND";
+366:           case ASSIGN_LSH:      return "ASSIGN_LSH";
+367:           case ASSIGN_RSH:      return "ASSIGN_RSH";
+368:           case ASSIGN_URSH:     return "ASSIGN_URSH";
+369:           case ASSIGN_ADD:      return "ASSIGN_ADD";
+370:           case ASSIGN_SUB:      return "ASSIGN_SUB";
+371:           case ASSIGN_MUL:      return "ASSIGN_MUL";
+372:           case ASSIGN_DIV:      return "ASSIGN_DIV";
+373:           case ASSIGN_MOD:      return "ASSIGN_MOD";
+374:           case HOOK:            return "HOOK";
+375:           case COLON:           return "COLON";
+376:           case OR:              return "OR";
+377:           case AND:             return "AND";
+378:           case INC:             return "INC";
+379:           case DEC:             return "DEC";
+380:           case DOT:             return "DOT";
+381:           case FUNCTION:        return "FUNCTION";
+382:           case EXPORT:          return "EXPORT";
+383:           case IMPORT:          return "IMPORT";
+384:           case IF:              return "IF";
+385:           case ELSE:            return "ELSE";
+386:           case SWITCH:          return "SWITCH";
+387:           case CASE:            return "CASE";
+388:           case DEFAULT:         return "DEFAULT";
+389:           case WHILE:           return "WHILE";
+390:           case DO:              return "DO";
+391:           case FOR:             return "FOR";
+392:           case BREAK:           return "BREAK";
+393:           case CONTINUE:        return "CONTINUE";
+394:           case VAR:             return "VAR";
+395:           case WITH:            return "WITH";
+396:           case CATCH:           return "CATCH";
+397:           case FINALLY:         return "FINALLY";
+398:           case RESERVED:        return "RESERVED";
+399:           case EMPTY:           return "EMPTY";
+400:           case BLOCK:           return "BLOCK";
+401:           case LABEL:           return "LABEL";
+402:           case TARGET:          return "TARGET";
+403:           case LOOP:            return "LOOP";
+404:           case EXPR_VOID:       return "EXPR_VOID";
+405:           case EXPR_RESULT:     return "EXPR_RESULT";
+406:           case JSR:             return "JSR";
+407:           case SCRIPT:          return "SCRIPT";
+408:           case TYPEOFNAME:      return "TYPEOFNAME";
+409:           case USE_STACK:       return "USE_STACK";
+410:           case SETPROP_OP:      return "SETPROP_OP";
+411:           case SETELEM_OP:      return "SETELEM_OP";
+412:           case LOCAL_BLOCK:     return "LOCAL_BLOCK";
+413:           case SET_REF_OP:      return "SET_REF_OP";
+414:           case DOTDOT:          return "DOTDOT";
+415:           case COLONCOLON:      return "COLONCOLON";
+416:           case XML:             return "XML";
+417:           case DOTQUERY:        return "DOTQUERY";
+418:           case XMLATTR:         return "XMLATTR";
+419:           case XMLEND:          return "XMLEND";
+420:           case TO_OBJECT:       return "TO_OBJECT";
+421:           case TO_DOUBLE:       return "TO_DOUBLE";
+422:           case GET:             return "GET";
+423:           case SET:             return "SET";
+424:           case CONST:           return "CONST";
+425:           case SETCONST:        return "SETCONST";
+426:           case DEBUGGER:        return "DEBUGGER";
+427:           case ANNOTATION:      return "ANNOTATION";
+428:           case PIPE:            return "PIPE";
+429:           case STAR:            return "STAR";
+430:           case EOC:             return "EOC";
+431:           case QMARK:           return "QMARK";
+432:           case ELLIPSIS:        return "ELLIPSIS";
+433:           case BANG:            return "BANG";
+434:           case VOID:            return "VOID";
+435:           case EQUALS:          return "EQUALS";
+436:         }
+437: 
+438:         // Token without name
+439:         throw new IllegalStateException(String.valueOf(token));
+440:     }
+
+[33] com.google.javascript.jscomp.NodeUtil#constructorCallHasSideEffects  (lines 680-682)
+680:   static boolean constructorCallHasSideEffects(Node callNode) {
+681:     return constructorCallHasSideEffects(callNode, null);
+682:   }
+
+[34] com.google.javascript.jscomp.PureFunctionIdentifier#toString  (lines 1040-1068)
+1040:     @Override
+1041:     public String toString() {
+1042:       List<String> status = Lists.newArrayList();
+1043:       if (extern) {
+1044:         status.add("extern");
+1045:       }
+1046: 
+1047:       if (pureFunction) {
+1048:         status.add("pure");
+1049:       }
+1050: 
+1051:       if (taintsThis) {
+1052:         status.add("this");
+1053:       }
+1054: 
+1055:       if (taintsGlobalState) {
+1056:         status.add("global");
+1057:       }
+1058: 
+1059:       if (functionThrows) {
+1060:         status.add("throw");
+1061:       }
+1062: 
+1063:       if (taintsUnknown) {
+1064:         status.add("complex");
+1065:       }
+1066: 
+1067:       return "Side effects: " + status.toString();
+1068:     }
+
+[35] com.google.javascript.rhino.Node#clearAllFlags  (lines 2138-2140)
+2138:     public void clearAllFlags() {
+2139:       value = Node.NO_SIDE_EFFECTS | Node.FLAG_LOCAL_RESULTS;
+2140:     }
+
+[36] com.google.javascript.jscomp.PureFunctionIdentifier#visit  (lines 396-467)
+396:     @Override
+397:     public void visit(NodeTraversal traversal, Node node, Node parent) {
+398: 
+399:       if (inExterns) {
+400:         return;
+401:       }
+402: 
+403:       if (!NodeUtil.nodeTypeMayHaveSideEffects(node)
+404:           && node.getType() != Token.RETURN) {
+405:         return;
+406:       }
+407: 
+408:       if (NodeUtil.isCall(node) || NodeUtil.isNew(node)) {
+409:         allFunctionCalls.add(node);
+410:       }
+411: 
+412:       Node enclosingFunction = traversal.getEnclosingFunction();
+413:       if (enclosingFunction != null) {
+414:         FunctionInformation sideEffectInfo =
+415:             functionSideEffectMap.get(enclosingFunction);
+416:         Preconditions.checkNotNull(sideEffectInfo);
+417: 
+418:         if (NodeUtil.isAssignmentOp(node)) {
+419:           visitAssignmentOrUnaryOperator(
+420:               sideEffectInfo, traversal.getScope(),
+421:               node, node.getFirstChild(), node.getLastChild());
+422:         } else {
+423:           switch(node.getType()) {
+424:             case Token.CALL:
+425:             case Token.NEW:
+426:               visitCall(sideEffectInfo, node);
+427:               break;
+428:             case Token.DELPROP:
+429:             case Token.DEC:
+430:             case Token.INC:
+431:               visitAssignmentOrUnaryOperator(
+432:                   sideEffectInfo, traversal.getScope(),
+433:                   node, node.getFirstChild(), null);
+434:               break;
+435:             case Token.NAME:
+436:               // Variable definition are not side effects.
+437:               // Just check that the name appears in the context of a
+438:               // variable declaration.
+439:               Preconditions.checkArgument(
+440:                   NodeUtil.isVarDeclaration(node));
+441:               Node value = node.getFirstChild();
+442:               // Assignment to local, if the value isn't a safe local value,
+443:               // new object creation or literal or known primitive result
+444:               // value, add it to the local blacklist.
+445:               if (value != null && !NodeUtil.evaluatesToLocalValue(value)) {
+446:                 Scope scope = traversal.getScope();
+447:                 Var var = scope.getVar(node.getString());
+448:                 sideEffectInfo.blacklistLocal(var);
+449:               }
+450:               break;
+451:             case Token.THROW:
+452:               visitThrow(sideEffectInfo);
+453:               break;
+454:             case Token.RETURN:
+455:               if (node.hasChildren()
+456:                   && !NodeUtil.evaluatesToLocalValue(node.getFirstChild())) {
+457:                 sideEffectInfo.setTaintsReturn();
+458:               }
+459:               break;
+460:             default:
+461:               throw new IllegalArgumentException(
+462:                   "Unhandled side effect node type " +
+463:                   Token.name(node.getType()));
+464:           }
+465:         }
+466:       }
+467:     }
+
+[37] com.google.javascript.jscomp.PureFunctionIdentifier#setIsPure  (lines 938-941)
+938:     void setIsPure() {
+939:       pureFunction = true;
+940:       checkInvariant();
+941:     }
+
+[38] com.google.javascript.jscomp.parsing.JsDocInfoParser#parse  (lines 138-874)
+138:   boolean parse() {
+139:     int lineno;
+140:     int charno;
+141: 
+142:     // JSTypes are represented as Rhino AST nodes, and then resolved later.
+143:     JSTypeExpression type;
+144: 
+145:     state = State.SEARCHING_ANNOTATION;
+146:     skipEOLs();
+147: 
+148:     JsDocToken token = next();
+149: 
+150:     // Always record that we have a comment.
+151:     if (jsdocBuilder.shouldParseDocumentation()) {
+152:       ExtractionInfo blockInfo = extractBlockComment(token);
+153:       token = blockInfo.token;
+154:       if (!blockInfo.string.isEmpty()) {
+155:         jsdocBuilder.recordBlockDescription(blockInfo.string);
+156:       }
+157:     } else {
+158:       if (token != JsDocToken.ANNOTATION &&
+159:           token != JsDocToken.EOC) {
+160:         // Mark that there was a description, but don't bother marking
+161:         // what it was.
+162:         jsdocBuilder.recordBlockDescription("");
+163:       }
+164:     }
+165: 
+166:     // Parse the actual JsDoc.
+167:     retry: for (;;) {
+168:       switch (token) {
+169:         case ANNOTATION:
+170:           if (state == State.SEARCHING_ANNOTATION) {
+171:             state = State.SEARCHING_NEWLINE;
+172:             lineno = stream.getLineno();
+173:             charno = stream.getCharno();
+174: 
+175:             String annotationName = stream.getString();
+176:             Annotation annotation = annotationNames.get(annotationName);
+177:             if (annotation == null) {
+178:               parser.addWarning("msg.bad.jsdoc.tag", annotationName,
+179:                   stream.getLineno(), stream.getCharno());
+180:             } else {
+181:               // Mark the beginning of the annotation.
+182:               jsdocBuilder.markAnnotation(annotationName, lineno, charno);
+183: 
+184:               switch (annotation) {
+185:                 case AUTHOR:
+186:                   if (jsdocBuilder.shouldParseDocumentation()) {
+187:                     ExtractionInfo authorInfo = extractSingleLineBlock();
+188:                     String author = authorInfo.string;
+189: 
+190:                     if (author.length() == 0) {
+191:                       parser.addWarning("msg.jsdoc.authormissing",
+192:                           stream.getLineno(), stream.getCharno());
+193:                     } else {
+194:                       jsdocBuilder.addAuthor(author);
+195:                     }
+196:                     token = authorInfo.token;
+197:                   } else {
+198:                     token = eatTokensUntilEOL(token);
+199:                   }
+200:                   continue retry;
+201: 
+202:                 case CONSTANT:
+203:                   if (!jsdocBuilder.recordConstancy()) {
+204:                     parser.addWarning("msg.jsdoc.const",
+205:                         stream.getLineno(), stream.getCharno());
+206:                   }
+207:                   token = eatTokensUntilEOL();
+208:                   continue retry;
+209: 
+210:                 case CONSTRUCTOR:
+211:                   if (!jsdocBuilder.recordConstructor()) {
+212:                     if (jsdocBuilder.isInterfaceRecorded()) {
+213:                       parser.addWarning("msg.jsdoc.interface.constructor",
+214:                           stream.getLineno(), stream.getCharno());
+215:                     } else {
+216:                       parser.addWarning("msg.jsdoc.incompat.type",
+217:                           stream.getLineno(), stream.getCharno());
+218:                     }
+219:                   }
+220:                   token = eatTokensUntilEOL();
+221:                   continue retry;
+222: 
+223:                 case DEPRECATED:
+224:                   if (!jsdocBuilder.recordDeprecated()) {
+225:                     parser.addWarning("msg.jsdoc.deprecated",
+226:                         stream.getLineno(), stream.getCharno());
+227:                   }
+228: 
+229:                   // Find the reason/description, if any.
+230:                   ExtractionInfo reasonInfo =
+231:                       extractMultilineTextualBlock(token);
+232: 
+233:                   String reason = reasonInfo.string;
+234: 
+235:                   if (reason.length() > 0) {
+236:                     jsdocBuilder.recordDeprecationReason(reason);
+237:                   }
+238: 
+239:                   token = reasonInfo.token;
+240:                   continue retry;
+241: 
+242:                 case INTERFACE:
+243:                   if (!jsdocBuilder.recordInterface()) {
+244:                     if (jsdocBuilder.isConstructorRecorded()) {
+245:                       parser.addWarning("msg.jsdoc.interface.constructor",
+246:                           stream.getLineno(), stream.getCharno());
+247:                     } else {
+248:                       parser.addWarning("msg.jsdoc.incompat.type",
+249:                           stream.getLineno(), stream.getCharno());
+250:                     }
+251:                   }
+252:                   token = eatTokensUntilEOL();
+253:                   continue retry;
+254: 
+255:                 case DESC:
+256:                   if (jsdocBuilder.isDescriptionRecorded()) {
+257:                     parser.addWarning("msg.jsdoc.desc.extra",
+258:                         stream.getLineno(), stream.getCharno());
+259:                     token = eatTokensUntilEOL();
+260:                     continue retry;
+261:                   } else {
+262:                     ExtractionInfo descriptionInfo =
+263:                         extractMultilineTextualBlock(token);
+264: 
+265:                     String description = descriptionInfo.string;
+266: 
+267:                     jsdocBuilder.recordDescription(description);
+268:                     token = descriptionInfo.token;
+269:                     continue retry;
+270:                   }
+271: 
+272:                 case FILE_OVERVIEW:
+273:                   String fileOverview = "";
+274:                   if (jsdocBuilder.shouldParseDocumentation()) {
+275:                     ExtractionInfo fileOverviewInfo =
+276:                         extractMultilineTextualBlock(token,
+277:                             WhitespaceOption.TRIM);
+278: 
+279:                     fileOverview = fileOverviewInfo.string;
+280: 
+281:                     token = fileOverviewInfo.token;
+282:                   } else {
+283:                     token = eatTokensUntilEOL(token);
+284:                   }
+285: 
+286:                   if (!jsdocBuilder.recordFileOverview(fileOverview) ||
+287:                       fileOverviewJSDocInfo != null) {
+288:                     parser.addWarning("msg.jsdoc.fileoverview.extra",
+289:                         stream.getLineno(), stream.getCharno());
+290:                   }
+291:                   continue retry;
+292: 
+293:                 case LICENSE:
+294:                 case PRESERVE:
+295:                   ExtractionInfo preserveInfo =
+296:                       extractMultilineTextualBlock(token,
+297:                                                    WhitespaceOption.PRESERVE);
+298: 
+299:                   String preserve = preserveInfo.string;
+300: 
+301:                   if (preserve.length() > 0) {
+302:                     if (fileLevelJsDocBuilder != null) {
+303:                       fileLevelJsDocBuilder.append(preserve);
+304:                     }
+305:                   }
+306: 
+307:                   token = preserveInfo.token;
+308:                   continue retry;
+309: 
+310:                 case ENUM:
+311:                   token = next();
+312:                   lineno = stream.getLineno();
+313:                   charno = stream.getCharno();
+314: 
+315:                   type = null;
+316:                   if (token != JsDocToken.EOL && token != JsDocToken.EOC) {
+317:                     type = createJSTypeExpression(
+318:                         parseAndRecordTypeNode(token));
+319:                   }
+320: 
+321:                   if (type == null) {
+322:                     type = createJSTypeExpression(newStringNode("number"));
+323:                   }
+324:                   if (!jsdocBuilder.recordEnumParameterType(type)) {
+325:                     parser.addWarning("msg.jsdoc.incompat.type", lineno, charno);
+326:                   }
+327:                   token = eatTokensUntilEOL(token);
+328:                   continue retry;
+329: 
+330:                 case EXPORT:
+331:                   if (!jsdocBuilder.recordExport()) {
+332:                     parser.addWarning("msg.jsdoc.export",
+333:                         stream.getLineno(), stream.getCharno());
+334:                   }
+335:                   token = eatTokensUntilEOL();
+336:                   continue retry;
+337: 
+338:                 case EXTERNS:
+339:                   if (!jsdocBuilder.recordExterns()) {
+340:                     parser.addWarning("msg.jsdoc.externs",
+341:                         stream.getLineno(), stream.getCharno());
+342:                   }
+343:                   token = eatTokensUntilEOL();
+344:                   continue retry;
+345: 
+346:                 case JAVA_DISPATCH:
+347:                   if (!jsdocBuilder.recordJavaDispatch()) {
+348:                     parser.addWarning("msg.jsdoc.javadispatch",
+349:                         stream.getLineno(), stream.getCharno());
+350:                   }
+351:                   token = eatTokensUntilEOL();
+352:                   continue retry;
+353: 
+354:                 case EXTENDS:
+355:                 case IMPLEMENTS:
+356:                   skipEOLs();
+357:                   token = next();
+358:                   lineno = stream.getLineno();
+359:                   charno = stream.getCharno();
+360:                   boolean matchingRc = false;
+361: 
+362:                   if (token == JsDocToken.LC) {
+363:                     token = next();
+364:                     matchingRc = true;
+365:                   }
+366: 
+367:                   if (token == JsDocToken.STRING) {
+368:                     Node typeNode = parseAndRecordTypeNameNode(
+369:                         token, lineno, charno, matchingRc);
+370: 
+371:                     lineno = stream.getLineno();
+372:                     charno = stream.getCharno();
+373: 
+374:                     typeNode = wrapNode(Token.BANG, typeNode);
+375:                     if (typeNode != null && !matchingRc) {
+376:                       typeNode.putBooleanProp(Node.BRACELESS_TYPE, true);
+377:                     }
+378:                     type = createJSTypeExpression(typeNode);
+379: 
+380:                     if (annotation == Annotation.EXTENDS) {
+381:                       if (!jsdocBuilder.recordBaseType(type)) {
+382:                         parser.addWarning(
+383:                             "msg.jsdoc.incompat.type", lineno, charno);
+384:                       }
+385:                     } else {
+386:                       Preconditions.checkState(
+387:                           annotation == Annotation.IMPLEMENTS);
+388:                       if (!jsdocBuilder.recordImplementedInterface(type)) {
+389:                         parser.addWarning("msg.jsdoc.implements.duplicate",
+390:                             lineno, charno);
+391:                       }
+392:                     }
+393:                     token = next();
+394:                     if (matchingRc) {
+395:                       if (token != JsDocToken.RC) {
+396:                         parser.addWarning("msg.jsdoc.missing.rc",
+397:                             stream.getLineno(), stream.getCharno());
+398:                       }
+399:                     } else if (token != JsDocToken.EOL &&
+400:                         token != JsDocToken.EOF && token != JsDocToken.EOC) {
+401:                       parser.addWarning("msg.end.annotation.expected",
+402:                           stream.getLineno(), stream.getCharno());
+403:                     }
+404:                   } else {
+405:                     parser.addWarning("msg.no.type.name", lineno, charno);
+406:                   }
+407:                   token = eatTokensUntilEOL(token);
+408:                   continue retry;
+409: 
+410:                 case HIDDEN:
+411:                   if (!jsdocBuilder.recordHiddenness()) {
+412:                     parser.addWarning("msg.jsdoc.hidden",
+413:                         stream.getLineno(), stream.getCharno());
+414:                   }
+415:                   token = eatTokensUntilEOL();
+416:                   continue retry;
+417: 
+418:                 case LENDS:
+419:                   skipEOLs();
+420: 
+421:                   matchingRc = false;
+422:                   if (match(JsDocToken.LC)) {
+423:                     token = next();
+424:                     matchingRc = true;
+425:                   }
+426: 
+427:                   if (match(JsDocToken.STRING)) {
+428:                     token = next();
+429:                     if (!jsdocBuilder.recordLends(stream.getString())) {
+430:                       parser.addWarning("msg.jsdoc.lends.incompatible",
+431:                           stream.getLineno(), stream.getCharno());
+432:                     }
+433:                   } else {
+434:                     parser.addWarning("msg.jsdoc.lends.missing",
+435:                         stream.getLineno(), stream.getCharno());
+436:                   }
+437: 
+438:                   if (matchingRc && !match(JsDocToken.RC)) {
+439:                     parser.addWarning("msg.jsdoc.missing.rc",
+440:                         stream.getLineno(), stream.getCharno());
+441:                   }
+442:                   token = eatTokensUntilEOL();
+443:                   continue retry;
+444: 
+445:                 case MEANING:
+446:                   ExtractionInfo meaningInfo =
+447:                       extractMultilineTextualBlock(token);
+448:                   String meaning = meaningInfo.string;
+449:                   token = meaningInfo.token;
+450:                   if (!jsdocBuilder.recordMeaning(meaning)) {
+451:                     parser.addWarning("msg.jsdoc.meaning.extra",
+452:                         stream.getLineno(), stream.getCharno());
+453:                   }
+454:                   continue retry;
+455: 
+456:                 case NO_ALIAS:
+457:                   if (!jsdocBuilder.recordNoAlias()) {
+458:                     parser.addWarning("msg.jsdoc.noalias",
+459:                         stream.getLineno(), stream.getCharno());
+460:                   }
+461:                   token = eatTokensUntilEOL();
+462:                   continue retry;
+463: 
+464:                 case NO_COMPILE:
+465:                   if (!jsdocBuilder.recordNoCompile()) {
+466:                     parser.addWarning("msg.jsdoc.nocompile",
+467:                         stream.getLineno(), stream.getCharno());
+468:                   }
+469:                   token = eatTokensUntilEOL();
+470:                   continue retry;
+471: 
+472:                 case NO_TYPE_CHECK:
+473:                   if (!jsdocBuilder.recordNoTypeCheck()) {
+474:                     parser.addWarning("msg.jsdoc.nocheck",
+475:                         stream.getLineno(), stream.getCharno());
+476:                   }
+477:                   token = eatTokensUntilEOL();
+478:                   continue retry;
+479: 
+480:                 case NOT_IMPLEMENTED:
+481:                   token = eatTokensUntilEOL();
+482:                   continue retry;
+483: 
+484:                 case INHERIT_DOC:
+485:                 case OVERRIDE:
+486:                   if (!jsdocBuilder.recordOverride()) {
+487:                     parser.addWarning("msg.jsdoc.override",
+488:                         stream.getLineno(), stream.getCharno());
+489:                   }
+490:                   token = eatTokensUntilEOL();
+491:                   continue retry;
+492: 
+493:                 case THROWS:
+494:                   skipEOLs();
+495:                   token = next();
+496:                   lineno = stream.getLineno();
+497:                   charno = stream.getCharno();
+498:                   type = null;
+499: 
+500:                   if (token == JsDocToken.LC) {
+501:                     type = createJSTypeExpression(
+502:                         parseAndRecordTypeNode(token));
+503: 
+504:                     if (type == null) {
+505:                       // parsing error reported during recursive descent
+506:                       // recovering parsing
+507:                       token = eatTokensUntilEOL();
+508:                       continue retry;
+509:                     }
+510:                   }
+511: 
+512:                   // *Update* the token to that after the type annotation.
+513:                   token = current();
+514: 
+515:                   // Save the throw type.
+516:                   jsdocBuilder.recordThrowType(type);
+517: 
+518:                   // Find the throw's description (if applicable).
+519:                   if (jsdocBuilder.shouldParseDocumentation()) {
+520:                     ExtractionInfo descriptionInfo =
+521:                         extractMultilineTextualBlock(token);
+522: 
+523:                     String description = descriptionInfo.string;
+524: 
+525:                     if (description.length() > 0) {
+526:                       jsdocBuilder.recordThrowDescription(type, description);
+527:                     }
+528: 
+529:                     token = descriptionInfo.token;
+530:                   } else {
+531:                     token = eatTokensUntilEOL(token);
+532:                   }
+533:                   continue retry;
+534: 
+535:                 case PARAM:
+536:                   skipEOLs();
+537:                   token = next();
+538:                   lineno = stream.getLineno();
+539:                   charno = stream.getCharno();
+540:                   type = null;
+541: 
+542:                   if (token == JsDocToken.LC) {
+543:                     type = createJSTypeExpression(
+544:                         parseAndRecordParamTypeNode(token));
+545: 
+546:                     if (type == null) {
+547:                       // parsing error reported during recursive descent
+548:                       // recovering parsing
+549:                       token = eatTokensUntilEOL();
+550:                       continue retry;
+551:                     }
+552:                     skipEOLs();
+553:                     token = next();
+554:                     lineno = stream.getLineno();
+555:                     charno = stream.getCharno();
+556:                   }
+557: 
+558:                   String name = null;
+559:                   boolean isBracketedParam = JsDocToken.LB == token;
+560:                   if (isBracketedParam) {
+561:                     token = next();
+562:                   }
+563: 
+564:                   if (JsDocToken.STRING != token) {
+565:                     parser.addWarning("msg.missing.variable.name",
+566:                         lineno, charno);
+567:                   } else {
+568:                     name = stream.getString();
+569: 
+570:                     if (isBracketedParam) {
+571:                       token = next();
+572: 
+573:                       // Throw out JsDocToolkit's "default" parameter annotation.
+574:                       // It makes no sense under our type system.
+575:                       if (JsDocToken.EQUALS == token) {
+576:                         token = next();
+577:                         if (JsDocToken.STRING == token) {
+578:                           token = next();
+579:                         }
+580:                       }
+581: 
+582:                       if (JsDocToken.RB != token) {
+583:                         reportTypeSyntaxWarning("msg.jsdoc.missing.rb");
+584:                       } else if (type != null) {
+585:                         // Make the type expression optional, if it isn't
+586:                         // already.
+587:                         type = JSTypeExpression.makeOptionalArg(type);
+588:                       }
+589:                     }
+590: 
+591:                     // If the param name has a DOT in it, just throw it out
+592:                     // quietly. We do not handle the JsDocToolkit method
+593:                     // for handling properties of params.
+594:                     if (name.indexOf('.') > -1) {
+595:                       name = null;
+596:                     } else if (!jsdocBuilder.recordParameter(name, type)) {
+597:                       if (jsdocBuilder.hasParameter(name)) {
+598:                         parser.addWarning("msg.dup.variable.name", name,
+599:                             lineno, charno);
+600:                       } else {
+601:                         parser.addWarning("msg.jsdoc.incompat.type", name,
+602:                             lineno, charno);
+603:                       }
+604:                     }
+605:                   }
+606: 
+607:                   if (name == null) {
+608:                     token = eatTokensUntilEOL(token);
+609:                     continue retry;
+610:                   }
+611: 
+612:                   jsdocBuilder.markName(name, lineno, charno);
+613: 
+614:                   // Find the parameter's description (if applicable).
+615:                   if (jsdocBuilder.shouldParseDocumentation()) {
+616:                     ExtractionInfo paramDescriptionInfo =
+617:                         extractMultilineTextualBlock(token);
+618: 
+619:                     String paramDescription = paramDescriptionInfo.string;
+620: 
+621:                     if (paramDescription.length() > 0) {
+622:                       jsdocBuilder.recordParameterDescription(name,
+623:                           paramDescription);
+624:                     }
+625: 
+626:                     token = paramDescriptionInfo.token;
+627:                   } else {
+628:                     token = eatTokensUntilEOL(token);
+629:                   }
+630:                   continue retry;
+631: 
+632:                 case PRESERVE_TRY:
+633:                   if (!jsdocBuilder.recordPreserveTry()) {
+634:                     parser.addWarning("msg.jsdoc.preservertry",
+635:                         stream.getLineno(), stream.getCharno());
+636:                   }
+637:                   token = eatTokensUntilEOL();
+638:                   continue retry;
+639: 
+640:                 case PRIVATE:
+641:                   if (!jsdocBuilder.recordVisibility(Visibility.PRIVATE)) {
+642:                     parser.addWarning("msg.jsdoc.visibility.private",
+643:                         stream.getLineno(), stream.getCharno());
+644:                   }
+645:                   token = eatTokensUntilEOL();
+646:                   continue retry;
+647: 
+648:                 case PROTECTED:
+649:                   if (!jsdocBuilder.recordVisibility(Visibility.PROTECTED)) {
+650:                     parser.addWarning("msg.jsdoc.visibility.protected",
+651:                         stream.getLineno(), stream.getCharno());
+652:                   }
+653:                   token = eatTokensUntilEOL();
+654:                   continue retry;
+655: 
+656:                 case PUBLIC:
+657:                   if (!jsdocBuilder.recordVisibility(Visibility.PUBLIC)) {
+658:                     parser.addWarning("msg.jsdoc.visibility.public",
+659:                         stream.getLineno(), stream.getCharno());
+660:                   }
+661:                   token = eatTokensUntilEOL();
+662:                   continue retry;
+663: 
+664:                 case NO_SHADOW:
+665:                   if (!jsdocBuilder.recordNoShadow()) {
+666:                     parser.addWarning("msg.jsdoc.noshadow",
+667:                         stream.getLineno(), stream.getCharno());
+668:                   }
+669:                   token = eatTokensUntilEOL();
+670:                   continue retry;
+671: 
+672:                 case NO_SIDE_EFFECTS:
+673:                   if (!jsdocBuilder.recordNoSideEffects()) {
+674:                     parser.addWarning("msg.jsdoc.nosideeffects",
+675:                         stream.getLineno(), stream.getCharno());
+676:                   }
+677:                   token = eatTokensUntilEOL();
+678:                   continue retry;
+679: 
+680:                 case MODIFIES:
+681:                   token = parseModifiesTag(next());
+682:                   continue retry;
+683: 
+684:                 case IMPLICIT_CAST:
+685:                   if (!jsdocBuilder.recordImplicitCast()) {
+686:                     parser.addWarning("msg.jsdoc.implicitcast",
+687:                         stream.getLineno(), stream.getCharno());
+688:                   }
+689:                   token = eatTokensUntilEOL();
+690:                   continue retry;
+691: 
+692:                 case SEE:
+693:                   if (jsdocBuilder.shouldParseDocumentation()) {
+694:                     ExtractionInfo referenceInfo = extractSingleLineBlock();
+695:                     String reference = referenceInfo.string;
+696: 
+697:                     if (reference.length() == 0) {
+698:                       parser.addWarning("msg.jsdoc.seemissing",
+699:                           stream.getLineno(), stream.getCharno());
+700:                     } else {
+701:                       jsdocBuilder.addReference(reference);
+702:                     }
+703: 
+704:                     token = referenceInfo.token;
+705:                   } else {
+706:                     token = eatTokensUntilEOL(token);
+707:                   }
+708:                   continue retry;
+709: 
+710:                 case SUPPRESS:
+711:                   token = parseSuppressTag(next());
+712:                   continue retry;
+713: 
+714:                 case TEMPLATE:
+715:                   ExtractionInfo templateInfo = extractSingleLineBlock();
+716:                   String templateTypeName = templateInfo.string;
+717: 
+718:                   if (templateTypeName.length() == 0) {
+719:                     parser.addWarning("msg.jsdoc.templatemissing",
+720:                           stream.getLineno(), stream.getCharno());
+721:                   } else if (!jsdocBuilder.recordTemplateTypeName(
+722:                       templateTypeName)) {
+723:                     parser.addWarning("msg.jsdoc.template.at.most.once",
+724:                         stream.getLineno(), stream.getCharno());
+725:                   }
+726: 
+727:                   token = templateInfo.token;
+728:                   continue retry;
+729: 
+730:                 case VERSION:
+731:                   ExtractionInfo versionInfo = extractSingleLineBlock();
+732:                   String version = versionInfo.string;
+733: 
+734:                   if (version.length() == 0) {
+735:                     parser.addWarning("msg.jsdoc.versionmissing",
+736:                           stream.getLineno(), stream.getCharno());
+737:                   } else {
+738:                     if (!jsdocBuilder.recordVersion(version)) {
+739:                        parser.addWarning("msg.jsdoc.extraversion",
+740:                           stream.getLineno(), stream.getCharno());
+741:                     }
+742:                   }
+743: 
+744:                   token = versionInfo.token;
+745:                   continue retry;
+746: 
+747:                 case DEFINE:
+748:                 case RETURN:
+749:                 case THIS:
+750:                 case TYPE:
+751:                 case TYPEDEF:
+752:                   skipEOLs();
+753:                   lineno = stream.getLineno();
+754:                   charno = stream.getCharno();
+755: 
+756:                   token = next();
+757: 
+758:                   Node typeNode = parseAndRecordTypeNode(token, lineno, charno);
+759: 
+760:                   if (annotation == Annotation.THIS) {
+761:                     typeNode = wrapNode(Token.BANG, typeNode);
+762:                     if (typeNode != null && token != JsDocToken.LC) {
+763:                       typeNode.putBooleanProp(Node.BRACELESS_TYPE, true);
+764:                     }
+765:                   }
+766:                   type = createJSTypeExpression(typeNode);
+767: 
+768:                   if (type == null) {
+769:                     // error reported during recursive descent
+770:                     // recovering parsing
+771:                   } else {
+772:                     switch (annotation) {
+773:                       case DEFINE:
+774:                         if (!jsdocBuilder.recordDefineType(type)) {
+775:                           parser.addWarning("msg.jsdoc.define",
+776:                               lineno, charno);
+777:                         }
+778:                         break;
+779: 
+780:                       case RETURN:
+781:                         if (!jsdocBuilder.recordReturnType(type)) {
+782:                           parser.addWarning(
+783:                               "msg.jsdoc.incompat.type", lineno, charno);
+784:                           break;
+785:                         }
+786: 
+787:                         // *Update* the token to that after the type annotation.
+788:                         token = current();
+789: 
+790:                         // Find the return's description (if applicable).
+791:                         if (jsdocBuilder.shouldParseDocumentation()) {
+792:                           ExtractionInfo returnDescriptionInfo =
+793:                               extractMultilineTextualBlock(token);
+794: 
+795:                           String returnDescription =
+796:                               returnDescriptionInfo.string;
+797: 
+798:                           if (returnDescription.length() > 0) {
+799:                             jsdocBuilder.recordReturnDescription(
+800:                                 returnDescription);
+801:                           }
+802: 
+803:                           token = returnDescriptionInfo.token;
+804:                         } else {
+805:                           token = eatTokensUntilEOL(token);
+806:                         }
+807:                         continue retry;
+808: 
+809:                       case THIS:
+810:                         if (!jsdocBuilder.recordThisType(type)) {
+811:                           parser.addWarning(
+812:                               "msg.jsdoc.incompat.type", lineno, charno);
+813:                         }
+814:                         break;
+815: 
+816:                       case TYPE:
+817:                         if (!jsdocBuilder.recordType(type)) {
+818:                           parser.addWarning(
+819:                               "msg.jsdoc.incompat.type", lineno, charno);
+820:                         }
+821:                         break;
+822: 
+823:                       case TYPEDEF:
+824:                         if (!jsdocBuilder.recordTypedef(type)) {
+825:                           parser.addWarning(
+826:                               "msg.jsdoc.incompat.type", lineno, charno);
+827:                         }
+828:                         break;
+829:                     }
+830: 
+831:                     token = eatTokensUntilEOL();
+832:                   }
+833:                   continue retry;
+834:               }
+835:             }
+836:           }
+837:           break;
+838: 
+839:         case EOC:
+840:           if (hasParsedFileOverviewDocInfo()) {
+841:             fileOverviewJSDocInfo = retrieveAndResetParsedJSDocInfo();
+842:           }
+843: 
+844:           return true;
+845: 
+846:         case EOF:
+847:           // discard any accumulated information
+848:           jsdocBuilder.build(null);
+849:           parser.addWarning("msg.unexpected.eof",
+850:               stream.getLineno(), stream.getCharno());
+851:           return false;
+852: 
+853:         case EOL:
+854:           if (state == State.SEARCHING_NEWLINE) {
+855:             state = State.SEARCHING_ANNOTATION;
+856:           }
+857:           token = next();
+858:           continue retry;
+859: 
+860:         default:
+861:           if (token == JsDocToken.STAR && state == State.SEARCHING_ANNOTATION) {
+862:             token = next();
+863:             continue retry;
+864:           } else {
+865:             state = State.SEARCHING_NEWLINE;
+866:             token = eatTokensUntilEOL();
+867:             continue retry;
+868:           }
+869:       }
+870: 
+871:       // next token
+872:       token = next();
+873:     }
+874:   }
+
+[39] com.google.javascript.jscomp.PureFunctionIdentifier#mutatesThis  (lines 1004-1006)
+1004:     boolean mutatesThis() {
+1005:       return taintsThis;
+1006:     }
+
+[40] com.google.javascript.jscomp.AnonymousFunctionNamingCallback#visit  (lines 67-107)
+67:   public void visit(NodeTraversal t, Node n, Node parent) {
+68:     switch (n.getType()) {
+69:       case Token.FUNCTION:
+70:         // this handles functions that are assigned to variables or
+71:         // properties
+72:         // e.g. goog.string.htmlEscape = function(str) {
+73:         // }
+74: 
+75:         // get the function name and see if it's empty
+76:         Node functionNameNode = n.getFirstChild();
+77:         String functionName = functionNameNode.getString();
+78:         if (functionName.length() == 0) {
+79:           if (parent.getType() == Token.ASSIGN) {
+80:             // this is an assignment to a property, generally either a
+81:             // static function or a prototype function
+82:             // e.g. goog.string.htmlEscape = function() { } or
+83:             //      goog.structs.Map.prototype.getCount = function() { }
+84:             Node lhs = parent.getFirstChild();
+85:             String name = namer.getName(lhs);
+86:             namer.setFunctionName(name, n);
+87:           } else if (parent.getType() == Token.NAME) {
+88:             // this is an assignment to a variable
+89:             // e.g. var handler = function() {}
+90:             String name = namer.getName(parent);
+91:             namer.setFunctionName(name, n);
+92:           }
+93:         }
+94:         break;
+95:       case Token.ASSIGN:
+96:         // this handles functions that are assigned to a prototype through
+97:         // an object literal
+98:         // e.g. BuzzApp.prototype = {
+99:         //        Start : function() { }
+100:         //      }
+101:         Node lhs = n.getFirstChild();
+102:         Node rhs = lhs.getNext();
+103:         if (rhs.getType() == Token.OBJECTLIT) {
+104:           nameObjectLiteralMethods(rhs, namer.getName(lhs));
+105:         }
+106:     }
+107:   }
+
+[41] com.google.javascript.rhino.Node#areAllFlagsSet  (lines 2142-2144)
+2142:     public boolean areAllFlagsSet() {
+2143:       return value == Node.SIDE_EFFECTS_ALL;
+2144:     }
+
+[42] com.google.javascript.jscomp.FunctionNames#getName  (lines 158-161)
+158:     @Override
+159:     public final String getName(Node node) {
+160:       return extractor.getName(node);
+161:     }
+
+[43] com.google.javascript.rhino.Node#toString  (lines 923-1039)
+923:   private void toString(
+924:       StringBuilder sb,
+925:       boolean printSource,
+926:       boolean printAnnotations,
+927:       boolean printType) {
+928:     if (Token.printTrees) {
+929:       sb.append(Token.name(type));
+930:       if (this instanceof StringNode) {
+931:         sb.append(' ');
+932:         sb.append(getString());
+933:       } else if (type == Token.FUNCTION) {
+934:         sb.append(' ');
+935:         // In the case of JsDoc trees, the first child is often not a string
+936:         // which causes exceptions to be thrown when calling toString or
+937:         // toStringTree.
+938:         if (first.getType() == Token.STRING) {
+939:           sb.append(first.getString());
+940:         }
+941:       } else if (this instanceof ScriptOrFnNode) {
+942:         ScriptOrFnNode sof = (ScriptOrFnNode) this;
+943:         if (this instanceof FunctionNode) {
+944:           FunctionNode fn = (FunctionNode) this;
+945:           sb.append(' ');
+946:           sb.append(fn.getFunctionName());
+947:         }
+948:         if (printSource) {
+949:           sb.append(" [source name: ");
+950:           sb.append(sof.getSourceName());
+951:           sb.append("] [encoded source length: ");
+952:           sb.append(sof.getEncodedSourceEnd() - sof.getEncodedSourceStart());
+953:           sb.append("] [base line: ");
+954:           sb.append(sof.getBaseLineno());
+955:           sb.append("] [end line: ");
+956:           sb.append(sof.getEndLineno());
+957:           sb.append(']');
+958:         }
+959:       } else if (type == Token.NUMBER) {
+960:         sb.append(' ');
+961:         sb.append(getDouble());
+962:       }
+963:       if (printSource) {
+964:         int lineno = getLineno();
+965:         if (lineno != -1) {
+966:           sb.append(' ');
+967:           sb.append(lineno);
+968:         }
+969:       }
+970: 
+971:       if (printAnnotations) {
+972:         int[] keys = getSortedPropTypes();
+973:         for (int i = 0; i < keys.length; i++) {
+974:           int type = keys[i];
+975:           PropListItem x = lookupProperty(type);
+976:           sb.append(" [");
+977:           sb.append(propToString(type));
+978:           sb.append(": ");
+979:           String value;
+980:           switch (type) {
+981:             case TARGETBLOCK_PROP: // can't add this as it recurses
+982:               value = "target block property";
+983:               break;
+984:             case LOCAL_BLOCK_PROP: // can't add this as it is dull
+985:               value = "last local block";
+986:               break;
+987:             case ISNUMBER_PROP:
+988:               switch (x.intValue) {
+989:                 case BOTH:
+990:                   value = "both";
+991:                   break;
+992:                 case RIGHT:
+993:                   value = "right";
+994:                   break;
+995:                 case LEFT:
+996:                   value = "left";
+997:                   break;
+998:                 default:
+999:                   throw Kit.codeBug();
+1000:               }
+1001:               break;
+1002:             case SPECIALCALL_PROP:
+1003:               switch (x.intValue) {
+1004:                 case SPECIALCALL_EVAL:
+1005:                   value = "eval";
+1006:                   break;
+1007:                 case SPECIALCALL_WITH:
+1008:                   value = "with";
+1009:                   break;
+1010:                 default:
+1011:                   // NON_SPECIALCALL should not be stored
+1012:                   throw Kit.codeBug();
+1013:               }
+1014:               break;
+1015:             default:
+1016:               Object obj = x.objectValue;
+1017:               if (obj != null) {
+1018:                 value = obj.toString();
+1019:               } else {
+1020:                 value = String.valueOf(x.intValue);
+1021:               }
+1022:               break;
+1023:           }
+1024:           sb.append(value);
+1025:           sb.append(']');
+1026:         }
+1027:       }
+1028: 
+1029:       if (printType) {
+1030:         if (jsType != null) {
+1031:           String jsTypeString = jsType.toString();
+1032:           if (jsTypeString != null) {
+1033:             sb.append(" : ");
+1034:             sb.append(jsTypeString);
+1035:           }
+1036:         }
+1037:       }
+1038:     }
+1039:   }
+
+[44] com.google.javascript.rhino.JSDocInfo#setModifies  (lines 585-594)
+585:   boolean setModifies(Set<String> modifies) {
+586:     lazyInitInfo();
+587: 
+588:     if (info.modifies != null) {
+589:       return false;
+590:     }
+591: 
+592:     info.modifies = modifies;
+593:     return true;
+594:   }
+
+[45] com.google.javascript.jscomp.SimpleDefinitionFinder#visit  (lines 158-262)
+158:     @Override
+159:     public void visit(NodeTraversal traversal, Node node, Node parent) {
+160:       // Arguments of external functions should not count as name
+161:       // definitions.  They are placeholder names for documentation
+162:       // purposes only which are not reachable from anywhere.
+163:       if (inExterns && NodeUtil.isName(node) && parent.getType() == Token.LP) {
+164:         return;
+165:       }
+166: 
+167:       Definition def =
+168:           DefinitionsRemover.getDefinition(node, inExterns);
+169:       if (def != null) {
+170:         String name = getSimplifiedName(def.getLValue());
+171:         if (name != null) {
+172:           Node rValue = def.getRValue();
+173:           if ((rValue != null) &&
+174:               !NodeUtil.isImmutableValue(rValue) &&
+175:               !NodeUtil.isFunction(rValue)) {
+176: 
+177:             // Unhandled complex expression
+178:             Definition unknownDef =
+179:                 new UnknownDefinition(def.getLValue(), inExterns);
+180:             def = unknownDef;
+181:           }
+182: 
+183:           // TODO(johnlenz) : remove this stub dropping code if it becomes
+184:           // illegal to have untyped stubs in the externs definitions.
+185:           if (inExterns) {
+186:             // We need special handling of untyped externs stubs here:
+187:             //    the stub should be dropped if the name is provided elsewhere.
+188: 
+189:             List<Definition> stubsToRemove = Lists.newArrayList();
+190:             String qualifiedName = node.getQualifiedName();
+191: 
+192:             // If there is no qualified name for this, then there will be
+193:             // no stubs to remove. This will happen if node is an object
+194:             // literal key.
+195:             if (qualifiedName != null) {
+196:               for (Definition prevDef : nameDefinitionMultimap.get(name)) {
+197:                 if (prevDef instanceof ExternalNameOnlyDefinition
+198:                     && !jsdocContainsDeclarations(node)) {
+199:                   String prevName = prevDef.getLValue().getQualifiedName();
+200:                   if (qualifiedName.equals(prevName)) {
+201:                     // Drop this stub, there is a real definition.
+202:                     stubsToRemove.add(prevDef);
+203:                   }
+204:                 }
+205:               }
+206: 
+207:               for (Definition prevDef : stubsToRemove) {
+208:                 nameDefinitionMultimap.remove(name, prevDef);
+209:               }
+210:             }
+211:           }
+212: 
+213:           nameDefinitionMultimap.put(name, def);
+214:           definitionSiteMap.put(node,
+215:                                 new DefinitionSite(node,
+216:                                                    def,
+217:                                                    traversal.getModule(),
+218:                                                    traversal.inGlobalScope(),
+219:                                                    inExterns));
+220:         }
+221:       }
+222: 
+223:       if (inExterns && (parent != null) && NodeUtil.isExpressionNode(parent)) {
+224:         String name = getSimplifiedName(node);
+225:         if (name != null) {
+226: 
+227:           // TODO(johnlenz) : remove this code if it becomes illegal to have
+228:           // stubs in the externs definitions.
+229: 
+230:           // We need special handling of untyped externs stubs here:
+231:           //    the stub should be dropped if the name is provided elsewhere.
+232:           // We can't just drop the stub now as it needs to be used as the
+233:           //    externs definition if no other definition is provided.
+234: 
+235:           boolean dropStub = false;
+236:           if (!jsdocContainsDeclarations(node)) {
+237:             String qualifiedName = node.getQualifiedName();
+238:             if (qualifiedName != null) {
+239:               for (Definition prevDef : nameDefinitionMultimap.get(name)) {
+240:                 String prevName = prevDef.getLValue().getQualifiedName();
+241:                 if (qualifiedName.equals(prevName)) {
+242:                   dropStub = true;
+243:                   break;
+244:                 }
+245:               }
+246:             }
+247:           }
+248: 
+249:           if (!dropStub) {
+250:             // Incomplete definition
+251:             Definition definition = new ExternalNameOnlyDefinition(node);
+252:             nameDefinitionMultimap.put(name, definition);
+253:             definitionSiteMap.put(node,
+254:                                   new DefinitionSite(node,
+255:                                                      definition,
+256:                                                      traversal.getModule(),
+257:                                                      traversal.inGlobalScope(),
+258:                                                      inExterns));
+259:           }
+260:         }
+261:       }
+262:     }
+
+[46] com.google.javascript.jscomp.PureFunctionIdentifier#isCallOrApply  (lines 863-872)
+863:   private static boolean isCallOrApply(Node callSite) {
+864:     Node callTarget = callSite.getFirstChild();
+865:     if (NodeUtil.isGet(callTarget)) {
+866:       String propString = callTarget.getLastChild().getString();
+867:       if (propString.equals("call") || propString.equals("apply")) {
+868:         return true;
+869:       }
+870:     }
+871:     return false;
+872:   }
+
+[47] com.google.javascript.rhino.Node#valueOf  (lines 2128-2130)
+2128:     public int valueOf() {
+2129:       return value;
+2130:     }
+
+[48] com.google.javascript.jscomp.PureFunctionIdentifier#propagateSideEffects  (lines 252-302)
+252:   private void propagateSideEffects() {
+253:     // Nodes are function declarations; Edges are function call sites.
+254:     DiGraph<FunctionInformation, Node> sideEffectGraph =
+255:         LinkedDirectedGraph.createWithoutAnnotations();
+256: 
+257:     // create graph nodes
+258:     for (FunctionInformation functionInfo : functionSideEffectMap.values()) {
+259:       sideEffectGraph.createNode(functionInfo);
+260:     }
+261: 
+262:     // add connections to called functions and side effect root.
+263:     for (FunctionInformation functionInfo : functionSideEffectMap.values()) {
+264:       if (!functionInfo.mayHaveSideEffects()) {
+265:         continue;
+266:       }
+267: 
+268:       for (Node callSite : functionInfo.getCallsInFunctionBody()) {
+269:         Node callee = callSite.getFirstChild();
+270:         Collection<Definition> defs =
+271:             getCallableDefinitions(definitionProvider, callee);
+272:         if (defs == null) {
+273:           // Definition set is not complete or eligible.  Possible
+274:           // causes include:
+275:           //  * "callee" is not of type NAME or GETPROP.
+276:           //  * One or more definitions are not functions.
+277:           //  * One or more definitions are complex.
+278:           //    (e.i. return value of a call that returns a function).
+279:           functionInfo.setTaintsUnknown();
+280:           break;
+281:         }
+282: 
+283:         for (Definition def : defs) {
+284:           Node defValue = def.getRValue();
+285:           FunctionInformation dep = functionSideEffectMap.get(defValue);
+286:           Preconditions.checkNotNull(dep);
+287:           sideEffectGraph.connect(dep, callSite, functionInfo);
+288:         }
+289:       }
+290:     }
+291: 
+292:     // Propagate side effect information to a fixed point.
+293:     FixedPointGraphTraversal.newTraversal(new SideEffectPropagationCallback())
+294:         .computeFixedPoint(sideEffectGraph);
+295: 
+296:     // Mark remaining functions "pure".
+297:     for (FunctionInformation functionInfo : functionSideEffectMap.values()) {
+298:       if (functionInfo.mayBePure()) {
+299:         functionInfo.setIsPure();
+300:       }
+301:     }
+302:   }
+
+[49] com.google.javascript.jscomp.NodeUtil#isThis  (lines 1461-1463)
+1461:   static boolean isThis(Node node) {
+1462:     return node.getType() == Token.THIS;
+1463:   }
+
+[50] com.google.javascript.rhino.Node#SideEffectFlags  (lines 2121-2122)
+2121:     public SideEffectFlags() {
+2122:     }

@@ -1,0 +1,478 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math3.fraction.BigFractionTest::testDigitLimitConstructor
+org.apache.commons.math3.fraction.FractionConversionException: illegal state: Overflow trying to convert 0.5 to fraction (2,499,999,794/4,999,999,587)
+	at org.apache.commons.math3.fraction.BigFraction.<init>(BigFraction.java:306)
+	at org.apache.commons.math3.fraction.BigFraction.<init>(BigFraction.java:356)
+	at org.apache.commons.math3.fraction.BigFractionTest.testDigitLimitConstructor(BigFractionTest.java:159)
+--- org.apache.commons.math3.fraction.FractionTest::testDigitLimitConstructor
+org.apache.commons.math3.fraction.FractionConversionException: illegal state: Overflow trying to convert 0.5 to fraction (2,499,999,794/4,999,999,587)
+	at org.apache.commons.math3.fraction.Fraction.<init>(Fraction.java:215)
+	at org.apache.commons.math3.fraction.Fraction.<init>(Fraction.java:144)
+	at org.apache.commons.math3.fraction.FractionTest.testDigitLimitConstructor(FractionTest.java:134)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math3.fraction.Fraction#Fraction  (lines 261-289)
+261:     public Fraction(int num, int den) {
+262:         if (den == 0) {
+263:             throw new MathArithmeticException(LocalizedFormats.ZERO_DENOMINATOR_IN_FRACTION,
+264:                                               num, den);
+265:         }
+266:         if (den < 0) {
+267:             if (num == Integer.MIN_VALUE ||
+268:                 den == Integer.MIN_VALUE) {
+269:                 throw new MathArithmeticException(LocalizedFormats.OVERFLOW_IN_FRACTION,
+270:                                                   num, den);
+271:             }
+272:             num = -num;
+273:             den = -den;
+274:         }
+275:         // reduce numerator and denominator by greatest common denominator.
+276:         final int d = ArithmeticUtils.gcd(num, den);
+277:         if (d > 1) {
+278:             num /= d;
+279:             den /= d;
+280:         }
+281: 
+282:         // move sign to numerator.
+283:         if (den < 0) {
+284:             num = -num;
+285:             den = -den;
+286:         }
+287:         this.numerator   = num;
+288:         this.denominator = den;
+289:     }
+
+[2] org.apache.commons.math3.fraction.FractionConversionException#FractionConversionException  (lines 52-54)
+52:     public FractionConversionException(double value, long p, long q) {
+53:         super(LocalizedFormats.FRACTION_CONVERSION_OVERFLOW, value, p, q);
+54:     }
+
+[3] org.apache.commons.math3.fraction.BigFraction#BigFraction  (lines 383-385)
+383:     public BigFraction(final int num, final int den) {
+384:         this(BigInteger.valueOf(num), BigInteger.valueOf(den));
+385:     }
+
+[4] org.apache.commons.math3.util.FastMath#floor  (lines 3335-3356)
+3335:     public static double floor(double x) {
+3336:         long y;
+3337: 
+3338:         if (x != x) { // NaN
+3339:             return x;
+3340:         }
+3341: 
+3342:         if (x >= TWO_POWER_52 || x <= -TWO_POWER_52) {
+3343:             return x;
+3344:         }
+3345: 
+3346:         y = (long) x;
+3347:         if (x < 0 && y != x) {
+3348:             y--;
+3349:         }
+3350: 
+3351:         if (y == 0) {
+3352:             return x*y;
+3353:         }
+3354: 
+3355:         return y;
+3356:     }
+
+[5] org.apache.commons.math3.fraction.Fraction#getDenominator  (lines 365-367)
+365:     public int getDenominator() {
+366:         return denominator;
+367:     }
+
+[6] org.apache.commons.math3.util.ArithmeticUtils#gcd  (lines 250-307)
+250:     public static int gcd(int p,
+251:                           int q)
+252:         throws MathArithmeticException {
+253:         int a = p;
+254:         int b = q;
+255:         if (a == 0 ||
+256:             b == 0) {
+257:             if (a == Integer.MIN_VALUE ||
+258:                 b == Integer.MIN_VALUE) {
+259:                 throw new MathArithmeticException(LocalizedFormats.GCD_OVERFLOW_32_BITS,
+260:                                                   p, q);
+261:             }
+262:             return FastMath.abs(a + b);
+263:         }
+264: 
+265:         long al = a;
+266:         long bl = b;
+267:         boolean useLong = false;
+268:         if (a < 0) {
+269:             if(Integer.MIN_VALUE == a) {
+270:                 useLong = true;
+271:             } else {
+272:                 a = -a;
+273:             }
+274:             al = -al;
+275:         }
+276:         if (b < 0) {
+277:             if (Integer.MIN_VALUE == b) {
+278:                 useLong = true;
+279:             } else {
+280:                 b = -b;
+281:             }
+282:             bl = -bl;
+283:         }
+284:         if (useLong) {
+285:             if(al == bl) {
+286:                 throw new MathArithmeticException(LocalizedFormats.GCD_OVERFLOW_32_BITS,
+287:                                                   p, q);
+288:             }
+289:             long blbu = bl;
+290:             bl = al;
+291:             al = blbu % al;
+292:             if (al == 0) {
+293:                 if (bl > Integer.MAX_VALUE) {
+294:                     throw new MathArithmeticException(LocalizedFormats.GCD_OVERFLOW_32_BITS,
+295:                                                       p, q);
+296:                 }
+297:                 return (int) bl;
+298:             }
+299:             blbu = bl;
+300: 
+301:             // Now "al" and "bl" fit in an "int".
+302:             b = (int) al;
+303:             a = (int) (blbu % al);
+304:         }
+305: 
+306:         return gcdPositive(a, b);
+307:     }
+
+[7] org.apache.commons.math3.fraction.BigFraction#BigFraction  (lines 269-335)
+269:     private BigFraction(final double value, final double epsilon,
+270:                         final int maxDenominator, int maxIterations)
+271:         throws FractionConversionException {
+272:         long overflow = Integer.MAX_VALUE;
+273:         double r0 = value;
+274:         long a0 = (long) FastMath.floor(r0);
+275:         if (a0 > overflow) {
+276:             throw new FractionConversionException(value, a0, 1l);
+277:         }
+278: 
+279:         // check for (almost) integer arguments, which should not go
+280:         // to iterations.
+281:         if (FastMath.abs(a0 - value) < epsilon) {
+282:             numerator = BigInteger.valueOf(a0);
+283:             denominator = BigInteger.ONE;
+284:             return;
+285:         }
+286: 
+287:         long p0 = 1;
+288:         long q0 = 0;
+289:         long p1 = a0;
+290:         long q1 = 1;
+291: 
+292:         long p2 = 0;
+293:         long q2 = 1;
+294: 
+295:         int n = 0;
+296:         boolean stop = false;
+297:         do {
+298:             ++n;
+299:             final double r1 = 1.0 / (r0 - a0);
+300:             final long a1 = (long) FastMath.floor(r1);
+301:             p2 = (a1 * p1) + p0;
+302:             q2 = (a1 * q1) + q0;
+303:             if ((p2 > overflow) || (q2 > overflow)) {
+304:                 // in maxDenominator mode, if the last fraction was very close to the actual value
+305:                 // q2 may overflow in the next iteration; in this case return the last one.
+306:                 throw new FractionConversionException(value, p2, q2);
+307:             }
+308: 
+309:             final double convergent = (double) p2 / (double) q2;
+310:             if ((n < maxIterations) &&
+311:                 (FastMath.abs(convergent - value) > epsilon) &&
+312:                 (q2 < maxDenominator)) {
+313:                 p0 = p1;
+314:                 p1 = p2;
+315:                 q0 = q1;
+316:                 q1 = q2;
+317:                 a0 = a1;
+318:                 r0 = r1;
+319:             } else {
+320:                 stop = true;
+321:             }
+322:         } while (!stop);
+323: 
+324:         if (n >= maxIterations) {
+325:             throw new FractionConversionException(value, maxIterations);
+326:         }
+327: 
+328:         if (q2 < maxDenominator) {
+329:             numerator   = BigInteger.valueOf(p2);
+330:             denominator = BigInteger.valueOf(q2);
+331:         } else {
+332:             numerator   = BigInteger.valueOf(p1);
+333:             denominator = BigInteger.valueOf(q1);
+334:         }
+335:     }
+
+[8] org.apache.commons.math3.fraction.BigFraction#BigFraction  (lines 120-149)
+120:     public BigFraction(BigInteger num, BigInteger den) {
+121:         MathUtils.checkNotNull(num, LocalizedFormats.NUMERATOR);
+122:         MathUtils.checkNotNull(den, LocalizedFormats.DENOMINATOR);
+123:         if (BigInteger.ZERO.equals(den)) {
+124:             throw new ZeroException(LocalizedFormats.ZERO_DENOMINATOR);
+125:         }
+126:         if (BigInteger.ZERO.equals(num)) {
+127:             numerator   = BigInteger.ZERO;
+128:             denominator = BigInteger.ONE;
+129:         } else {
+130: 
+131:             // reduce numerator and denominator by greatest common denominator
+132:             final BigInteger gcd = num.gcd(den);
+133:             if (BigInteger.ONE.compareTo(gcd) < 0) {
+134:                 num = num.divide(gcd);
+135:                 den = den.divide(gcd);
+136:             }
+137: 
+138:             // move sign to numerator
+139:             if (BigInteger.ZERO.compareTo(den) > 0) {
+140:                 num = num.negate();
+141:                 den = den.negate();
+142:             }
+143: 
+144:             // store the values in the final fields
+145:             numerator   = num;
+146:             denominator = den;
+147: 
+148:         }
+149:     }
+
+[9] org.apache.commons.math3.exception.MathIllegalStateException#getLocalizedMessage  (lines 84-87)
+84:     @Override
+85:     public String getLocalizedMessage() {
+86:         return context.getLocalizedMessage();
+87:     }
+
+[10] org.apache.commons.math3.util.FastMath#abs  (lines 3000-3007)
+3000:     public static long abs(final long x) {
+3001:         final long l = x >>> 63;
+3002:         // l is one if x negative zero else
+3003:         // ~l+1 is zero if x is positive, -1 if x is negative
+3004:         // x^(~l+1) is x is x is positive, ~x if x is negative
+3005:         // add around
+3006:         return (x ^ (~l + 1)) + l;
+3007:     }
+
+[11] org.apache.commons.math3.util.FastMath#abs  (lines 3023-3025)
+3023:     public static double abs(double x) {
+3024:         return Double.longBitsToDouble(MASK_NON_SIGN_LONG & Double.doubleToRawLongBits(x));
+3025:     }
+
+[12] org.apache.commons.math3.util.MathUtils#checkNotNull  (lines 247-254)
+247:     public static void checkNotNull(Object o,
+248:                                     Localizable pattern,
+249:                                     Object ... args)
+250:         throws NullArgumentException {
+251:         if (o == null) {
+252:             throw new NullArgumentException(pattern, args);
+253:         }
+254:     }
+
+[13] org.apache.commons.math3.fraction.BigFraction#BigFraction  (lines 368-370)
+368:     public BigFraction(final int num) {
+369:         this(BigInteger.valueOf(num), BigInteger.ONE);
+370:     }
+
+[14] org.apache.commons.math3.fraction.Fraction#Fraction  (lines 141-145)
+141:     public Fraction(double value, int maxDenominator)
+142:         throws FractionConversionException
+143:     {
+144:        this(value, 0, maxDenominator, 100);
+145:     }
+
+[15] org.apache.commons.math3.exception.ConvergenceException#ConvergenceException  (lines 47-50)
+47:     public ConvergenceException(Localizable pattern,
+48:                                 Object ... args) {
+49:         getContext().addMessage(pattern, args);
+50:     }
+
+[16] org.apache.commons.math3.util.ArithmeticUtils#gcdPositive  (lines 329-362)
+329:     private static int gcdPositive(int a,
+330:                                    int b) {
+331:         if (a == 0) {
+332:             return b;
+333:         }
+334:         else if (b == 0) {
+335:             return a;
+336:         }
+337: 
+338:         // Make "a" and "b" odd, keeping track of common power of 2.
+339:         final int aTwos = Integer.numberOfTrailingZeros(a);
+340:         a >>= aTwos;
+341:         final int bTwos = Integer.numberOfTrailingZeros(b);
+342:         b >>= bTwos;
+343:         final int shift = Math.min(aTwos, bTwos);
+344: 
+345:         // "a" and "b" are positive.
+346:         // If a > b then "gdc(a, b)" is equal to "gcd(a - b, b)".
+347:         // If a < b then "gcd(a, b)" is equal to "gcd(b - a, a)".
+348:         // Hence, in the successive iterations:
+349:         //  "a" becomes the absolute difference of the current values,
+350:         //  "b" becomes the minimum of the current values.
+351:         while (a != b) {
+352:             final int delta = a - b;
+353:             b = Math.min(a, b);
+354:             a = Math.abs(delta);
+355: 
+356:             // Remove any power of 2 in "a" ("b" is guaranteed to be odd).
+357:             a >>= Integer.numberOfTrailingZeros(a);
+358:         }
+359: 
+360:         // Recover the common power of 2.
+361:         return a << shift;
+362:     }
+
+[17] org.apache.commons.math3.fraction.BigFraction#getDenominatorAsInt  (lines 767-769)
+767:     public int getDenominatorAsInt() {
+768:         return denominator.intValue();
+769:     }
+
+[18] org.apache.commons.math3.fraction.BigFraction#BigFraction  (lines 354-357)
+354:     public BigFraction(final double value, final int maxDenominator)
+355:         throws FractionConversionException {
+356:         this(value, 0, maxDenominator, 100);
+357:     }
+
+[19] org.apache.commons.math3.exception.MathIllegalStateException#getContext  (lines 73-75)
+73:     public ExceptionContext getContext() {
+74:         return context;
+75:     }
+
+[20] org.apache.commons.math3.exception.util.LocalizedFormats#getLocalizedString  (lines 380-398)
+380:     public String getLocalizedString(final Locale locale) {
+381:         try {
+382:             final String path = LocalizedFormats.class.getName().replaceAll("\\.", "/");
+383:             ResourceBundle bundle =
+384:                     ResourceBundle.getBundle("assets/" + path, locale);
+385:             if (bundle.getLocale().getLanguage().equals(locale.getLanguage())) {
+386:                 // the value of the resource is the translated format
+387:                 return bundle.getString(toString());
+388:             }
+389: 
+390:         } catch (MissingResourceException mre) { // NOPMD
+391:             // do nothing here
+392:         }
+393: 
+394:         // either the locale is not supported or the resource is unknown
+395:         // don't translate and fall back to using the source format
+396:         return sourceFormat;
+397: 
+398:     }
+
+[21] org.apache.commons.math3.fraction.Fraction#getNumerator  (lines 373-375)
+373:     public int getNumerator() {
+374:         return numerator;
+375:     }
+
+[22] org.apache.commons.math3.util.FastMath#abs  (lines 2990-2993)
+2990:     public static int abs(final int x) {
+2991:         final int i = x >>> 31;
+2992:         return (x ^ (~i + 1)) + i;
+2993:     }
+
+[23] org.apache.commons.math3.exception.MathIllegalStateException#getMessage  (lines 78-81)
+78:     @Override
+79:     public String getMessage() {
+80:         return context.getMessage();
+81:     }
+
+[24] org.apache.commons.math3.fraction.BigFraction#getNumeratorAsInt  (lines 800-802)
+800:     public int getNumeratorAsInt() {
+801:         return numerator.intValue();
+802:     }
+
+[25] org.apache.commons.math3.exception.MathIllegalStateException#MathIllegalStateException  (lines 44-48)
+44:     public MathIllegalStateException(Localizable pattern,
+45:                                      Object ... args) {
+46:         context = new ExceptionContext(this);
+47:         context.addMessage(pattern, args);
+48:     }
+
+[26] org.apache.commons.math3.exception.MathIllegalStateException#MathIllegalStateException  (lines 68-70)
+68:     public MathIllegalStateException() {
+69:         this(LocalizedFormats.ILLEGAL_STATE);
+70:     }
+
+[27] org.apache.commons.math3.exception.util.LocalizedFormats#LocalizedFormats  (lines 370-372)
+370:     private LocalizedFormats(final String sourceFormat) {
+371:         this.sourceFormat = sourceFormat;
+372:     }
+
+[28] org.apache.commons.math3.fraction.Fraction#Fraction  (lines 178-243)
+178:     private Fraction(double value, double epsilon, int maxDenominator, int maxIterations)
+179:         throws FractionConversionException
+180:     {
+181:         long overflow = Integer.MAX_VALUE;
+182:         double r0 = value;
+183:         long a0 = (long)FastMath.floor(r0);
+184:         if (FastMath.abs(a0) > overflow) {
+185:             throw new FractionConversionException(value, a0, 1l);
+186:         }
+187: 
+188:         // check for (almost) integer arguments, which should not go to iterations.
+189:         if (FastMath.abs(a0 - value) < epsilon) {
+190:             this.numerator = (int) a0;
+191:             this.denominator = 1;
+192:             return;
+193:         }
+194: 
+195:         long p0 = 1;
+196:         long q0 = 0;
+197:         long p1 = a0;
+198:         long q1 = 1;
+199: 
+200:         long p2 = 0;
+201:         long q2 = 1;
+202: 
+203:         int n = 0;
+204:         boolean stop = false;
+205:         do {
+206:             ++n;
+207:             double r1 = 1.0 / (r0 - a0);
+208:             long a1 = (long)FastMath.floor(r1);
+209:             p2 = (a1 * p1) + p0;
+210:             q2 = (a1 * q1) + q0;
+211: 
+212:             if ((FastMath.abs(p2) > overflow) || (FastMath.abs(q2) > overflow)) {
+213:                 // in maxDenominator mode, if the last fraction was very close to the actual value
+214:                 // q2 may overflow in the next iteration; in this case return the last one.
+215:                 throw new FractionConversionException(value, p2, q2);
+216:             }
+217: 
+218:             double convergent = (double)p2 / (double)q2;
+219:             if (n < maxIterations && FastMath.abs(convergent - value) > epsilon && q2 < maxDenominator) {
+220:                 p0 = p1;
+221:                 p1 = p2;
+222:                 q0 = q1;
+223:                 q1 = q2;
+224:                 a0 = a1;
+225:                 r0 = r1;
+226:             } else {
+227:                 stop = true;
+228:             }
+229:         } while (!stop);
+230: 
+231:         if (n >= maxIterations) {
+232:             throw new FractionConversionException(value, maxIterations);
+233:         }
+234: 
+235:         if (q2 < maxDenominator) {
+236:             this.numerator = (int) p2;
+237:             this.denominator = (int) q2;
+238:         } else {
+239:             this.numerator = (int) p1;
+240:             this.denominator = (int) q1;
+241:         }
+242: 
+243:     }

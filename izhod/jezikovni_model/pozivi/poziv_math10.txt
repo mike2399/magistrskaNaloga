@@ -1,0 +1,853 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math3.analysis.differentiation.DerivativeStructureTest::testAtan2SpecialCases
+junit.framework.AssertionFailedError: expected:<0.0> but was:<NaN>
+	at org.apache.commons.math3.analysis.differentiation.DerivativeStructureTest.testAtan2SpecialCases(DerivativeStructureTest.java:816)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math3.analysis.differentiation.DSCompiler#getSize  (lines 641-643)
+641:     public int getSize() {
+642:         return sizes[parameters][order];
+643:     }
+
+[2] org.apache.commons.math3.analysis.differentiation.DSCompiler#compileMultiplicationIndirection  (lines 340-388)
+340:     private static int[][][] compileMultiplicationIndirection(final int parameters, final int order,
+341:                                                            final DSCompiler valueCompiler,
+342:                                                            final DSCompiler derivativeCompiler,
+343:                                                            final int[] lowerIndirection) {
+344: 
+345:         if ((parameters == 0) || (order == 0)) {
+346:             return new int[][][] { { { 1, 0, 0 } } };
+347:         }
+348: 
+349:         // this is an implementation of definition 3 in Dan Kalman's paper.
+350:         final int vSize = valueCompiler.multIndirection.length;
+351:         final int dSize = derivativeCompiler.multIndirection.length;
+352:         final int[][][] multIndirection = new int[vSize + dSize][][];
+353: 
+354:         System.arraycopy(valueCompiler.multIndirection, 0, multIndirection, 0, vSize);
+355: 
+356:         for (int i = 0; i < dSize; ++i) {
+357:             final int[][] dRow = derivativeCompiler.multIndirection[i];
+358:             List<int[]> row = new ArrayList<int[]>();
+359:             for (int j = 0; j < dRow.length; ++j) {
+360:                 row.add(new int[] { dRow[j][0], lowerIndirection[dRow[j][1]], vSize + dRow[j][2] });
+361:                 row.add(new int[] { dRow[j][0], vSize + dRow[j][1], lowerIndirection[dRow[j][2]] });
+362:             }
+363: 
+364:             // combine terms with similar derivation orders
+365:             final List<int[]> combined = new ArrayList<int[]>(row.size());
+366:             for (int j = 0; j < row.size(); ++j) {
+367:                 final int[] termJ = row.get(j);
+368:                 if (termJ[0] > 0) {
+369:                     for (int k = j + 1; k < row.size(); ++k) {
+370:                         final int[] termK = row.get(k);
+371:                         if (termJ[1] == termK[1] && termJ[2] == termK[2]) {
+372:                             // combine termJ and termK
+373:                             termJ[0] += termK[0];
+374:                             // make sure we will skip termK later on in the outer loop
+375:                             termK[0] = 0;
+376:                         }
+377:                     }
+378:                     combined.add(termJ);
+379:                 }
+380:             }
+381: 
+382:             multIndirection[vSize + i] = combined.toArray(new int[combined.size()][]);
+383: 
+384:         }
+385: 
+386:         return multIndirection;
+387: 
+388:     }
+
+[3] org.apache.commons.math3.analysis.differentiation.DerivativeStructure#DerivativeStructure  (lines 108-122)
+108:     public DerivativeStructure(final int parameters, final int order,
+109:                                final int index, final double value)
+110:         throws NumberIsTooLargeException {
+111:         this(parameters, order, value);
+112: 
+113:         if (index >= parameters) {
+114:             throw new NumberIsTooLargeException(index, parameters, false);
+115:         }
+116: 
+117:         if (order > 0) {
+118:             // the derivative of the variable with respect to itself is 1.
+119:             data[DSCompiler.getCompiler(index, order).getSize()] = 1.0;
+120:         }
+121: 
+122:     }
+
+[4] org.apache.commons.math3.analysis.differentiation.DerivativeStructure#DerivativeStructure  (lines 72-75)
+72:     private DerivativeStructure(final DSCompiler compiler) {
+73:         this.compiler = compiler;
+74:         this.data     = new double[compiler.getSize()];
+75:     }
+
+[5] org.apache.commons.math3.analysis.differentiation.DSCompiler#compileSizes  (lines 233-249)
+233:     private static int[][] compileSizes(final int parameters, final int order,
+234:                                         final DSCompiler valueCompiler) {
+235: 
+236:         final int[][] sizes = new int[parameters + 1][order + 1];
+237:         if (parameters == 0) {
+238:             Arrays.fill(sizes[0], 1);
+239:         } else {
+240:             System.arraycopy(valueCompiler.sizes, 0, sizes, 0, parameters);
+241:             sizes[parameters][0] = 1;
+242:             for (int i = 0; i < order; ++i) {
+243:                 sizes[parameters][i + 1] = sizes[parameters][i] + sizes[parameters - 1][i + 1];
+244:             }
+245:         }
+246: 
+247:         return sizes;
+248: 
+249:     }
+
+[6] org.apache.commons.math3.analysis.differentiation.DSCompiler#getCompiler  (lines 185-225)
+185:     public static DSCompiler getCompiler(int parameters, int order) {
+186: 
+187:         // get the cached compilers
+188:         final DSCompiler[][] cache = compilers.get();
+189:         if (cache != null && cache.length > parameters && cache[parameters].length > order) {
+190:             if (cache[parameters][order] != null) {
+191:                 // the compiler has already been created
+192:                 return cache[parameters][order];
+193:             }
+194:         }
+195: 
+196:         // we need to create more compilers
+197:         final int maxParameters = FastMath.max(parameters, cache == null ? 0 : cache.length);
+198:         final int maxOrder      = FastMath.max(order,     cache == null ? 0 : cache[0].length);
+199:         final DSCompiler[][] newCache = new DSCompiler[maxParameters + 1][maxOrder + 1];
+200: 
+201:         if (cache != null) {
+202:             // preserve the already created compilers
+203:             for (int i = 0; i < cache.length; ++i) {
+204:                 System.arraycopy(cache[i], 0, newCache[i], 0, cache[i].length);
+205:             }
+206:         }
+207: 
+208:         // create the array in increasing diagonal order
+209:         for (int diag = 0; diag <= parameters + order; ++diag) {
+210:             for (int o = FastMath.max(0, diag - parameters); o <= FastMath.min(order, diag); ++o) {
+211:                 final int p = diag - o;
+212:                 if (newCache[p][o] == null) {
+213:                     final DSCompiler valueCompiler      = (p == 0) ? null : newCache[p - 1][o];
+214:                     final DSCompiler derivativeCompiler = (o == 0) ? null : newCache[p][o - 1];
+215:                     newCache[p][o] = new DSCompiler(p, o, valueCompiler, derivativeCompiler);
+216:                 }
+217:             }
+218:         }
+219: 
+220:         // atomically reset the cached compilers array
+221:         compilers.compareAndSet(cache, newCache);
+222: 
+223:         return newCache[parameters][order];
+224: 
+225:     }
+
+[7] org.apache.commons.math3.analysis.differentiation.DSCompiler#DSCompiler  (lines 158-178)
+158:     private DSCompiler(final int parameters, final int order,
+159:                        final DSCompiler valueCompiler, final DSCompiler derivativeCompiler) {
+160: 
+161:         this.parameters = parameters;
+162:         this.order      = order;
+163:         this.sizes      = compileSizes(parameters, order, valueCompiler);
+164:         this.derivativesIndirection =
+165:                 compileDerivativesIndirection(parameters, order,
+166:                                               valueCompiler, derivativeCompiler);
+167:         this.lowerIndirection =
+168:                 compileLowerIndirection(parameters, order,
+169:                                         valueCompiler, derivativeCompiler);
+170:         this.multIndirection =
+171:                 compileMultiplicationIndirection(parameters, order,
+172:                                                  valueCompiler, derivativeCompiler, lowerIndirection);
+173:         this.compIndirection =
+174:                 compileCompositionIndirection(parameters, order,
+175:                                               valueCompiler, derivativeCompiler,
+176:                                               sizes, derivativesIndirection);
+177: 
+178:     }
+
+[8] org.apache.commons.math3.util.FastMath#pow  (lines 1611-1668)
+1611:     public static double pow(double d, int e) {
+1612: 
+1613:         if (e == 0) {
+1614:             return 1.0;
+1615:         } else if (e < 0) {
+1616:             e = -e;
+1617:             d = 1.0 / d;
+1618:         }
+1619: 
+1620:         // split d as two 26 bits numbers
+1621:         // beware the following expressions must NOT be simplified, they rely on floating point arithmetic properties
+1622:         final int splitFactor = 0x8000001;
+1623:         final double cd       = splitFactor * d;
+1624:         final double d1High   = cd - (cd - d);
+1625:         final double d1Low    = d - d1High;
+1626: 
+1627:         // prepare result
+1628:         double resultHigh = 1;
+1629:         double resultLow  = 0;
+1630: 
+1631:         // d^(2p)
+1632:         double d2p     = d;
+1633:         double d2pHigh = d1High;
+1634:         double d2pLow  = d1Low;
+1635: 
+1636:         while (e != 0) {
+1637: 
+1638:             if ((e & 0x1) != 0) {
+1639:                 // accurate multiplication result = result * d^(2p) using Veltkamp TwoProduct algorithm
+1640:                 // beware the following expressions must NOT be simplified, they rely on floating point arithmetic properties
+1641:                 final double tmpHigh = resultHigh * d2p;
+1642:                 final double cRH     = splitFactor * resultHigh;
+1643:                 final double rHH     = cRH - (cRH - resultHigh);
+1644:                 final double rHL     = resultHigh - rHH;
+1645:                 final double tmpLow  = rHL * d2pLow - (((tmpHigh - rHH * d2pHigh) - rHL * d2pHigh) - rHH * d2pLow);
+1646:                 resultHigh = tmpHigh;
+1647:                 resultLow  = resultLow * d2p + tmpLow;
+1648:             }
+1649: 
+1650:             // accurate squaring d^(2(p+1)) = d^(2p) * d^(2p) using Veltkamp TwoProduct algorithm
+1651:             // beware the following expressions must NOT be simplified, they rely on floating point arithmetic properties
+1652:             final double tmpHigh = d2pHigh * d2p;
+1653:             final double cD2pH   = splitFactor * d2pHigh;
+1654:             final double d2pHH   = cD2pH - (cD2pH - d2pHigh);
+1655:             final double d2pHL   = d2pHigh - d2pHH;
+1656:             final double tmpLow  = d2pHL * d2pLow - (((tmpHigh - d2pHH * d2pHigh) - d2pHL * d2pHigh) - d2pHH * d2pLow);
+1657:             final double cTmpH   = splitFactor * tmpHigh;
+1658:             d2pHigh = cTmpH - (cTmpH - tmpHigh);
+1659:             d2pLow  = d2pLow * d2p + tmpLow + (tmpHigh - d2pHigh);
+1660:             d2p     = d2pHigh + d2pLow;
+1661: 
+1662:             e = e >> 1;
+1663: 
+1664:         }
+1665: 
+1666:         return resultHigh + resultLow;
+1667: 
+1668:     }
+
+[9] org.apache.commons.math3.analysis.differentiation.DSCompiler#atan2  (lines 1382-1420)
+1382:     public void atan2(final double[] y, final int yOffset,
+1383:                       final double[] x, final int xOffset,
+1384:                       final double[] result, final int resultOffset) {
+1385: 
+1386:         // compute r = sqrt(x^2+y^2)
+1387:         double[] tmp1 = new double[getSize()];
+1388:         multiply(x, xOffset, x, xOffset, tmp1, 0);      // x^2
+1389:         double[] tmp2 = new double[getSize()];
+1390:         multiply(y, yOffset, y, yOffset, tmp2, 0);      // y^2
+1391:         add(tmp1, 0, tmp2, 0, tmp2, 0);                 // x^2 + y^2
+1392:         rootN(tmp2, 0, 2, tmp1, 0);                     // r = sqrt(x^2 + y^2)
+1393: 
+1394:         if (x[xOffset] >= 0) {
+1395: 
+1396:             // compute atan2(y, x) = 2 atan(y / (r + x))
+1397:             add(tmp1, 0, x, xOffset, tmp2, 0);          // r + x
+1398:             divide(y, yOffset, tmp2, 0, tmp1, 0);       // y /(r + x)
+1399:             atan(tmp1, 0, tmp2, 0);                     // atan(y / (r + x))
+1400:             for (int i = 0; i < tmp2.length; ++i) {
+1401:                 result[resultOffset + i] = 2 * tmp2[i]; // 2 * atan(y / (r + x))
+1402:             }
+1403: 
+1404:         } else {
+1405: 
+1406:             // compute atan2(y, x) = +/- pi - 2 atan(y / (r - x))
+1407:             subtract(tmp1, 0, x, xOffset, tmp2, 0);     // r - x
+1408:             divide(y, yOffset, tmp2, 0, tmp1, 0);       // y /(r - x)
+1409:             atan(tmp1, 0, tmp2, 0);                     // atan(y / (r - x))
+1410:             result[resultOffset] =
+1411:                     ((tmp2[0] <= 0) ? -FastMath.PI : FastMath.PI) - 2 * tmp2[0]; // +/-pi - 2 * atan(y / (r - x))
+1412:             for (int i = 1; i < tmp2.length; ++i) {
+1413:                 result[resultOffset + i] = -2 * tmp2[i]; // +/-pi - 2 * atan(y / (r - x))
+1414:             }
+1415: 
+1416:         }
+1417: 
+1418:         // fix value to take special cases (+0/+0, +0/-0, -0/+0, -0/-0, +/-infinity) correctly
+1419: 
+1420:     }
+
+[10] org.apache.commons.math3.analysis.differentiation.DSCompiler#compose  (lines 1710-1725)
+1710:     public void compose(final double[] operand, final int operandOffset, final double[] f,
+1711:                         final double[] result, final int resultOffset) {
+1712:         for (int i = 0; i < compIndirection.length; ++i) {
+1713:             final int[][] mappingI = compIndirection[i];
+1714:             double r = 0;
+1715:             for (int j = 0; j < mappingI.length; ++j) {
+1716:                 final int[] mappingIJ = mappingI[j];
+1717:                 double product = mappingIJ[0] * f[mappingIJ[1]];
+1718:                 for (int k = 2; k < mappingIJ.length; ++k) {
+1719:                     product *= operand[operandOffset + mappingIJ[k]];
+1720:                 }
+1721:                 r += product;
+1722:             }
+1723:             result[resultOffset + i] = r;
+1724:         }
+1725:     }
+
+[11] org.apache.commons.math3.analysis.differentiation.DSCompiler#compileLowerIndirection  (lines 306-325)
+306:     private static int[] compileLowerIndirection(final int parameters, final int order,
+307:                                               final DSCompiler valueCompiler,
+308:                                               final DSCompiler derivativeCompiler) {
+309: 
+310:         if (parameters == 0 || order <= 1) {
+311:             return new int[] { 0 };
+312:         }
+313: 
+314:         // this is an implementation of definition 6 in Dan Kalman's paper.
+315:         final int vSize = valueCompiler.lowerIndirection.length;
+316:         final int dSize = derivativeCompiler.lowerIndirection.length;
+317:         final int[] lowerIndirection = new int[vSize + dSize];
+318:         System.arraycopy(valueCompiler.lowerIndirection, 0, lowerIndirection, 0, vSize);
+319:         for (int i = 0; i < dSize; ++i) {
+320:             lowerIndirection[vSize + i] = valueCompiler.getSize() + derivativeCompiler.lowerIndirection[i];
+321:         }
+322: 
+323:         return lowerIndirection;
+324: 
+325:     }
+
+[12] org.apache.commons.math3.analysis.differentiation.DSCompiler#getPartialDerivativeIndex  (lines 556-587)
+556:     private static int getPartialDerivativeIndex(final int parameters, final int order,
+557:                                                  final int[][] sizes, final int ... orders)
+558:         throws NumberIsTooLargeException {
+559: 
+560:         // the value is obtained by diving into the recursive Dan Kalman's structure
+561:         // this is theorem 2 of his paper, with recursion replaced by iteration
+562:         int index     = 0;
+563:         int m         = order;
+564:         int ordersSum = 0;
+565:         for (int i = parameters - 1; i >= 0; --i) {
+566: 
+567:             // derivative order for current free parameter
+568:             int derivativeOrder = orders[i];
+569: 
+570:             // safety check
+571:             ordersSum += derivativeOrder;
+572:             if (ordersSum > order) {
+573:                 throw new NumberIsTooLargeException(ordersSum, order, true);
+574:             }
+575: 
+576:             while (derivativeOrder-- > 0) {
+577:                 // as long as we differentiate according to current free parameter,
+578:                 // we have to skip the value part and dive into the derivative part
+579:                 // so we add the size of the value part to the base index
+580:                 index += sizes[i][m--];
+581:             }
+582: 
+583:         }
+584: 
+585:         return index;
+586: 
+587:     }
+
+[13] org.apache.commons.math3.analysis.differentiation.DSCompiler#checkCompatibility  (lines 1752-1760)
+1752:     public void checkCompatibility(final DSCompiler compiler)
+1753:             throws DimensionMismatchException {
+1754:         if (parameters != compiler.parameters) {
+1755:             throw new DimensionMismatchException(parameters, compiler.parameters);
+1756:         }
+1757:         if (order != compiler.order) {
+1758:             throw new DimensionMismatchException(order, compiler.order);
+1759:         }
+1760:     }
+
+[14] org.apache.commons.math3.util.FastMath#sqrt  (lines 378-380)
+378:     public static double sqrt(final double a) {
+379:         return Math.sqrt(a);
+380:     }
+
+[15] org.apache.commons.math3.analysis.differentiation.DSCompiler#multiply  (lines 768-781)
+768:     public void multiply(final double[] lhs, final int lhsOffset,
+769:                          final double[] rhs, final int rhsOffset,
+770:                          final double[] result, final int resultOffset) {
+771:         for (int i = 0; i < multIndirection.length; ++i) {
+772:             final int[][] mappingI = multIndirection[i];
+773:             double r = 0;
+774:             for (int j = 0; j < mappingI.length; ++j) {
+775:                 r += mappingI[j][0] *
+776:                      lhs[lhsOffset + mappingI[j][1]] *
+777:                      rhs[rhsOffset + mappingI[j][2]];
+778:             }
+779:             result[resultOffset + i] = r;
+780:         }
+781:     }
+
+[16] org.apache.commons.math3.analysis.differentiation.DSCompiler#divide  (lines 793-799)
+793:     public void divide(final double[] lhs, final int lhsOffset,
+794:                        final double[] rhs, final int rhsOffset,
+795:                        final double[] result, final int resultOffset) {
+796:         final double[] reciprocal = new double[getSize()];
+797:         pow(rhs, lhsOffset, -1, reciprocal, 0);
+798:         multiply(lhs, lhsOffset, reciprocal, 0, result, resultOffset);
+799:     }
+
+[17] org.apache.commons.math3.util.FastMath#atan  (lines 2422-2424)
+2422:     public static double atan(double x) {
+2423:         return atan(x, 0.0, false);
+2424:     }
+
+[18] org.apache.commons.math3.analysis.differentiation.DSCompiler#compileCompositionIndirection  (lines 404-500)
+404:     private static int[][][] compileCompositionIndirection(final int parameters, final int order,
+405:                                                         final DSCompiler valueCompiler,
+406:                                                         final DSCompiler derivativeCompiler,
+407:                                                         final int[][] sizes,
+408:                                                         final int[][] derivativesIndirection) {
+409: 
+410:         if ((parameters == 0) || (order == 0)) {
+411:             return new int[][][] { { { 1, 0 } } };
+412:         }
+413: 
+414:         final int vSize = valueCompiler.compIndirection.length;
+415:         final int dSize = derivativeCompiler.compIndirection.length;
+416:         final int[][][] compIndirection = new int[vSize + dSize][][];
+417: 
+418:         // the composition rules from the value part can be reused as is
+419:         System.arraycopy(valueCompiler.compIndirection, 0, compIndirection, 0, vSize);
+420: 
+421:         // the composition rules for the derivative part are deduced by
+422:         // differentiation the rules from the underlying compiler once
+423:         // with respect to the parameter this compiler handles and the
+424:         // underlying one did not handle
+425:         for (int i = 0; i < dSize; ++i) {
+426:             List<int[]> row = new ArrayList<int[]>();
+427:             for (int[] term : derivativeCompiler.compIndirection[i]) {
+428: 
+429:                 // handle term p * f_k(g(x)) * g_l1(x) * g_l2(x) * ... * g_lp(x)
+430: 
+431:                 // derive the first factor in the term: f_k with respect to new parameter
+432:                 int[] derivedTermF = new int[term.length + 1];
+433:                 derivedTermF[0] = term[0];     // p
+434:                 derivedTermF[1] = term[1] + 1; // f_(k+1)
+435:                 int[] orders = new int[parameters];
+436:                 orders[parameters - 1] = 1;
+437:                 derivedTermF[term.length] = getPartialDerivativeIndex(parameters, order, sizes, orders);  // g_1
+438:                 for (int j = 2; j < term.length; ++j) {
+439:                     // convert the indices as the mapping for the current order
+440:                     // is different from the mapping with one less order
+441:                     derivedTermF[j] = convertIndex(term[j], parameters,
+442:                                                    derivativeCompiler.derivativesIndirection,
+443:                                                    parameters, order, sizes);
+444:                 }
+445:                 Arrays.sort(derivedTermF, 2, derivedTermF.length);
+446:                 row.add(derivedTermF);
+447: 
+448:                 // derive the various g_l
+449:                 for (int l = 2; l < term.length; ++l) {
+450:                     int[] derivedTermG = new int[term.length];
+451:                     derivedTermG[0] = term[0];
+452:                     derivedTermG[1] = term[1];
+453:                     for (int j = 2; j < term.length; ++j) {
+454:                         // convert the indices as the mapping for the current order
+455:                         // is different from the mapping with one less order
+456:                         derivedTermG[j] = convertIndex(term[j], parameters,
+457:                                                        derivativeCompiler.derivativesIndirection,
+458:                                                        parameters, order, sizes);
+459:                         if (j == l) {
+460:                             // derive this term
+461:                             System.arraycopy(derivativesIndirection[derivedTermG[j]], 0, orders, 0, parameters);
+462:                             orders[parameters - 1]++;
+463:                             derivedTermG[j] = getPartialDerivativeIndex(parameters, order, sizes, orders);
+464:                         }
+465:                     }
+466:                     Arrays.sort(derivedTermG, 2, derivedTermG.length);
+467:                     row.add(derivedTermG);
+468:                 }
+469: 
+470:             }
+471: 
+472:             // combine terms with similar derivation orders
+473:             final List<int[]> combined = new ArrayList<int[]>(row.size());
+474:             for (int j = 0; j < row.size(); ++j) {
+475:                 final int[] termJ = row.get(j);
+476:                 if (termJ[0] > 0) {
+477:                     for (int k = j + 1; k < row.size(); ++k) {
+478:                         final int[] termK = row.get(k);
+479:                         boolean equals = termJ.length == termK.length;
+480:                         for (int l = 1; equals && l < termJ.length; ++l) {
+481:                             equals &= termJ[l] == termK[l];
+482:                         }
+483:                         if (equals) {
+484:                             // combine termJ and termK
+485:                             termJ[0] += termK[0];
+486:                             // make sure we will skip termK later on in the outer loop
+487:                             termK[0] = 0;
+488:                         }
+489:                     }
+490:                     combined.add(termJ);
+491:                 }
+492:             }
+493: 
+494:             compIndirection[vSize + i] = combined.toArray(new int[combined.size()][]);
+495: 
+496:         }
+497: 
+498:         return compIndirection;
+499: 
+500:     }
+
+[19] org.apache.commons.math3.analysis.differentiation.DSCompiler#pow  (lines 869-911)
+869:     public void pow(final double[] operand, final int operandOffset, final int n,
+870:                     final double[] result, final int resultOffset) {
+871: 
+872:         if (n == 0) {
+873:             // special case, x^0 = 1 for all x
+874:             result[resultOffset] = 1.0;
+875:             Arrays.fill(result, resultOffset + 1, resultOffset + getSize(), 0);
+876:             return;
+877:         }
+878: 
+879:         // create the power function value and derivatives
+880:         // [x^n, nx^(n-1), n(n-1)x^(n-2), ... ]
+881:         double[] function = new double[1 + order];
+882: 
+883:         if (n > 0) {
+884:             // strictly positive power
+885:             final int maxOrder = FastMath.min(order, n);
+886:             double xk = FastMath.pow(operand[operandOffset], n - maxOrder);
+887:             for (int i = maxOrder; i > 0; --i) {
+888:                 function[i] = xk;
+889:                 xk *= operand[operandOffset];
+890:             }
+891:             function[0] = xk;
+892:         } else {
+893:             // strictly negative power
+894:             final double inv = 1.0 / operand[operandOffset];
+895:             double xk = FastMath.pow(inv, -n);
+896:             for (int i = 0; i <= order; ++i) {
+897:                 function[i] = xk;
+898:                 xk *= inv;
+899:             }
+900:         }
+901: 
+902:         double coefficient = n;
+903:         for (int i = 1; i <= order; ++i) {
+904:             function[i] *= coefficient;
+905:             coefficient *= n - i;
+906:         }
+907: 
+908:         // apply function composition
+909:         compose(operand, operandOffset, function, result, resultOffset);
+910: 
+911:     }
+
+[20] org.apache.commons.math3.analysis.differentiation.DerivativeStructure#DerivativeStructure  (lines 91-94)
+91:     public DerivativeStructure(final int parameters, final int order, final double value) {
+92:         this(parameters, order);
+93:         this.data[0] = value;
+94:     }
+
+[21] org.apache.commons.math3.util.FastMath#atan  (lines 2432-2571)
+2432:     private static double atan(double xa, double xb, boolean leftPlane) {
+2433:         boolean negate = false;
+2434:         int idx;
+2435: 
+2436:         if (xa == 0.0) { // Matches +/- 0.0; return correct sign
+2437:             return leftPlane ? copySign(Math.PI, xa) : xa;
+2438:         }
+2439: 
+2440:         if (xa < 0) {
+2441:             // negative
+2442:             xa = -xa;
+2443:             xb = -xb;
+2444:             negate = true;
+2445:         }
+2446: 
+2447:         if (xa > 1.633123935319537E16) { // Very large input
+2448:             return (negate ^ leftPlane) ? (-Math.PI * F_1_2) : (Math.PI * F_1_2);
+2449:         }
+2450: 
+2451:         /* Estimate the closest tabulated arctan value, compute eps = xa-tangentTable */
+2452:         if (xa < 1) {
+2453:             idx = (int) (((-1.7168146928204136 * xa * xa + 8.0) * xa) + 0.5);
+2454:         } else {
+2455:             final double oneOverXa = 1 / xa;
+2456:             idx = (int) (-((-1.7168146928204136 * oneOverXa * oneOverXa + 8.0) * oneOverXa) + 13.07);
+2457:         }
+2458:         double epsA = xa - TANGENT_TABLE_A[idx];
+2459:         double epsB = -(epsA - xa + TANGENT_TABLE_A[idx]);
+2460:         epsB += xb - TANGENT_TABLE_B[idx];
+2461: 
+2462:         double temp = epsA + epsB;
+2463:         epsB = -(temp - epsA - epsB);
+2464:         epsA = temp;
+2465: 
+2466:         /* Compute eps = eps / (1.0 + xa*tangent) */
+2467:         temp = xa * HEX_40000000;
+2468:         double ya = xa + temp - temp;
+2469:         double yb = xb + xa - ya;
+2470:         xa = ya;
+2471:         xb += yb;
+2472: 
+2473:         //if (idx > 8 || idx == 0)
+2474:         if (idx == 0) {
+2475:             /* If the slope of the arctan is gentle enough (< 0.45), this approximation will suffice */
+2476:             //double denom = 1.0 / (1.0 + xa*tangentTableA[idx] + xb*tangentTableA[idx] + xa*tangentTableB[idx] + xb*tangentTableB[idx]);
+2477:             final double denom = 1d / (1d + (xa + xb) * (TANGENT_TABLE_A[idx] + TANGENT_TABLE_B[idx]));
+2478:             //double denom = 1.0 / (1.0 + xa*tangentTableA[idx]);
+2479:             ya = epsA * denom;
+2480:             yb = epsB * denom;
+2481:         } else {
+2482:             double temp2 = xa * TANGENT_TABLE_A[idx];
+2483:             double za = 1d + temp2;
+2484:             double zb = -(za - 1d - temp2);
+2485:             temp2 = xb * TANGENT_TABLE_A[idx] + xa * TANGENT_TABLE_B[idx];
+2486:             temp = za + temp2;
+2487:             zb += -(temp - za - temp2);
+2488:             za = temp;
+2489: 
+2490:             zb += xb * TANGENT_TABLE_B[idx];
+2491:             ya = epsA / za;
+2492: 
+2493:             temp = ya * HEX_40000000;
+2494:             final double yaa = (ya + temp) - temp;
+2495:             final double yab = ya - yaa;
+2496: 
+2497:             temp = za * HEX_40000000;
+2498:             final double zaa = (za + temp) - temp;
+2499:             final double zab = za - zaa;
+2500: 
+2501:             /* Correct for rounding in division */
+2502:             yb = (epsA - yaa * zaa - yaa * zab - yab * zaa - yab * zab) / za;
+2503: 
+2504:             yb += -epsA * zb / za / za;
+2505:             yb += epsB / za;
+2506:         }
+2507: 
+2508: 
+2509:         epsA = ya;
+2510:         epsB = yb;
+2511: 
+2512:         /* Evaluate polynomial */
+2513:         final double epsA2 = epsA * epsA;
+2514: 
+2515:         /*
+2516:     yb = -0.09001346640161823;
+2517:     yb = yb * epsA2 + 0.11110718400605211;
+2518:     yb = yb * epsA2 + -0.1428571349122913;
+2519:     yb = yb * epsA2 + 0.19999999999273194;
+2520:     yb = yb * epsA2 + -0.33333333333333093;
+2521:     yb = yb * epsA2 * epsA;
+2522:          */
+2523: 
+2524:         yb = 0.07490822288864472;
+2525:         yb = yb * epsA2 + -0.09088450866185192;
+2526:         yb = yb * epsA2 + 0.11111095942313305;
+2527:         yb = yb * epsA2 + -0.1428571423679182;
+2528:         yb = yb * epsA2 + 0.19999999999923582;
+2529:         yb = yb * epsA2 + -0.33333333333333287;
+2530:         yb = yb * epsA2 * epsA;
+2531: 
+2532: 
+2533:         ya = epsA;
+2534: 
+2535:         temp = ya + yb;
+2536:         yb = -(temp - ya - yb);
+2537:         ya = temp;
+2538: 
+2539:         /* Add in effect of epsB.   atan'(x) = 1/(1+x^2) */
+2540:         yb += epsB / (1d + epsA * epsA);
+2541: 
+2542:         //result = yb + eighths[idx] + ya;
+2543:         double za = EIGHTHS[idx] + ya;
+2544:         double zb = -(za - EIGHTHS[idx] - ya);
+2545:         temp = za + yb;
+2546:         zb += -(temp - za - yb);
+2547:         za = temp;
+2548: 
+2549:         double result = za + zb;
+2550:         double resultb = -(result - za - zb);
+2551: 
+2552:         if (leftPlane) {
+2553:             // Result is in the left plane
+2554:             final double pia = 1.5707963267948966 * 2;
+2555:             final double pib = 6.123233995736766E-17 * 2;
+2556: 
+2557:             za = pia - result;
+2558:             zb = -(za - pia + result);
+2559:             zb += pib - resultb;
+2560: 
+2561:             result = za + zb;
+2562:             resultb = -(result - za - zb);
+2563:         }
+2564: 
+2565: 
+2566:         if (negate ^ leftPlane) {
+2567:             result = -result;
+2568:         }
+2569: 
+2570:         return result;
+2571:     }
+
+[22] org.apache.commons.math3.analysis.differentiation.DSCompiler#convertIndex  (lines 600-606)
+600:     private static int convertIndex(final int index,
+601:                                     final int srcP, final int[][] srcDerivativesIndirection,
+602:                                     final int destP, final int destO, final int[][] destSizes) {
+603:         int[] orders = new int[destP];
+604:         System.arraycopy(srcDerivativesIndirection[index], 0, orders, 0, FastMath.min(srcP, destP));
+605:         return getPartialDerivativeIndex(destP, destO, destSizes, orders);
+606:     }
+
+[23] org.apache.commons.math3.analysis.differentiation.DerivativeStructure#atan2  (lines 754-760)
+754:     public static DerivativeStructure atan2(final DerivativeStructure y, final DerivativeStructure x)
+755:         throws DimensionMismatchException {
+756:         y.compiler.checkCompatibility(x.compiler);
+757:         final DerivativeStructure result = new DerivativeStructure(y.compiler);
+758:         y.compiler.atan2(y.data, 0, x.data, 0, result.data, 0);
+759:         return result;
+760:     }
+
+[24] org.apache.commons.math3.analysis.differentiation.DSCompiler#compileDerivativesIndirection  (lines 258-293)
+258:     private static int[][] compileDerivativesIndirection(final int parameters, final int order,
+259:                                                       final DSCompiler valueCompiler,
+260:                                                       final DSCompiler derivativeCompiler) {
+261: 
+262:         if (parameters == 0 || order == 0) {
+263:             return new int[1][parameters];
+264:         }
+265: 
+266:         final int vSize = valueCompiler.derivativesIndirection.length;
+267:         final int dSize = derivativeCompiler.derivativesIndirection.length;
+268:         final int[][] derivativesIndirection = new int[vSize + dSize][parameters];
+269: 
+270:         // set up the indices for the value part
+271:         for (int i = 0; i < vSize; ++i) {
+272:             // copy the first indices, the last one remaining set to 0
+273:             System.arraycopy(valueCompiler.derivativesIndirection[i], 0,
+274:                              derivativesIndirection[i], 0,
+275:                              parameters - 1);
+276:         }
+277: 
+278:         // set up the indices for the derivative part
+279:         for (int i = 0; i < dSize; ++i) {
+280: 
+281:             // copy the indices
+282:             System.arraycopy(derivativeCompiler.derivativesIndirection[i], 0,
+283:                              derivativesIndirection[vSize + i], 0,
+284:                              parameters);
+285: 
+286:             // increment the derivation order for the last parameter
+287:             derivativesIndirection[vSize + i][parameters - 1]++;
+288: 
+289:         }
+290: 
+291:         return derivativesIndirection;
+292: 
+293:     }
+
+[25] org.apache.commons.math3.analysis.differentiation.DSCompiler#add  (lines 734-740)
+734:     public void add(final double[] lhs, final int lhsOffset,
+735:                     final double[] rhs, final int rhsOffset,
+736:                     final double[] result, final int resultOffset) {
+737:         for (int i = 0; i < getSize(); ++i) {
+738:             result[resultOffset + i] = lhs[lhsOffset + i] + rhs[rhsOffset + i];
+739:         }
+740:     }
+
+[26] org.apache.commons.math3.analysis.differentiation.DerivativeStructure#DerivativeStructure  (lines 81-83)
+81:     public DerivativeStructure(final int parameters, final int order) {
+82:         this(DSCompiler.getCompiler(parameters, order));
+83:     }
+
+[27] org.apache.commons.math3.util.FastMath#min  (lines 3420-3422)
+3420:     public static int min(final int a, final int b) {
+3421:         return (a <= b) ? a : b;
+3422:     }
+
+[28] org.apache.commons.math3.analysis.differentiation.DSCompiler#rootN  (lines 942-969)
+942:     public void rootN(final double[] operand, final int operandOffset, final int n,
+943:                       final double[] result, final int resultOffset) {
+944: 
+945:         // create the function value and derivatives
+946:         // [x^(1/n), (1/n)x^((1/n)-1), (1-n)/n^2x^((1/n)-2), ... ]
+947:         double[] function = new double[1 + order];
+948:         double xk;
+949:         if (n == 2) {
+950:             function[0] = FastMath.sqrt(operand[operandOffset]);
+951:             xk          = 0.5 / function[0];
+952:         } else if (n == 3) {
+953:             function[0] = FastMath.cbrt(operand[operandOffset]);
+954:             xk          = 1.0 / (3.0 * function[0] * function[0]);
+955:         } else {
+956:             function[0] = FastMath.pow(operand[operandOffset], 1.0 / n);
+957:             xk          = 1.0 / (n * FastMath.pow(function[0], n - 1));
+958:         }
+959:         final double nReciprocal = 1.0 / n;
+960:         final double xReciprocal = 1.0 / operand[operandOffset];
+961:         for (int i = 1; i <= order; ++i) {
+962:             function[i] = xk;
+963:             xk *= xReciprocal * (nReciprocal - i);
+964:         }
+965: 
+966:         // apply function composition
+967:         compose(operand, operandOffset, function, result, resultOffset);
+968: 
+969:     }
+
+[29] org.apache.commons.math3.analysis.differentiation.DerivativeStructure#getValue  (lines 230-232)
+230:     public double getValue() {
+231:         return data[0];
+232:     }
+
+[30] org.apache.commons.math3.analysis.differentiation.DSCompiler#atan  (lines 1323-1370)
+1323:     public void atan(final double[] operand, final int operandOffset,
+1324:                      final double[] result, final int resultOffset) {
+1325: 
+1326:         // create the function value and derivatives
+1327:         double[] function = new double[1 + order];
+1328:         final double x = operand[operandOffset];
+1329:         function[0] = FastMath.atan(x);
+1330:         if (order > 0) {
+1331:             // the nth order derivative of atan has the form:
+1332:             // dn(atan(x)/dxn = Q_n(x) / (1 + x^2)^n
+1333:             // where Q_n(x) is a degree n-1 polynomial with same parity as n-1
+1334:             // Q_1(x) = 1, Q_2(x) = -2x, Q_3(x) = 6x^2 - 2 ...
+1335:             // the general recurrence relation for Q_n is:
+1336:             // Q_n(x) = (1+x^2) Q_(n-1)'(x) - 2(n-1) x Q_(n-1)(x)
+1337:             // as per polynomial parity, we can store coefficients of both Q_(n-1) and Q_n in the same array
+1338:             final double[] q = new double[order];
+1339:             q[0] = 1;
+1340:             final double x2    = x * x;
+1341:             final double f     = 1.0 / (1 + x2);
+1342:             double coeff = f;
+1343:             function[1] = coeff * q[0];
+1344:             for (int n = 2; n <= order; ++n) {
+1345: 
+1346:                 // update and evaluate polynomial Q_n(x)
+1347:                 double v = 0;
+1348:                 q[n - 1] = -n * q[n - 2];
+1349:                 for (int k = n - 1; k >= 0; k -= 2) {
+1350:                     v = v * x2 + q[k];
+1351:                     if (k > 2) {
+1352:                         q[k - 2] = (k - 1) * q[k - 1] + (k - 1 - 2 * n) * q[k - 3];
+1353:                     } else if (k == 2) {
+1354:                         q[0] = q[1];
+1355:                     }
+1356:                 }
+1357:                 if ((n & 0x1) == 0) {
+1358:                     v *= x;
+1359:                 }
+1360: 
+1361:                 coeff *= f;
+1362:                 function[n] = coeff * v;
+1363: 
+1364:             }
+1365:         }
+1366: 
+1367:         // apply function composition
+1368:         compose(operand, operandOffset, function, result, resultOffset);
+1369: 
+1370:     }
+
+[31] org.apache.commons.math3.util.FastMath#max  (lines 3488-3490)
+3488:     public static int max(final int a, final int b) {
+3489:         return (a <= b) ? b : a;
+3490:     }

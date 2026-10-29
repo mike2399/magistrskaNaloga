@@ -1,0 +1,984 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.joda.time.format.TestDateTimeFormatter::testParseLocalDate_weekyear_month_week_2010
+junit.framework.AssertionFailedError: expected:<2010-01-04> but was:<2008-12-29>
+	at org.joda.time.format.TestDateTimeFormatter.testParseLocalDate_weekyear_month_week_2010(TestDateTimeFormatter.java:428)
+--- org.joda.time.format.TestDateTimeFormatter::testParseLocalDate_weekyear_month_week_2011
+junit.framework.AssertionFailedError: expected:<2011-01-03> but was:<2010-01-04>
+	at org.joda.time.format.TestDateTimeFormatter.testParseLocalDate_weekyear_month_week_2011(TestDateTimeFormatter.java:434)
+--- org.joda.time.format.TestDateTimeFormatter::testParseLocalDate_weekyear_month_week_2012
+junit.framework.AssertionFailedError: expected:<2012-01-02> but was:<2011-01-03>
+	at org.joda.time.format.TestDateTimeFormatter.testParseLocalDate_weekyear_month_week_2012(TestDateTimeFormatter.java:440)
+--- org.joda.time.format.TestDateTimeFormatter::testParseLocalDate_year_month_week_2010
+junit.framework.AssertionFailedError: expected:<2010-01-04> but was:<2008-12-29>
+	at org.joda.time.format.TestDateTimeFormatter.testParseLocalDate_year_month_week_2010(TestDateTimeFormatter.java:454)
+... (3 more triggering tests omitted)
+
+=== CANDIDATE METHODS ===
+
+[1] org.joda.time.format.DateTimeParserBucket#compareReverse  (lines 493-504)
+493:     static int compareReverse(DurationField a, DurationField b) {
+494:         if (a == null || !a.isSupported()) {
+495:             if (b == null || !b.isSupported()) {
+496:                 return 0;
+497:             }
+498:             return -1;
+499:         }
+500:         if (b == null || !b.isSupported()) {
+501:             return 1;
+502:         }
+503:         return -a.compareTo(b);
+504:     }
+
+[2] org.joda.time.format.DateTimeFormatterBuilder#parseInto  (lines 1262-1325)
+1262:         public int parseInto(DateTimeParserBucket bucket, String text, int position) {
+1263:             int limit = Math.min(iMaxParsedDigits, text.length() - position);
+1264: 
+1265:             boolean negative = false;
+1266:             int length = 0;
+1267:             while (length < limit) {
+1268:                 char c = text.charAt(position + length);
+1269:                 if (length == 0 && (c == '-' || c == '+') && iSigned) {
+1270:                     negative = c == '-';
+1271: 
+1272:                     // Next character must be a digit.
+1273:                     if (length + 1 >= limit || 
+1274:                         (c = text.charAt(position + length + 1)) < '0' || c > '9')
+1275:                     {
+1276:                         break;
+1277:                     }
+1278: 
+1279:                     if (negative) {
+1280:                         length++;
+1281:                     } else {
+1282:                         // Skip the '+' for parseInt to succeed.
+1283:                         position++;
+1284:                     }
+1285:                     // Expand the limit to disregard the sign character.
+1286:                     limit = Math.min(limit + 1, text.length() - position);
+1287:                     continue;
+1288:                 }
+1289:                 if (c < '0' || c > '9') {
+1290:                     break;
+1291:                 }
+1292:                 length++;
+1293:             }
+1294: 
+1295:             if (length == 0) {
+1296:                 return ~position;
+1297:             }
+1298: 
+1299:             int value;
+1300:             if (length >= 9) {
+1301:                 // Since value may exceed integer limits, use stock parser
+1302:                 // which checks for this.
+1303:                 value = Integer.parseInt(text.substring(position, position += length));
+1304:             } else {
+1305:                 int i = position;
+1306:                 if (negative) {
+1307:                     i++;
+1308:                 }
+1309:                 try {
+1310:                     value = text.charAt(i++) - '0';
+1311:                 } catch (StringIndexOutOfBoundsException e) {
+1312:                     return ~position;
+1313:                 }
+1314:                 position += length;
+1315:                 while (i < position) {
+1316:                     value = ((value << 3) + (value << 1)) + text.charAt(i++) - '0';
+1317:                 }
+1318:                 if (negative) {
+1319:                     value = -value;
+1320:                 }
+1321:             }
+1322: 
+1323:             bucket.saveField(iFieldType, value);
+1324:             return position;
+1325:         }
+
+[3] org.joda.time.LocalDate#LocalDate  (lines 280-287)
+280:     public LocalDate(long instant, Chronology chronology) {
+281:         chronology = DateTimeUtils.getChronology(chronology);
+282:         
+283:         long localMillis = chronology.getZone().getMillisKeepLocal(DateTimeZone.UTC, instant);
+284:         chronology = chronology.withUTC();
+285:         iLocalMillis = chronology.dayOfMonth().roundFloor(localMillis);
+286:         iChronology = chronology;
+287:     }
+
+[4] org.joda.time.format.DateTimeFormatter#parseLocalDateTime  (lines 794-814)
+794:     public LocalDateTime parseLocalDateTime(String text) {
+795:         DateTimeParser parser = requireParser();
+796:         
+797:         Chronology chrono = selectChronology(null).withUTC();  // always use UTC, avoiding DST gaps
+798:         DateTimeParserBucket bucket = new DateTimeParserBucket(0, chrono, iLocale, iPivotYear, iDefaultYear);
+799:         int newPos = parser.parseInto(bucket, text, 0);
+800:         if (newPos >= 0) {
+801:             if (newPos >= text.length()) {
+802:                 long millis = bucket.computeMillis(true, text);
+803:                 if (bucket.getZone() == null) {  // treat withOffsetParsed() as being true
+804:                     int parsedOffset = bucket.getOffset();
+805:                     DateTimeZone parsedZone = DateTimeZone.forOffsetMillis(parsedOffset);
+806:                     chrono = chrono.withZone(parsedZone);
+807:                 }
+808:                 return new LocalDateTime(millis, chrono);
+809:             }
+810:         } else {
+811:             newPos = ~newPos;
+812:         }
+813:         throw new IllegalArgumentException(FormatUtils.createErrorMessage(text, newPos));
+814:     }
+
+[5] org.joda.time.chrono.GJChronology#getDateTimeMillis  (lines 326-348)
+326:     public long getDateTimeMillis(int year, int monthOfYear, int dayOfMonth,
+327:                                   int millisOfDay)
+328:         throws IllegalArgumentException
+329:     {
+330:         Chronology base;
+331:         if ((base = getBase()) != null) {
+332:             return base.getDateTimeMillis(year, monthOfYear, dayOfMonth, millisOfDay);
+333:         }
+334: 
+335:         // Assume date is Gregorian.
+336:         long instant = iGregorianChronology.getDateTimeMillis
+337:             (year, monthOfYear, dayOfMonth, millisOfDay);
+338:         if (instant < iCutoverMillis) {
+339:             // Maybe it's Julian.
+340:             instant = iJulianChronology.getDateTimeMillis
+341:                 (year, monthOfYear, dayOfMonth, millisOfDay);
+342:             if (instant >= iCutoverMillis) {
+343:                 // Okay, it's in the illegal cutover gap.
+344:                 throw new IllegalArgumentException("Specified date does not exist");
+345:             }
+346:         }
+347:         return instant;
+348:     }
+
+[6] org.joda.time.format.DateTimeFormatterBuilder#PaddedNumber  (lines 1393-1398)
+1393:         protected PaddedNumber(DateTimeFieldType fieldType, int maxParsedDigits,
+1394:                      boolean signed, int minPrintedDigits)
+1395:         {
+1396:             super(fieldType, maxParsedDigits, signed);
+1397:             iMinPrintedDigits = minPrintedDigits;
+1398:         }
+
+[7] org.joda.time.LocalDateTime#LocalDateTime  (lines 274-280)
+274:     public LocalDateTime(long instant, Chronology chronology) {
+275:         chronology = DateTimeUtils.getChronology(chronology);
+276:         
+277:         long localMillis = chronology.getZone().getMillisKeepLocal(DateTimeZone.UTC, instant);
+278:         iLocalMillis = localMillis;
+279:         iChronology = chronology.withUTC();
+280:     }
+
+[8] org.joda.time.format.DateTimeParserBucket#set  (lines 464-474)
+464:         long set(long millis, boolean reset) {
+465:             if (iText == null) {
+466:                 millis = iField.set(millis, iValue);
+467:             } else {
+468:                 millis = iField.set(millis, iText, iLocale);
+469:             }
+470:             if (reset) {
+471:                 millis = iField.roundFloor(millis);
+472:             }
+473:             return millis;
+474:         }
+
+[9] org.joda.time.DateTimeZone#getMillisKeepLocal  (lines 1026-1035)
+1026:     public long getMillisKeepLocal(DateTimeZone newZone, long oldInstant) {
+1027:         if (newZone == null) {
+1028:             newZone = DateTimeZone.getDefault();
+1029:         }
+1030:         if (newZone == this) {
+1031:             return oldInstant;
+1032:         }
+1033:         long instantLocal = convertUTCToLocal(oldInstant);
+1034:         return newZone.convertLocalToUTC(instantLocal, false, oldInstant);
+1035:     }
+
+[10] org.joda.time.LocalDateTime#toLocalDate  (lines 697-699)
+697:     public LocalDate toLocalDate() {
+698:         return new LocalDate(getLocalMillis(), getChronology());
+699:     }
+
+[11] org.joda.time.format.DateTimeFormat#parsePatternTo  (lines 399-563)
+399:     private static void parsePatternTo(DateTimeFormatterBuilder builder, String pattern) {
+400:         int length = pattern.length();
+401:         int[] indexRef = new int[1];
+402: 
+403:         for (int i=0; i<length; i++) {
+404:             indexRef[0] = i;
+405:             String token = parseToken(pattern, indexRef);
+406:             i = indexRef[0];
+407: 
+408:             int tokenLen = token.length();
+409:             if (tokenLen == 0) {
+410:                 break;
+411:             }
+412:             char c = token.charAt(0);
+413: 
+414:             switch (c) {
+415:             case 'G': // era designator (text)
+416:                 builder.appendEraText();
+417:                 break;
+418:             case 'C': // century of era (number)
+419:                 builder.appendCenturyOfEra(tokenLen, tokenLen);
+420:                 break;
+421:             case 'x': // weekyear (number)
+422:             case 'y': // year (number)
+423:             case 'Y': // year of era (number)
+424:                 if (tokenLen == 2) {
+425:                     boolean lenientParse = true;
+426: 
+427:                     // Peek ahead to next token.
+428:                     if (i + 1 < length) {
+429:                         indexRef[0]++;
+430:                         if (isNumericToken(parseToken(pattern, indexRef))) {
+431:                             // If next token is a number, cannot support
+432:                             // lenient parse, because it will consume digits
+433:                             // that it should not.
+434:                             lenientParse = false;
+435:                         }
+436:                         indexRef[0]--;
+437:                     }
+438: 
+439:                     // Use pivots which are compatible with SimpleDateFormat.
+440:                     switch (c) {
+441:                     case 'x':
+442:                         builder.appendTwoDigitWeekyear
+443:                             (new DateTime().getWeekyear() - 30, lenientParse);
+444:                         break;
+445:                     case 'y':
+446:                     case 'Y':
+447:                     default:
+448:                         builder.appendTwoDigitYear(new DateTime().getYear() - 30, lenientParse);
+449:                         break;
+450:                     }
+451:                 } else {
+452:                     // Try to support long year values.
+453:                     int maxDigits = 9;
+454: 
+455:                     // Peek ahead to next token.
+456:                     if (i + 1 < length) {
+457:                         indexRef[0]++;
+458:                         if (isNumericToken(parseToken(pattern, indexRef))) {
+459:                             // If next token is a number, cannot support long years.
+460:                             maxDigits = tokenLen;
+461:                         }
+462:                         indexRef[0]--;
+463:                     }
+464: 
+465:                     switch (c) {
+466:                     case 'x':
+467:                         builder.appendWeekyear(tokenLen, maxDigits);
+468:                         break;
+469:                     case 'y':
+470:                         builder.appendYear(tokenLen, maxDigits);
+471:                         break;
+472:                     case 'Y':
+473:                         builder.appendYearOfEra(tokenLen, maxDigits);
+474:                         break;
+475:                     }
+476:                 }
+477:                 break;
+478:             case 'M': // month of year (text and number)
+479:                 if (tokenLen >= 3) {
+480:                     if (tokenLen >= 4) {
+481:                         builder.appendMonthOfYearText();
+482:                     } else {
+483:                         builder.appendMonthOfYearShortText();
+484:                     }
+485:                 } else {
+486:                     builder.appendMonthOfYear(tokenLen);
+487:                 }
+488:                 break;
+489:             case 'd': // day of month (number)
+490:                 builder.appendDayOfMonth(tokenLen);
+491:                 break;
+492:             case 'a': // am/pm marker (text)
+493:                 builder.appendHalfdayOfDayText();
+494:                 break;
+495:             case 'h': // clockhour of halfday (number, 1..12)
+496:                 builder.appendClockhourOfHalfday(tokenLen);
+497:                 break;
+498:             case 'H': // hour of day (number, 0..23)
+499:                 builder.appendHourOfDay(tokenLen);
+500:                 break;
+501:             case 'k': // clockhour of day (1..24)
+502:                 builder.appendClockhourOfDay(tokenLen);
+503:                 break;
+504:             case 'K': // hour of halfday (0..11)
+505:                 builder.appendHourOfHalfday(tokenLen);
+506:                 break;
+507:             case 'm': // minute of hour (number)
+508:                 builder.appendMinuteOfHour(tokenLen);
+509:                 break;
+510:             case 's': // second of minute (number)
+511:                 builder.appendSecondOfMinute(tokenLen);
+512:                 break;
+513:             case 'S': // fraction of second (number)
+514:                 builder.appendFractionOfSecond(tokenLen, tokenLen);
+515:                 break;
+516:             case 'e': // day of week (number)
+517:                 builder.appendDayOfWeek(tokenLen);
+518:                 break;
+519:             case 'E': // dayOfWeek (text)
+520:                 if (tokenLen >= 4) {
+521:                     builder.appendDayOfWeekText();
+522:                 } else {
+523:                     builder.appendDayOfWeekShortText();
+524:                 }
+525:                 break;
+526:             case 'D': // day of year (number)
+527:                 builder.appendDayOfYear(tokenLen);
+528:                 break;
+529:             case 'w': // week of weekyear (number)
+530:                 builder.appendWeekOfWeekyear(tokenLen);
+531:                 break;
+532:             case 'z': // time zone (text)
+533:                 if (tokenLen >= 4) {
+534:                     builder.appendTimeZoneName();
+535:                 } else {
+536:                     builder.appendTimeZoneShortName();
+537:                 }
+538:                 break;
+539:             case 'Z': // time zone offset
+540:                 if (tokenLen == 1) {
+541:                     builder.appendTimeZoneOffset(null, "Z", false, 2, 2);
+542:                 } else if (tokenLen == 2) {
+543:                     builder.appendTimeZoneOffset(null, "Z", true, 2, 2);
+544:                 } else {
+545:                     builder.appendTimeZoneId();
+546:                 }
+547:                 break;
+548:             case '\'': // literal text
+549:                 String sub = token.substring(1);
+550:                 if (sub.length() == 1) {
+551:                     builder.appendLiteral(sub.charAt(0));
+552:                 } else {
+553:                     // Create copy of sub since otherwise the temporary quoted
+554:                     // string would still be referenced internally.
+555:                     builder.appendLiteral(new String(sub));
+556:                 }
+557:                 break;
+558:             default:
+559:                 throw new IllegalArgumentException
+560:                     ("Illegal pattern component: " + token);
+561:             }
+562:         }
+563:     }
+
+[12] org.joda.time.chrono.GJChronology#roundFloor  (lines 850-863)
+850:         public long roundFloor(long instant) {
+851:             if (instant >= iCutover) {
+852:                 instant = iGregorianField.roundFloor(instant);
+853:                 if (instant < iCutover) {
+854:                     // Only adjust if gap fully crossed.
+855:                     if (instant + iGapDuration < iCutover) {
+856:                         instant = gregorianToJulian(instant);
+857:                     }
+858:                 }
+859:             } else {
+860:                 instant = iJulianField.roundFloor(instant);
+861:             }
+862:             return instant;
+863:         }
+
+[13] org.joda.time.format.DateTimeFormat#createFormatterForPattern  (lines 673-689)
+673:     private static DateTimeFormatter createFormatterForPattern(String pattern) {
+674:         if (pattern == null || pattern.length() == 0) {
+675:             throw new IllegalArgumentException("Invalid pattern specification");
+676:         }
+677:         DateTimeFormatter formatter = null;
+678:         synchronized (cPatternedCache) {
+679:             formatter = cPatternedCache.get(pattern);
+680:             if (formatter == null) {
+681:                 DateTimeFormatterBuilder builder = new DateTimeFormatterBuilder();
+682:                 parsePatternTo(builder, pattern);
+683:                 formatter = builder.toFormatter();
+684: 
+685:                 cPatternedCache.put(pattern, formatter);
+686:             }
+687:         }
+688:         return formatter;
+689:     }
+
+[14] org.joda.time.chrono.GJChronology#withUTC  (lines 306-308)
+306:     public Chronology withUTC() {
+307:         return withZone(DateTimeZone.UTC);
+308:     }
+
+[15] org.joda.time.chrono.GJChronology#getMinimumDaysInFirstWeek  (lines 392-394)
+392:     public int getMinimumDaysInFirstWeek() {
+393:         return iGregorianChronology.getMinimumDaysInFirstWeek();
+394:     }
+
+[16] org.joda.time.DateTimeFieldType#getField  (lines 479-533)
+479:         public DateTimeField getField(Chronology chronology) {
+480:             chronology = DateTimeUtils.getChronology(chronology);
+481: 
+482:             switch (iOrdinal) {
+483:                 case ERA:
+484:                     return chronology.era();
+485:                 case YEAR_OF_ERA:
+486:                     return chronology.yearOfEra();
+487:                 case CENTURY_OF_ERA:
+488:                     return chronology.centuryOfEra();
+489:                 case YEAR_OF_CENTURY:
+490:                     return chronology.yearOfCentury();
+491:                 case YEAR:
+492:                     return chronology.year();
+493:                 case DAY_OF_YEAR:
+494:                     return chronology.dayOfYear();
+495:                 case MONTH_OF_YEAR:
+496:                     return chronology.monthOfYear();
+497:                 case DAY_OF_MONTH:
+498:                     return chronology.dayOfMonth();
+499:                 case WEEKYEAR_OF_CENTURY:
+500:                     return chronology.weekyearOfCentury();
+501:                 case WEEKYEAR:
+502:                     return chronology.weekyear();
+503:                 case WEEK_OF_WEEKYEAR:
+504:                     return chronology.weekOfWeekyear();
+505:                 case DAY_OF_WEEK:
+506:                     return chronology.dayOfWeek();
+507:                 case HALFDAY_OF_DAY:
+508:                     return chronology.halfdayOfDay();
+509:                 case HOUR_OF_HALFDAY:
+510:                     return chronology.hourOfHalfday();
+511:                 case CLOCKHOUR_OF_HALFDAY:
+512:                     return chronology.clockhourOfHalfday();
+513:                 case CLOCKHOUR_OF_DAY:
+514:                     return chronology.clockhourOfDay();
+515:                 case HOUR_OF_DAY:
+516:                     return chronology.hourOfDay();
+517:                 case MINUTE_OF_DAY:
+518:                     return chronology.minuteOfDay();
+519:                 case MINUTE_OF_HOUR:
+520:                     return chronology.minuteOfHour();
+521:                 case SECOND_OF_DAY:
+522:                     return chronology.secondOfDay();
+523:                 case SECOND_OF_MINUTE:
+524:                     return chronology.secondOfMinute();
+525:                 case MILLIS_OF_DAY:
+526:                     return chronology.millisOfDay();
+527:                 case MILLIS_OF_SECOND:
+528:                     return chronology.millisOfSecond();
+529:                 default:
+530:                     // Shouldn't happen.
+531:                     throw new InternalError();
+532:             }
+533:         }
+
+[17] org.joda.time.Instant#toInstant  (lines 130-132)
+130:     public Instant toInstant() {
+131:         return this;
+132:     }
+
+[18] org.joda.time.format.DateTimeParserBucket#getOffset  (lines 172-174)
+172:     public int getOffset() {
+173:         return iOffset;
+174:     }
+
+[19] org.joda.time.DateTimeZone#forOffsetMillis  (lines 281-284)
+281:     public static DateTimeZone forOffsetMillis(int millisOffset) {
+282:         String id = printOffset(millisOffset);
+283:         return fixedOffsetZone(id, millisOffset);
+284:     }
+
+[20] org.joda.time.chrono.GJChronology#getInstance  (lines 184-231)
+184:     public static synchronized GJChronology getInstance(
+185:             DateTimeZone zone,
+186:             ReadableInstant gregorianCutover,
+187:             int minDaysInFirstWeek) {
+188:         
+189:         zone = DateTimeUtils.getZone(zone);
+190:         Instant cutoverInstant;
+191:         if (gregorianCutover == null) {
+192:             cutoverInstant = DEFAULT_CUTOVER;
+193:         } else {
+194:             cutoverInstant = gregorianCutover.toInstant();
+195:         }
+196: 
+197:         GJChronology chrono;
+198: 
+199:         ArrayList<GJChronology> chronos = cCache.get(zone);
+200:         if (chronos == null) {
+201:             chronos = new ArrayList<GJChronology>(2);
+202:             cCache.put(zone, chronos);
+203:         } else {
+204:             for (int i=chronos.size(); --i>=0; ) {
+205:                 chrono = chronos.get(i);
+206:                 if (minDaysInFirstWeek == chrono.getMinimumDaysInFirstWeek() &&
+207:                     cutoverInstant.equals(chrono.getGregorianCutover())) {
+208:                     
+209:                     return chrono;
+210:                 }
+211:             }
+212:         }
+213: 
+214:         if (zone == DateTimeZone.UTC) {
+215:             chrono = new GJChronology
+216:                 (JulianChronology.getInstance(zone, minDaysInFirstWeek),
+217:                  GregorianChronology.getInstance(zone, minDaysInFirstWeek),
+218:                  cutoverInstant);
+219:         } else {
+220:             chrono = getInstance(DateTimeZone.UTC, cutoverInstant, minDaysInFirstWeek);
+221:             chrono = new GJChronology
+222:                 (ZonedChronology.getInstance(chrono, zone),
+223:                  chrono.iJulianChronology,
+224:                  chrono.iGregorianChronology,
+225:                  chrono.iCutoverInstant);
+226:         }
+227: 
+228:         chronos.add(chrono);
+229: 
+230:         return chrono;
+231:     }
+
+[21] org.joda.time.chrono.GJChronology#getZone  (lines 291-297)
+291:     public DateTimeZone getZone() {
+292:         Chronology base;
+293:         if ((base = getBase()) != null) {
+294:             return base.getZone();
+295:         }
+296:         return DateTimeZone.UTC;
+297:     }
+
+[22] org.joda.time.LocalDate#LocalDate  (lines 391-401)
+391:     public LocalDate(
+392:             int year,
+393:             int monthOfYear,
+394:             int dayOfMonth,
+395:             Chronology chronology) {
+396:         super();
+397:         chronology = DateTimeUtils.getChronology(chronology).withUTC();
+398:         long instant = chronology.getDateTimeMillis(year, monthOfYear, dayOfMonth, 0);
+399:         iChronology = chronology;
+400:         iLocalMillis = instant;
+401:     }
+
+[23] org.joda.time.field.BaseDurationField#compareTo  (lines 145-157)
+145:     public int compareTo(DurationField otherField) {
+146:         long otherMillis = otherField.getUnitMillis();
+147:         long thisMillis = getUnitMillis();
+148:         // cannot do (thisMillis - otherMillis) as can overflow
+149:         if (thisMillis == otherMillis) {
+150:             return 0;
+151:         }
+152:         if (thisMillis < otherMillis) {
+153:             return -1;
+154:         } else {
+155:             return 1;
+156:         }
+157:     }
+
+[24] org.joda.time.format.DateTimeParserBucket#saveField  (lines 248-264)
+248:     private void saveField(SavedField field) {
+249:         SavedField[] savedFields = iSavedFields;
+250:         int savedFieldsCount = iSavedFieldsCount;
+251:         
+252:         if (savedFieldsCount == savedFields.length || iSavedFieldsShared) {
+253:             // Expand capacity or merely copy if saved fields are shared.
+254:             SavedField[] newArray = new SavedField
+255:                 [savedFieldsCount == savedFields.length ? savedFieldsCount * 2 : savedFields.length];
+256:             System.arraycopy(savedFields, 0, newArray, 0, savedFieldsCount);
+257:             iSavedFields = savedFields = newArray;
+258:             iSavedFieldsShared = false;
+259:         }
+260:         
+261:         iSavedState = null;
+262:         savedFields[savedFieldsCount] = field;
+263:         iSavedFieldsCount = savedFieldsCount + 1;
+264:     }
+
+[25] org.joda.time.format.DateTimeFormatterBuilder#appendDecimal  (lines 394-410)
+394:     public DateTimeFormatterBuilder appendDecimal(
+395:             DateTimeFieldType fieldType, int minDigits, int maxDigits) {
+396:         if (fieldType == null) {
+397:             throw new IllegalArgumentException("Field type must not be null");
+398:         }
+399:         if (maxDigits < minDigits) {
+400:             maxDigits = minDigits;
+401:         }
+402:         if (minDigits < 0 || maxDigits <= 0) {
+403:             throw new IllegalArgumentException();
+404:         }
+405:         if (minDigits <= 1) {
+406:             return append0(new UnpaddedNumber(fieldType, maxDigits, false));
+407:         } else {
+408:             return append0(new PaddedNumber(fieldType, maxDigits, false, minDigits));
+409:         }
+410:     }
+
+[26] org.joda.time.chrono.GJChronology#getGregorianCutover  (lines 383-385)
+383:     public Instant getGregorianCutover() {
+384:         return iCutoverInstant;
+385:     }
+
+[27] org.joda.time.DurationFieldType#getField  (lines 263-295)
+263:         public DurationField getField(Chronology chronology) {
+264:             chronology = DateTimeUtils.getChronology(chronology);
+265:             
+266:             switch (iOrdinal) {
+267:                 case ERAS:
+268:                     return chronology.eras();
+269:                 case CENTURIES:
+270:                     return chronology.centuries();
+271:                 case WEEKYEARS:
+272:                     return chronology.weekyears();
+273:                 case YEARS:
+274:                     return chronology.years();
+275:                 case MONTHS:
+276:                     return chronology.months();
+277:                 case WEEKS:
+278:                     return chronology.weeks();
+279:                 case DAYS:
+280:                     return chronology.days();
+281:                 case HALFDAYS:
+282:                     return chronology.halfdays();
+283:                 case HOURS:
+284:                     return chronology.hours();
+285:                 case MINUTES:
+286:                     return chronology.minutes();
+287:                 case SECONDS:
+288:                     return chronology.seconds();
+289:                 case MILLIS:
+290:                     return chronology.millis();
+291:                 default:
+292:                     // Shouldn't happen.
+293:                     throw new InternalError();
+294:             }
+295:         }
+
+[28] org.joda.time.LocalDateTime#getLocalMillis  (lines 585-587)
+585:     protected long getLocalMillis() {
+586:         return iLocalMillis;
+587:     }
+
+[29] org.joda.time.chrono.GJChronology#getInstanceUTC  (lines 122-124)
+122:     public static GJChronology getInstanceUTC() {
+123:         return getInstance(DateTimeZone.UTC, DEFAULT_CUTOVER, 4);
+124:     }
+
+[30] org.joda.time.chrono.GJChronology#withZone  (lines 316-324)
+316:     public Chronology withZone(DateTimeZone zone) {
+317:         if (zone == null) {
+318:             zone = DateTimeZone.getDefault();
+319:         }
+320:         if (zone == getZone()) {
+321:             return this;
+322:         }
+323:         return getInstance(zone, iCutoverInstant, getMinimumDaysInFirstWeek());
+324:     }
+
+[31] org.joda.time.field.DecoratedDurationField#getUnitMillis  (lines 100-102)
+100:     public long getUnitMillis() {
+101:         return iField.getUnitMillis();
+102:     }
+
+[32] org.joda.time.format.DateTimeFormatterBuilder#parseInto  (lines 2583-2594)
+2583:         public int parseInto(DateTimeParserBucket bucket, String text, int position) {
+2584:             DateTimeParser[] elements = iParsers;
+2585:             if (elements == null) {
+2586:                 throw new UnsupportedOperationException();
+2587:             }
+2588: 
+2589:             int len = elements.length;
+2590:             for (int i=0; i<len && position >= 0; i++) {
+2591:                 position = elements[i].parseInto(bucket, text, position);
+2592:             }
+2593:             return position;
+2594:         }
+
+[33] org.joda.time.format.DateTimeFormat#forPattern  (lines 169-171)
+169:     public static DateTimeFormatter forPattern(String pattern) {
+170:         return createFormatterForPattern(pattern);
+171:     }
+
+[34] org.joda.time.format.DateTimeFormatterBuilder#decompose  (lines 2608-2629)
+2608:         private void decompose(List<Object> elementPairs, List<Object> printerList, List<Object> parserList) {
+2609:             int size = elementPairs.size();
+2610:             for (int i=0; i<size; i+=2) {
+2611:                 Object element = elementPairs.get(i);
+2612:                 if (element instanceof DateTimePrinter) {
+2613:                     if (element instanceof Composite) {
+2614:                         addArrayToList(printerList, ((Composite)element).iPrinters);
+2615:                     } else {
+2616:                         printerList.add(element);
+2617:                     }
+2618:                 }
+2619: 
+2620:                 element = elementPairs.get(i + 1);
+2621:                 if (element instanceof DateTimeParser) {
+2622:                     if (element instanceof Composite) {
+2623:                         addArrayToList(parserList, ((Composite)element).iParsers);
+2624:                     } else {
+2625:                         parserList.add(element);
+2626:                     }
+2627:                 }
+2628:             }
+2629:         }
+
+[35] org.joda.time.format.DateTimeFormat#parseToken  (lines 573-623)
+573:     private static String parseToken(String pattern, int[] indexRef) {
+574:         StringBuffer buf = new StringBuffer();
+575: 
+576:         int i = indexRef[0];
+577:         int length = pattern.length();
+578: 
+579:         char c = pattern.charAt(i);
+580:         if (c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z') {
+581:             // Scan a run of the same character, which indicates a time
+582:             // pattern.
+583:             buf.append(c);
+584: 
+585:             while (i + 1 < length) {
+586:                 char peek = pattern.charAt(i + 1);
+587:                 if (peek == c) {
+588:                     buf.append(c);
+589:                     i++;
+590:                 } else {
+591:                     break;
+592:                 }
+593:             }
+594:         } else {
+595:             // This will identify token as text.
+596:             buf.append('\'');
+597: 
+598:             boolean inLiteral = false;
+599: 
+600:             for (; i < length; i++) {
+601:                 c = pattern.charAt(i);
+602:                 
+603:                 if (c == '\'') {
+604:                     if (i + 1 < length && pattern.charAt(i + 1) == '\'') {
+605:                         // '' is treated as escaped '
+606:                         i++;
+607:                         buf.append(c);
+608:                     } else {
+609:                         inLiteral = !inLiteral;
+610:                     }
+611:                 } else if (!inLiteral &&
+612:                            (c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z')) {
+613:                     i--;
+614:                     break;
+615:                 } else {
+616:                     buf.append(c);
+617:                 }
+618:             }
+619:         }
+620: 
+621:         indexRef[0] = i;
+622:         return buf.toString();
+623:     }
+
+[36] org.joda.time.DateTimeZone#fixedOffsetZone  (lines 348-366)
+348:     private static synchronized DateTimeZone fixedOffsetZone(String id, int offset) {
+349:         if (offset == 0) {
+350:             return DateTimeZone.UTC;
+351:         }
+352:         if (iFixedOffsetCache == null) {
+353:             iFixedOffsetCache = new HashMap<String, SoftReference<DateTimeZone>>();
+354:         }
+355:         DateTimeZone zone;
+356:         Reference<DateTimeZone> ref = iFixedOffsetCache.get(id);
+357:         if (ref != null) {
+358:             zone = ref.get();
+359:             if (zone != null) {
+360:                 return zone;
+361:             }
+362:         }
+363:         zone = new FixedDateTimeZone(id, null, offset, offset);
+364:         iFixedOffsetCache.put(id, new SoftReference<DateTimeZone>(zone));
+365:         return zone;
+366:     }
+
+[37] org.joda.time.LocalDateTime#getChronology  (lines 594-596)
+594:     public Chronology getChronology() {
+595:         return iChronology;
+596:     }
+
+[38] org.joda.time.format.DateTimeParserBucket#saveField  (lines 233-235)
+233:     public void saveField(DateTimeFieldType fieldType, int value) {
+234:         saveField(new SavedField(fieldType.getField(iChrono), value));
+235:     }
+
+[39] org.joda.time.base.AbstractInstant#equals  (lines 257-269)
+257:     public boolean equals(Object readableInstant) {
+258:         // must be to fulfil ReadableInstant contract
+259:         if (this == readableInstant) {
+260:             return true;
+261:         }
+262:         if (readableInstant instanceof ReadableInstant == false) {
+263:             return false;
+264:         }
+265:         ReadableInstant otherInstant = (ReadableInstant) readableInstant;
+266:         return
+267:             getMillis() == otherInstant.getMillis() &&
+268:             FieldUtils.equals(getChronology(), otherInstant.getChronology());
+269:     }
+
+[40] org.joda.time.chrono.GJChronology#set  (lines 696-725)
+696:         public long set(long instant, int value) {
+697:             if (instant >= iCutover) {
+698:                 instant = iGregorianField.set(instant, value);
+699:                 if (instant < iCutover) {
+700:                     // Only adjust if gap fully crossed.
+701:                     if (instant + iGapDuration < iCutover) {
+702:                         instant = gregorianToJulian(instant);
+703:                     }
+704:                     // Verify that new value stuck.
+705:                     if (get(instant) != value) {
+706:                         throw new IllegalFieldValueException
+707:                             (iGregorianField.getType(), new Integer(value), null, null);
+708:                     }
+709:                 }
+710:             } else {
+711:                 instant = iJulianField.set(instant, value);
+712:                 if (instant >= iCutover) {
+713:                     // Only adjust if gap fully crossed.
+714:                     if (instant - iGapDuration >= iCutover) {
+715:                         instant = julianToGregorian(instant);
+716:                     }
+717:                     // Verify that new value stuck.
+718:                     if (get(instant) != value) {
+719:                        throw new IllegalFieldValueException
+720:                             (iJulianField.getType(), new Integer(value), null, null);
+721:                     }
+722:                 }
+723:             }
+724:             return instant;
+725:         }
+
+[41] org.joda.time.chrono.AssembledChronology#weekOfWeekyear  (lines 239-241)
+239:     public final DateTimeField weekOfWeekyear() {
+240:         return iWeekOfWeekyear;
+241:     }
+
+[42] org.joda.time.format.DateTimeParserBucket#SavedField  (lines 450-455)
+450:         SavedField(DateTimeField field, int value) {
+451:             iField = field;
+452:             iValue = value;
+453:             iText = null;
+454:             iLocale = null;
+455:         }
+
+[43] org.joda.time.format.DateTimeFormatter#parseLocalDate  (lines 758-760)
+758:     public LocalDate parseLocalDate(String text) {
+759:         return parseLocalDateTime(text).toLocalDate();
+760:     }
+
+[44] org.joda.time.format.DateTimeFormatter#selectChronology  (lines 914-923)
+914:     private Chronology selectChronology(Chronology chrono) {
+915:         chrono = DateTimeUtils.getChronology(chrono);
+916:         if (iChrono != null) {
+917:             chrono = iChrono;
+918:         }
+919:         if (iZone != null) {
+920:             chrono = chrono.withZone(iZone);
+921:         }
+922:         return chrono;
+923:     }
+
+[45] org.joda.time.DateTimeUtils#getZone  (lines 268-273)
+268:     public static final DateTimeZone getZone(DateTimeZone zone) {
+269:         if (zone == null) {
+270:             return DateTimeZone.getDefault();
+271:         }
+272:         return zone;
+273:     }
+
+[46] org.joda.time.format.DateTimeFormatter#withChronology  (lines 254-260)
+254:     public DateTimeFormatter withChronology(Chronology chrono) {
+255:         if (iChrono == chrono) {
+256:             return this;
+257:         }
+258:         return new DateTimeFormatter(iPrinter, iParser, iLocale,
+259:                 iOffsetParsed, chrono, iZone, iPivotYear, iDefaultYear);
+260:     }
+
+[47] org.joda.time.LocalDate#equals  (lines 568-580)
+568:     public boolean equals(Object partial) {
+569:         // override to perform faster
+570:         if (this == partial) {
+571:             return true;
+572:         }
+573:         if (partial instanceof LocalDate) {
+574:             LocalDate other = (LocalDate) partial;
+575:             if (iChronology.equals(other.iChronology)) {
+576:                 return iLocalMillis == other.iLocalMillis;
+577:             }
+578:         }
+579:         return super.equals(partial);
+580:     }
+
+[48] org.joda.time.format.DateTimeFormatterBuilder#isPrinter  (lines 1097-1105)
+1097:     private boolean isPrinter(Object f) {
+1098:         if (f instanceof DateTimePrinter) {
+1099:             if (f instanceof Composite) {
+1100:                 return ((Composite)f).isPrinter();
+1101:             }
+1102:             return true;
+1103:         }
+1104:         return false;
+1105:     }
+
+[49] org.joda.time.format.DateTimeParserBucket#getZone  (lines 151-153)
+151:     public DateTimeZone getZone() {
+152:         return iZone;
+153:     }
+
+[50] org.joda.time.format.DateTimeParserBucket#computeMillis  (lines 331-378)
+331:     public long computeMillis(boolean resetFields, String text) {
+332:         SavedField[] savedFields = iSavedFields;
+333:         int count = iSavedFieldsCount;
+334:         if (iSavedFieldsShared) {
+335:             iSavedFields = savedFields = (SavedField[])iSavedFields.clone();
+336:             iSavedFieldsShared = false;
+337:         }
+338:         sort(savedFields, count);
+339:         if (count > 0) {
+340:             // alter base year for parsing if first field is month or day
+341:             DurationField months = DurationFieldType.months().getField(iChrono);
+342:             DurationField days = DurationFieldType.days().getField(iChrono);
+343:             DurationField first = savedFields[0].iField.getDurationField();
+344:             if (compareReverse(first, months) >= 0 && compareReverse(first, days) <= 0) {
+345:                 saveField(DateTimeFieldType.year(), iDefaultYear);
+346:                 return computeMillis(resetFields, text);
+347:             }
+348:         }
+349: 
+350:         long millis = iMillis;
+351:         try {
+352:             for (int i = 0; i < count; i++) {
+353:                 millis = savedFields[i].set(millis, resetFields);
+354:             }
+355:         } catch (IllegalFieldValueException e) {
+356:             if (text != null) {
+357:                 e.prependMessage("Cannot parse \"" + text + '"');
+358:             }
+359:             throw e;
+360:         }
+361:         
+362:         if (iZone == null) {
+363:             millis -= iOffset;
+364:         } else {
+365:             int offset = iZone.getOffsetFromLocal(millis);
+366:             millis -= offset;
+367:             if (offset != iZone.getOffset(millis)) {
+368:                 String message =
+369:                     "Illegal instant due to time zone offset transition (" + iZone + ')';
+370:                 if (text != null) {
+371:                     message = "Cannot parse \"" + text + "\": " + message;
+372:                 }
+373:                 throw new IllegalArgumentException(message);
+374:             }
+375:         }
+376:         
+377:         return millis;
+378:     }

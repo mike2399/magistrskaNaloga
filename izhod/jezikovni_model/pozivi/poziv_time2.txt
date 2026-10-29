@@ -1,0 +1,772 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.joda.time.TestPartial_Basics::testWith_baseAndArgHaveNoRange
+java.lang.IllegalArgumentException: Types array must not contain duplicate: era and year
+	at org.joda.time.Partial.<init>(Partial.java:224)
+	at org.joda.time.Partial.with(Partial.java:466)
+	at org.joda.time.TestPartial_Basics.testWith_baseAndArgHaveNoRange(TestPartial_Basics.java:469)
+
+=== CANDIDATE METHODS ===
+
+[1] org.joda.time.chrono.ZonedChronology#getDurationField  (lines 513-515)
+513:         public final DurationField getDurationField() {
+514:             return iDurationField;
+515:         }
+
+[2] org.joda.time.base.AbstractPartial#indexOf  (lines 169-176)
+169:     public int indexOf(DateTimeFieldType type) {
+170:         for (int i = 0, isize = size(); i < isize; i++) {
+171:             if (getFieldType(i) == type) {
+172:                 return i;
+173:             }
+174:         }
+175:         return -1;
+176:     }
+
+[3] org.joda.time.Partial#with  (lines 428-476)
+428:     public Partial with(DateTimeFieldType fieldType, int value) {
+429:         if (fieldType == null) {
+430:             throw new IllegalArgumentException("The field type must not be null");
+431:         }
+432:         int index = indexOf(fieldType);
+433:         if (index == -1) {
+434:             DateTimeFieldType[] newTypes = new DateTimeFieldType[iTypes.length + 1];
+435:             int[] newValues = new int[newTypes.length];
+436:             
+437:             // find correct insertion point to keep largest-smallest order
+438:             int i = 0;
+439:             DurationField unitField = fieldType.getDurationType().getField(iChronology);
+440:             if (unitField.isSupported()) {
+441:                 for (; i < iTypes.length; i++) {
+442:                     DateTimeFieldType loopType = iTypes[i];
+443:                     DurationField loopUnitField = loopType.getDurationType().getField(iChronology);
+444:                     if (loopUnitField.isSupported()) {
+445:                         int compare = unitField.compareTo(loopUnitField);
+446:                         if (compare > 0) {
+447:                             break;
+448:                         } else if (compare == 0) {
+449:                             DurationField rangeField = fieldType.getRangeDurationType().getField(iChronology);
+450:                             DurationField loopRangeField = loopType.getRangeDurationType().getField(iChronology);
+451:                             if (rangeField.compareTo(loopRangeField) > 0) {
+452:                                 break;
+453:                             }
+454:                         }
+455:                     }
+456:                 }
+457:             }
+458:             System.arraycopy(iTypes, 0, newTypes, 0, i);
+459:             System.arraycopy(iValues, 0, newValues, 0, i);
+460:             newTypes[i] = fieldType;
+461:             newValues[i] = value;
+462:             System.arraycopy(iTypes, i, newTypes, i + 1, newTypes.length - i - 1);
+463:             System.arraycopy(iValues, i, newValues, i + 1, newValues.length - i - 1);
+464:             // use public constructor to ensure full validation
+465:             // this isn't overly efficient, but is safe
+466:             Partial newPartial = new Partial(newTypes, newValues, iChronology);
+467:             iChronology.validate(newPartial, newValues);
+468:             return newPartial;
+469:         }
+470:         if (value == getValue(index)) {
+471:             return this;
+472:         }
+473:         int[] newValues = getValues();
+474:         newValues = getField(index).set(this, index, newValues, value);
+475:         return new Partial(this, newValues);
+476:     }
+
+[4] org.joda.time.tz.DateTimeZoneBuilder#getOffset  (lines 1530-1547)
+1530:         public int getOffset(long instant) {
+1531:             long[] transitions = iTransitions;
+1532:             int i = Arrays.binarySearch(transitions, instant);
+1533:             if (i >= 0) {
+1534:                 return iWallOffsets[i];
+1535:             }
+1536:             i = ~i;
+1537:             if (i < transitions.length) {
+1538:                 if (i > 0) {
+1539:                     return iWallOffsets[i - 1];
+1540:                 }
+1541:                 return 0;
+1542:             }
+1543:             if (iTailZone == null) {
+1544:                 return iWallOffsets[i - 1];
+1545:             }
+1546:             return iTailZone.getOffset(instant);
+1547:         }
+
+[5] org.joda.time.field.BaseDateTimeField#getMinimumValue  (lines 771-773)
+771:     public int getMinimumValue(ReadablePartial instant, int[] values) {
+772:         return getMinimumValue(instant);
+773:     }
+
+[6] org.joda.time.Partial#getFieldType  (lines 345-347)
+345:     public DateTimeFieldType getFieldType(int index) {
+346:         return iTypes[index];
+347:     }
+
+[7] org.joda.time.field.BaseDateTimeField#getMinimumValue  (lines 757-759)
+757:     public int getMinimumValue(ReadablePartial instant) {
+758:         return getMinimumValue();
+759:     }
+
+[8] org.joda.time.DateTimeZone#convertLocalToUTC  (lines 997-1038)
+997:     public long convertLocalToUTC(long instantLocal, boolean strict) {
+998:         // get the offset at instantLocal (first estimate)
+999:         int offsetLocal = getOffset(instantLocal);
+1000:         // adjust instantLocal using the estimate and recalc the offset
+1001:         int offset = getOffset(instantLocal - offsetLocal);
+1002:         // if the offsets differ, we must be near a DST boundary
+1003:         if (offsetLocal != offset) {
+1004:             // if strict then always check if in DST gap
+1005:             // otherwise only check if zone in Western hemisphere (as the
+1006:             // value of offset is already correct for Eastern hemisphere)
+1007:             if (strict || offsetLocal < 0) {
+1008:                 // determine if we are in the DST gap
+1009:                 long nextLocal = nextTransition(instantLocal - offsetLocal);
+1010:                 if (nextLocal == (instantLocal - offsetLocal)) {
+1011:                     nextLocal = Long.MAX_VALUE;
+1012:                 }
+1013:                 long nextAdjusted = nextTransition(instantLocal - offset);
+1014:                 if (nextAdjusted == (instantLocal - offset)) {
+1015:                     nextAdjusted = Long.MAX_VALUE;
+1016:                 }
+1017:                 if (nextLocal != nextAdjusted) {
+1018:                     // yes we are in the DST gap
+1019:                     if (strict) {
+1020:                         // DST gap is not acceptable
+1021:                         throw new IllegalInstantException(instantLocal, getID());
+1022:                     } else {
+1023:                         // DST gap is acceptable, but for the Western hemisphere
+1024:                         // the offset is wrong and will result in local times
+1025:                         // before the cutover so use the offsetLocal instead
+1026:                         offset = offsetLocal;
+1027:                     }
+1028:                 }
+1029:             }
+1030:         }
+1031:         // check for overflow
+1032:         long instantUTC = instantLocal - offset;
+1033:         // If there is a sign change, but the two values have different signs...
+1034:         if ((instantLocal ^ instantUTC) < 0 && (instantLocal ^ offset) < 0) {
+1035:             throw new ArithmeticException("Subtracting time zone offset caused overflow");
+1036:         }
+1037:         return instantUTC;
+1038:     }
+
+[9] org.joda.time.chrono.ZonedChronology#hashCode  (lines 630-633)
+630:         @Override
+631:         public int hashCode() {
+632:             return iField.hashCode() ^ iZone.hashCode();
+633:         }
+
+[10] org.joda.time.chrono.GJChronology#getGregorianCutover  (lines 399-401)
+399:     public Instant getGregorianCutover() {
+400:         return iCutoverInstant;
+401:     }
+
+[11] org.joda.time.Partial#getField  (lines 334-336)
+334:     protected DateTimeField getField(int index, Chronology chrono) {
+335:         return iTypes[index].getField(chrono);
+336:     }
+
+[12] org.joda.time.chrono.GJChronology#withUTC  (lines 309-311)
+309:     public Chronology withUTC() {
+310:         return withZone(DateTimeZone.UTC);
+311:     }
+
+[13] org.joda.time.chrono.CopticChronology#getInstanceUTC  (lines 88-90)
+88:     public static CopticChronology getInstanceUTC() {
+89:         return INSTANCE_UTC;
+90:     }
+
+[14] org.joda.time.Partial#size  (lines 310-312)
+310:     public int size() {
+311:         return iTypes.length;
+312:     }
+
+[15] org.joda.time.tz.DateTimeZoneBuilder#nextTransition  (lines 1572-1587)
+1572:         public long nextTransition(long instant) {
+1573:             long[] transitions = iTransitions;
+1574:             int i = Arrays.binarySearch(transitions, instant);
+1575:             i = (i >= 0) ? (i + 1) : ~i;
+1576:             if (i < transitions.length) {
+1577:                 return transitions[i];
+1578:             }
+1579:             if (iTailZone == null) {
+1580:                 return instant;
+1581:             }
+1582:             long end = transitions[transitions.length - 1];
+1583:             if (instant < end) {
+1584:                 instant = end;
+1585:             }
+1586:             return iTailZone.nextTransition(instant);
+1587:         }
+
+[16] org.joda.time.DateTimeFieldType#year  (lines 326-328)
+326:     public static DateTimeFieldType year() {
+327:         return YEAR_TYPE;
+328:     }
+
+[17] org.joda.time.chrono.ZonedChronology#getRangeDurationField  (lines 517-519)
+517:         public final DurationField getRangeDurationField() {
+518:             return iRangeDurationField;
+519:         }
+
+[18] org.joda.time.field.BaseDateTimeField#getMaximumValue  (lines 817-819)
+817:     public int getMaximumValue(ReadablePartial instant, int[] values) {
+818:         return getMaximumValue(instant);
+819:     }
+
+[19] org.joda.time.chrono.GJChronology#assemble  (lines 477-586)
+477:     protected void assemble(Fields fields) {
+478:         Object[] params = (Object[])getParam();
+479: 
+480:         JulianChronology julian = (JulianChronology)params[0];
+481:         GregorianChronology gregorian = (GregorianChronology)params[1];
+482:         Instant cutoverInstant = (Instant)params[2];
+483:         iCutoverMillis = cutoverInstant.getMillis();
+484: 
+485:         iJulianChronology = julian;
+486:         iGregorianChronology = gregorian;
+487:         iCutoverInstant = cutoverInstant;
+488: 
+489:         if (getBase() != null) {
+490:             return;
+491:         }
+492: 
+493:         if (julian.getMinimumDaysInFirstWeek() != gregorian.getMinimumDaysInFirstWeek()) {
+494:             throw new IllegalArgumentException();
+495:         }
+496: 
+497:         // Compute difference between the chronologies at the cutover instant
+498:         iGapDuration = iCutoverMillis - julianToGregorianByYear(iCutoverMillis);
+499: 
+500:         // Begin field definitions.
+501: 
+502:         // First just copy all the Gregorian fields and then override those
+503:         // that need special attention.
+504:         fields.copyFieldsFrom(gregorian);
+505:         
+506:         // Assuming cutover is at midnight, all time of day fields can be
+507:         // gregorian since they are unaffected by cutover.
+508: 
+509:         // Verify assumption.
+510:         if (gregorian.millisOfDay().get(iCutoverMillis) == 0) {
+511:             // Cutover is sometime in the day, so cutover fields are required
+512:             // for time of day.
+513: 
+514:             fields.millisOfSecond = new CutoverField(julian.millisOfSecond(), fields.millisOfSecond, iCutoverMillis);
+515:             fields.millisOfDay = new CutoverField(julian.millisOfDay(), fields.millisOfDay, iCutoverMillis);
+516:             fields.secondOfMinute = new CutoverField(julian.secondOfMinute(), fields.secondOfMinute, iCutoverMillis);
+517:             fields.secondOfDay = new CutoverField(julian.secondOfDay(), fields.secondOfDay, iCutoverMillis);
+518:             fields.minuteOfHour = new CutoverField(julian.minuteOfHour(), fields.minuteOfHour, iCutoverMillis);
+519:             fields.minuteOfDay = new CutoverField(julian.minuteOfDay(), fields.minuteOfDay, iCutoverMillis);
+520:             fields.hourOfDay = new CutoverField(julian.hourOfDay(), fields.hourOfDay, iCutoverMillis);
+521:             fields.hourOfHalfday = new CutoverField(julian.hourOfHalfday(), fields.hourOfHalfday, iCutoverMillis);
+522:             fields.clockhourOfDay = new CutoverField(julian.clockhourOfDay(), fields.clockhourOfDay, iCutoverMillis);
+523:             fields.clockhourOfHalfday = new CutoverField(julian.clockhourOfHalfday(),
+524:                                                          fields.clockhourOfHalfday, iCutoverMillis);
+525:             fields.halfdayOfDay = new CutoverField(julian.halfdayOfDay(), fields.halfdayOfDay, iCutoverMillis);
+526:         }
+527: 
+528:         // These fields just require basic cutover support.
+529:         {
+530:             fields.era = new CutoverField(julian.era(), fields.era, iCutoverMillis);
+531:         }
+532: 
+533:         // These fields are special because they have imprecise durations. The
+534:         // family of addition methods need special attention. Override affected
+535:         // duration fields as well.
+536:         {
+537:             fields.year = new ImpreciseCutoverField(
+538:                 julian.year(), fields.year, iCutoverMillis);
+539:             fields.years = fields.year.getDurationField();
+540:             fields.yearOfEra = new ImpreciseCutoverField(
+541:                 julian.yearOfEra(), fields.yearOfEra, fields.years, iCutoverMillis);
+542:             
+543:             fields.centuryOfEra = new ImpreciseCutoverField(
+544:                 julian.centuryOfEra(), fields.centuryOfEra, iCutoverMillis);
+545:             fields.centuries = fields.centuryOfEra.getDurationField();
+546:             
+547:             fields.yearOfCentury = new ImpreciseCutoverField(
+548:                 julian.yearOfCentury(), fields.yearOfCentury, fields.years, fields.centuries, iCutoverMillis);
+549:             
+550:             fields.monthOfYear = new ImpreciseCutoverField(
+551:                 julian.monthOfYear(), fields.monthOfYear, null, fields.years, iCutoverMillis);
+552:             fields.months = fields.monthOfYear.getDurationField();
+553:             
+554:             fields.weekyear = new ImpreciseCutoverField(
+555:                 julian.weekyear(), fields.weekyear, null, iCutoverMillis, true);
+556:             fields.weekyears = fields.weekyear.getDurationField();
+557:             fields.weekyearOfCentury = new ImpreciseCutoverField(
+558:                 julian.weekyearOfCentury(), fields.weekyearOfCentury, fields.weekyears, fields.centuries, iCutoverMillis);
+559:         }
+560: 
+561:         // DayOfYear and weekOfWeekyear require special handling since cutover
+562:         // year has fewer days and weeks. Extend the cutover to the start of
+563:         // the next year or weekyear. This keeps the sequence unbroken during
+564:         // the cutover year.
+565: 
+566:         {
+567:             long cutover = gregorian.year().roundCeiling(iCutoverMillis);
+568:             fields.dayOfYear = new CutoverField(
+569:                 julian.dayOfYear(), fields.dayOfYear, fields.years, cutover, false);
+570:         }
+571: 
+572:         {
+573:             long cutover = gregorian.weekyear().roundCeiling(iCutoverMillis);
+574:             fields.weekOfWeekyear = new CutoverField(
+575:                 julian.weekOfWeekyear(), fields.weekOfWeekyear, fields.weekyears, cutover, true);
+576:         }
+577: 
+578:         // These fields require basic cutover support, except they must link to
+579:         // imprecise durations.
+580:         {
+581:             CutoverField cf = new CutoverField
+582:                 (julian.dayOfMonth(), fields.dayOfMonth, iCutoverMillis);
+583:             cf.iRangeDurationField = fields.months;
+584:             fields.dayOfMonth = cf;
+585:         }
+586:     }
+
+[20] org.joda.time.chrono.BasicYearDateTimeField#getMaximumValue  (lines 119-121)
+119:     public int getMaximumValue() {
+120:         return iChronology.getMaxYear();
+121:     }
+
+[21] org.joda.time.chrono.GJChronology#withZone  (lines 319-327)
+319:     public Chronology withZone(DateTimeZone zone) {
+320:         if (zone == null) {
+321:             zone = DateTimeZone.getDefault();
+322:         }
+323:         if (zone == getZone()) {
+324:             return this;
+325:         }
+326:         return getInstance(zone, iCutoverInstant, getMinimumDaysInFirstWeek());
+327:     }
+
+[22] org.joda.time.chrono.GJChronology#getInstance  (lines 185-234)
+185:     public static synchronized GJChronology getInstance(
+186:             DateTimeZone zone,
+187:             ReadableInstant gregorianCutover,
+188:             int minDaysInFirstWeek) {
+189:         
+190:         zone = DateTimeUtils.getZone(zone);
+191:         Instant cutoverInstant;
+192:         if (gregorianCutover == null) {
+193:             cutoverInstant = DEFAULT_CUTOVER;
+194:         } else {
+195:             cutoverInstant = gregorianCutover.toInstant();
+196:             LocalDate cutoverDate = new LocalDate(cutoverInstant.getMillis(), GregorianChronology.getInstance(zone));
+197:             if (cutoverDate.getYear() <= 0) {
+198:                 throw new IllegalArgumentException("Cutover too early. Must be on or after 0001-01-01.");
+199:             }
+200:         }
+201: 
+202:         GJChronology chrono;
+203:         synchronized (cCache) {
+204:             ArrayList<GJChronology> chronos = cCache.get(zone);
+205:             if (chronos == null) {
+206:                 chronos = new ArrayList<GJChronology>(2);
+207:                 cCache.put(zone, chronos);
+208:             } else {
+209:                 for (int i = chronos.size(); --i >= 0;) {
+210:                     chrono = chronos.get(i);
+211:                     if (minDaysInFirstWeek == chrono.getMinimumDaysInFirstWeek() &&
+212:                         cutoverInstant.equals(chrono.getGregorianCutover())) {
+213:                         
+214:                         return chrono;
+215:                     }
+216:                 }
+217:             }
+218:             if (zone == DateTimeZone.UTC) {
+219:                 chrono = new GJChronology
+220:                     (JulianChronology.getInstance(zone, minDaysInFirstWeek),
+221:                      GregorianChronology.getInstance(zone, minDaysInFirstWeek),
+222:                      cutoverInstant);
+223:             } else {
+224:                 chrono = getInstance(DateTimeZone.UTC, cutoverInstant, minDaysInFirstWeek);
+225:                 chrono = new GJChronology
+226:                     (ZonedChronology.getInstance(chrono, zone),
+227:                      chrono.iJulianChronology,
+228:                      chrono.iGregorianChronology,
+229:                      chrono.iCutoverInstant);
+230:             }
+231:             chronos.add(chrono);
+232:         }
+233:         return chrono;
+234:     }
+
+[23] org.joda.time.DateTimeZone#convertLocalToUTC  (lines 975-983)
+975:     public long convertLocalToUTC(long instantLocal, boolean strict, long originalInstantUTC) {
+976:         int offsetOriginal = getOffset(originalInstantUTC);
+977:         long instantUTC = instantLocal - offsetOriginal;
+978:         int offsetLocalFromOriginal = getOffset(instantUTC);
+979:         if (offsetLocalFromOriginal == offsetOriginal) {
+980:             return instantUTC;
+981:         }
+982:         return convertLocalToUTC(instantLocal, strict);
+983:     }
+
+[24] org.joda.time.Partial#Partial  (lines 189-251)
+189:     public Partial(DateTimeFieldType[] types, int[] values, Chronology chronology) {
+190:         super();
+191:         chronology = DateTimeUtils.getChronology(chronology).withUTC();
+192:         iChronology = chronology;
+193:         if (types == null) {
+194:             throw new IllegalArgumentException("Types array must not be null");
+195:         }
+196:         if (values == null) {
+197:             throw new IllegalArgumentException("Values array must not be null");
+198:         }
+199:         if (values.length != types.length) {
+200:             throw new IllegalArgumentException("Values array must be the same length as the types array");
+201:         }
+202:         if (types.length == 0) {
+203:             iTypes = types;
+204:             iValues = values;
+205:             return;
+206:         }
+207:         for (int i = 0; i < types.length; i++) {
+208:             if (types[i] == null) {
+209:                 throw new IllegalArgumentException("Types array must not contain null: index " + i);
+210:             }
+211:         }
+212:         DurationField lastUnitField = null;
+213:         for (int i = 0; i < types.length; i++) {
+214:             DateTimeFieldType loopType = types[i];
+215:             DurationField loopUnitField = loopType.getDurationType().getField(iChronology);
+216:             if (i > 0) {
+217:                 int compare = lastUnitField.compareTo(loopUnitField);
+218:                 if (compare < 0 || (compare != 0 && loopUnitField.isSupported() == false)) {
+219:                     throw new IllegalArgumentException("Types array must be in order largest-smallest: " +
+220:                             types[i - 1].getName() + " < " + loopType.getName());
+221:                 } else if (compare == 0) {
+222:                     if (types[i - 1].getRangeDurationType() == null) {
+223:                         if (loopType.getRangeDurationType() == null) {
+224:                             throw new IllegalArgumentException("Types array must not contain duplicate: " +
+225:                                             types[i - 1].getName() + " and " + loopType.getName());
+226:                         }
+227:                     } else {
+228:                         if (loopType.getRangeDurationType() == null) {
+229:                             throw new IllegalArgumentException("Types array must be in order largest-smallest: " +
+230:                                     types[i - 1].getName() + " < " + loopType.getName());
+231:                         }
+232:                         DurationField lastRangeField = types[i - 1].getRangeDurationType().getField(iChronology);
+233:                         DurationField loopRangeField = loopType.getRangeDurationType().getField(iChronology);
+234:                         if (lastRangeField.compareTo(loopRangeField) < 0) {
+235:                             throw new IllegalArgumentException("Types array must be in order largest-smallest: " +
+236:                                     types[i - 1].getName() + " < " + loopType.getName());
+237:                         }
+238:                         if (lastRangeField.compareTo(loopRangeField) == 0) {
+239:                             throw new IllegalArgumentException("Types array must not contain duplicate: " +
+240:                                             types[i - 1].getName() + " and " + loopType.getName());
+241:                         }
+242:                     }
+243:                 }
+244:             }
+245:             lastUnitField = loopUnitField;
+246:         }
+247:         
+248:         iTypes = (DateTimeFieldType[]) types.clone();
+249:         chronology.validate(this, values);
+250:         iValues = (int[]) values.clone();
+251:     }
+
+[25] org.joda.time.DurationFieldType#getField  (lines 281-313)
+281:         public DurationField getField(Chronology chronology) {
+282:             chronology = DateTimeUtils.getChronology(chronology);
+283:             
+284:             switch (iOrdinal) {
+285:                 case ERAS:
+286:                     return chronology.eras();
+287:                 case CENTURIES:
+288:                     return chronology.centuries();
+289:                 case WEEKYEARS:
+290:                     return chronology.weekyears();
+291:                 case YEARS:
+292:                     return chronology.years();
+293:                 case MONTHS:
+294:                     return chronology.months();
+295:                 case WEEKS:
+296:                     return chronology.weeks();
+297:                 case DAYS:
+298:                     return chronology.days();
+299:                 case HALFDAYS:
+300:                     return chronology.halfdays();
+301:                 case HOURS:
+302:                     return chronology.hours();
+303:                 case MINUTES:
+304:                     return chronology.minutes();
+305:                 case SECONDS:
+306:                     return chronology.seconds();
+307:                 case MILLIS:
+308:                     return chronology.millis();
+309:                 default:
+310:                     // Shouldn't happen.
+311:                     throw new InternalError();
+312:             }
+313:         }
+
+[26] org.joda.time.DateTimeFieldType#getField  (lines 479-533)
+479:         public DateTimeField getField(Chronology chronology) {
+480:             chronology = DateTimeUtils.getChronology(chronology);
+481: 
+482:             switch (iOrdinal) {
+483:                 case ERA:
+484:                     return chronology.era();
+485:                 case YEAR_OF_ERA:
+486:                     return chronology.yearOfEra();
+487:                 case CENTURY_OF_ERA:
+488:                     return chronology.centuryOfEra();
+489:                 case YEAR_OF_CENTURY:
+490:                     return chronology.yearOfCentury();
+491:                 case YEAR:
+492:                     return chronology.year();
+493:                 case DAY_OF_YEAR:
+494:                     return chronology.dayOfYear();
+495:                 case MONTH_OF_YEAR:
+496:                     return chronology.monthOfYear();
+497:                 case DAY_OF_MONTH:
+498:                     return chronology.dayOfMonth();
+499:                 case WEEKYEAR_OF_CENTURY:
+500:                     return chronology.weekyearOfCentury();
+501:                 case WEEKYEAR:
+502:                     return chronology.weekyear();
+503:                 case WEEK_OF_WEEKYEAR:
+504:                     return chronology.weekOfWeekyear();
+505:                 case DAY_OF_WEEK:
+506:                     return chronology.dayOfWeek();
+507:                 case HALFDAY_OF_DAY:
+508:                     return chronology.halfdayOfDay();
+509:                 case HOUR_OF_HALFDAY:
+510:                     return chronology.hourOfHalfday();
+511:                 case CLOCKHOUR_OF_HALFDAY:
+512:                     return chronology.clockhourOfHalfday();
+513:                 case CLOCKHOUR_OF_DAY:
+514:                     return chronology.clockhourOfDay();
+515:                 case HOUR_OF_DAY:
+516:                     return chronology.hourOfDay();
+517:                 case MINUTE_OF_DAY:
+518:                     return chronology.minuteOfDay();
+519:                 case MINUTE_OF_HOUR:
+520:                     return chronology.minuteOfHour();
+521:                 case SECOND_OF_DAY:
+522:                     return chronology.secondOfDay();
+523:                 case SECOND_OF_MINUTE:
+524:                     return chronology.secondOfMinute();
+525:                 case MILLIS_OF_DAY:
+526:                     return chronology.millisOfDay();
+527:                 case MILLIS_OF_SECOND:
+528:                     return chronology.millisOfSecond();
+529:                 default:
+530:                     // Shouldn't happen.
+531:                     throw new InternalError();
+532:             }
+533:         }
+
+[27] org.joda.time.DateTimeFieldType#getName  (lines 377-379)
+377:     public String getName() {
+378:         return iName;
+379:     }
+
+[28] org.joda.time.chrono.ZonedChronology#set  (lines 479-490)
+479:         public long set(long instant, int value) {
+480:             long localInstant = iZone.convertUTCToLocal(instant);
+481:             localInstant = iField.set(localInstant, value);
+482:             long result = iZone.convertLocalToUTC(localInstant, false, instant);
+483:             if (get(result) != value) {
+484:                 IllegalInstantException cause = new IllegalInstantException(localInstant,  iZone.getID());
+485:                 IllegalFieldValueException ex = new IllegalFieldValueException(iField.getType(), Integer.valueOf(value), cause.getMessage());
+486:                 ex.initCause(cause);
+487:                 throw ex;
+488:             }
+489:             return result;
+490:         }
+
+[29] org.joda.time.field.BaseDateTimeField#getMaximumValue  (lines 803-805)
+803:     public int getMaximumValue(ReadablePartial instant) {
+804:         return getMaximumValue();
+805:     }
+
+[30] org.joda.time.Partial#getChronology  (lines 322-324)
+322:     public Chronology getChronology() {
+323:         return iChronology;
+324:     }
+
+[31] org.joda.time.base.AbstractPartial#getField  (lines 104-106)
+104:     public DateTimeField getField(int index) {
+105:         return getField(index, getChronology());
+106:     }
+
+[32] org.joda.time.field.UnsupportedDurationField#compareTo  (lines 226-228)
+226:     public int compareTo(DurationField durationField) {
+227:         return 0;
+228:     }
+
+[33] org.joda.time.chrono.ZonedChronology#getMinimumValue  (lines 564-566)
+564:         public int getMinimumValue() {
+565:             return iField.getMinimumValue();
+566:         }
+
+[34] org.joda.time.Partial#Partial  (lines 152-162)
+152:     public Partial(DateTimeFieldType type, int value, Chronology chronology) {
+153:         super();
+154:         chronology = DateTimeUtils.getChronology(chronology).withUTC();
+155:         iChronology = chronology;
+156:         if (type == null) {
+157:             throw new IllegalArgumentException("The field type must not be null");
+158:         }
+159:         iTypes = new DateTimeFieldType[] {type};
+160:         iValues = new int[] {value};
+161:         chronology.validate(this, iValues);
+162:     }
+
+[35] org.joda.time.chrono.GJChronology#getMinimumDaysInFirstWeek  (lines 408-410)
+408:     public int getMinimumDaysInFirstWeek() {
+409:         return iGregorianChronology.getMinimumDaysInFirstWeek();
+410:     }
+
+[36] org.joda.time.field.UnsupportedDurationField#isSupported  (lines 91-93)
+91:     public boolean isSupported() {
+92:         return false;
+93:     }
+
+[37] org.joda.time.base.AbstractInstant#equals  (lines 257-269)
+257:     public boolean equals(Object readableInstant) {
+258:         // must be to fulfil ReadableInstant contract
+259:         if (this == readableInstant) {
+260:             return true;
+261:         }
+262:         if (readableInstant instanceof ReadableInstant == false) {
+263:             return false;
+264:         }
+265:         ReadableInstant otherInstant = (ReadableInstant) readableInstant;
+266:         return
+267:             getMillis() == otherInstant.getMillis() &&
+268:             FieldUtils.equals(getChronology(), otherInstant.getChronology());
+269:     }
+
+[38] org.joda.time.Partial#Partial  (lines 138-140)
+138:     public Partial(DateTimeFieldType type, int value) {
+139:         this(type, value, null);
+140:     }
+
+[39] org.joda.time.chrono.BuddhistChronology#getInstanceUTC  (lines 85-87)
+85:     public static BuddhistChronology getInstanceUTC() {
+86:         return INSTANCE_UTC;
+87:     }
+
+[40] org.joda.time.DateTimeFieldType#era  (lines 362-364)
+362:     public static DateTimeFieldType era() {
+363:         return ERA_TYPE;
+364:     }
+
+[41] org.joda.time.chrono.GJChronology#GJChronology  (lines 280-285)
+280:     private GJChronology(Chronology base,
+281:                          JulianChronology julian,
+282:                          GregorianChronology gregorian,
+283:                          Instant cutoverInstant) {
+284:         super(base, new Object[] {julian, gregorian, cutoverInstant});
+285:     }
+
+[42] org.joda.time.chrono.BaseChronology#validate  (lines 180-213)
+180:     public void validate(ReadablePartial partial, int[] values) {
+181:         // check values in standard range, catching really stupid cases like -1
+182:         // this means that the second check will not hit trouble
+183:         int size = partial.size();
+184:         for (int i = 0; i < size; i++) {
+185:             int value = values[i];
+186:             DateTimeField field = partial.getField(i);
+187:             if (value < field.getMinimumValue()) {
+188:                 throw new IllegalFieldValueException
+189:                     (field.getType(), Integer.valueOf(value),
+190:                      Integer.valueOf(field.getMinimumValue()), null);
+191:             }
+192:             if (value > field.getMaximumValue()) {
+193:                 throw new IllegalFieldValueException
+194:                     (field.getType(), Integer.valueOf(value),
+195:                      null, Integer.valueOf(field.getMaximumValue()));
+196:             }
+197:         }
+198:         // check values in specific range, catching really odd cases like 30th Feb
+199:         for (int i = 0; i < size; i++) {
+200:             int value = values[i];
+201:             DateTimeField field = partial.getField(i);
+202:             if (value < field.getMinimumValue(partial, values)) {
+203:                 throw new IllegalFieldValueException
+204:                     (field.getType(), Integer.valueOf(value),
+205:                      Integer.valueOf(field.getMinimumValue(partial, values)), null);
+206:             }
+207:             if (value > field.getMaximumValue(partial, values)) {
+208:                 throw new IllegalFieldValueException
+209:                     (field.getType(), Integer.valueOf(value),
+210:                      null, Integer.valueOf(field.getMaximumValue(partial, values)));
+211:             }
+212:         }
+213:     }
+
+[43] org.joda.time.DateTimeFieldType#getRangeDurationType  (lines 456-458)
+456:         public DurationFieldType getRangeDurationType() {
+457:             return iRangeType;
+458:         }
+
+[44] org.joda.time.chrono.ZonedChronology#hashCode  (lines 376-379)
+376:         @Override
+377:         public int hashCode() {
+378:             return iField.hashCode() ^ iZone.hashCode();
+379:         }
+
+[45] org.joda.time.chrono.ZonedChronology#getLeapDurationField  (lines 531-533)
+531:         public final DurationField getLeapDurationField() {
+532:             return iLeapDurationField;
+533:         }
+
+[46] org.joda.time.chrono.ISOChronology#getInstance  (lines 95-113)
+95:     public static ISOChronology getInstance(DateTimeZone zone) {
+96:         if (zone == null) {
+97:             zone = DateTimeZone.getDefault();
+98:         }
+99:         int index = System.identityHashCode(zone) & (FAST_CACHE_SIZE - 1);
+100:         ISOChronology chrono = cFastCache[index];
+101:         if (chrono != null && chrono.getZone() == zone) {
+102:             return chrono;
+103:         }
+104:         synchronized (cCache) {
+105:             chrono = cCache.get(zone);
+106:             if (chrono == null) {
+107:                 chrono = new ISOChronology(ZonedChronology.getInstance(INSTANCE_UTC, zone));
+108:                 cCache.put(zone, chrono);
+109:             }
+110:         }
+111:         cFastCache[index] = chrono;
+112:         return chrono;
+113:     }
+
+[47] org.joda.time.Instant#toInstant  (lines 143-145)
+143:     public Instant toInstant() {
+144:         return this;
+145:     }
+
+[48] org.joda.time.chrono.AssembledChronology#eras  (lines 287-289)
+287:     public final DurationField eras() {
+288:         return iEras;
+289:     }
+
+[49] org.joda.time.chrono.GJChronology#getZone  (lines 294-300)
+294:     public DateTimeZone getZone() {
+295:         Chronology base;
+296:         if ((base = getBase()) != null) {
+297:             return base.getZone();
+298:         }
+299:         return DateTimeZone.UTC;
+300:     }
+
+[50] org.joda.time.chrono.ZonedChronology#getMaximumValue  (lines 581-583)
+581:         public int getMaximumValue() {
+582:             return iField.getMaximumValue();
+583:         }

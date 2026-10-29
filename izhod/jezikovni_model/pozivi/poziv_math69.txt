@@ -1,0 +1,675 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math.stat.correlation.PearsonsCorrelationTest::testPValueNearZero
+junit.framework.AssertionFailedError
+	at org.apache.commons.math.stat.correlation.PearsonsCorrelationTest.testPValueNearZero(PearsonsCorrelationTest.java:181)
+--- org.apache.commons.math.stat.correlation.SpearmansRankCorrelationTest::testPValueNearZero
+junit.framework.AssertionFailedError
+	at org.apache.commons.math.stat.correlation.PearsonsCorrelationTest.testPValueNearZero(PearsonsCorrelationTest.java:181)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math.util.ContinuedFraction#evaluate  (lines 125-206)
+125:     public double evaluate(double x, double epsilon, int maxIterations)
+126:         throws MathException
+127:     {
+128:         double p0 = 1.0;
+129:         double p1 = getA(0, x);
+130:         double q0 = 0.0;
+131:         double q1 = 1.0;
+132:         double c = p1 / q1;
+133:         int n = 0;
+134:         double relativeError = Double.MAX_VALUE;
+135:         while (n < maxIterations && relativeError > epsilon) {
+136:             ++n;
+137:             double a = getA(n, x);
+138:             double b = getB(n, x);
+139:             double p2 = a * p1 + b * p0;
+140:             double q2 = a * q1 + b * q0;
+141:             boolean infinite = false;
+142:             if (Double.isInfinite(p2) || Double.isInfinite(q2)) {
+143:                 /*
+144:                  * Need to scale. Try successive powers of the larger of a or b
+145:                  * up to 5th power. Throw ConvergenceException if one or both
+146:                  * of p2, q2 still overflow.
+147:                  */
+148:                 double scaleFactor = 1d;
+149:                 double lastScaleFactor = 1d;
+150:                 final int maxPower = 5;
+151:                 final double scale = Math.max(a,b);
+152:                 if (scale <= 0) {  // Can't scale
+153:                     throw new ConvergenceException(
+154:                             "Continued fraction convergents diverged to +/- infinity for value {0}",
+155:                              x);
+156:                 }
+157:                 infinite = true;
+158:                 for (int i = 0; i < maxPower; i++) {
+159:                     lastScaleFactor = scaleFactor;
+160:                     scaleFactor *= scale;
+161:                     if (a != 0.0 && a > b) {
+162:                         p2 = p1 / lastScaleFactor + (b / scaleFactor * p0);
+163:                         q2 = q1 / lastScaleFactor + (b / scaleFactor * q0);
+164:                     } else if (b != 0) {
+165:                         p2 = (a / scaleFactor * p1) + p0 / lastScaleFactor;
+166:                         q2 = (a / scaleFactor * q1) + q0 / lastScaleFactor;
+167:                     }
+168:                     infinite = Double.isInfinite(p2) || Double.isInfinite(q2);
+169:                     if (!infinite) {
+170:                         break;
+171:                     }
+172:                 }
+173:             }
+174: 
+175:             if (infinite) {
+176:                // Scaling failed
+177:                throw new ConvergenceException(
+178:                  "Continued fraction convergents diverged to +/- infinity for value {0}",
+179:                   x);
+180:             }
+181: 
+182:             double r = p2 / q2;
+183: 
+184:             if (Double.isNaN(r)) {
+185:                 throw new ConvergenceException(
+186:                   "Continued fraction diverged to NaN for value {0}",
+187:                   x);
+188:             }
+189:             relativeError = Math.abs(r / c - 1.0);
+190: 
+191:             // prepare for next iteration
+192:             c = p2 / q2;
+193:             p0 = p1;
+194:             p1 = p2;
+195:             q0 = q1;
+196:             q1 = q2;
+197:         }
+198: 
+199:         if (n >= maxIterations) {
+200:             throw new MaxIterationsExceededException(maxIterations,
+201:                 "Continued fraction convergents failed to converge for value {0}",
+202:                 x);
+203:         }
+204: 
+205:         return c;
+206:     }
+
+[2] org.apache.commons.math.distribution.TDistributionImpl#setDegreesOfFreedomInternal  (lines 87-94)
+87:     private void setDegreesOfFreedomInternal(double newDegreesOfFreedom) {
+88:         if (newDegreesOfFreedom <= 0.0) {
+89:             throw MathRuntimeException.createIllegalArgumentException(
+90:                   "degrees of freedom must be positive ({0})",
+91:                   newDegreesOfFreedom);
+92:         }
+93:         this.degreesOfFreedom = newDegreesOfFreedom;
+94:     }
+
+[3] org.apache.commons.math.linear.BlockRealMatrix#getColumn  (lines 1181-1203)
+1181:     @Override
+1182:     public double[] getColumn(final int column)
+1183:         throws MatrixIndexException {
+1184: 
+1185:         MatrixUtils.checkColumnIndex(this, column);
+1186:         final double[] out = new double[rows];
+1187: 
+1188:         // perform copy block-wise, to ensure good cache behavior
+1189:         final int jBlock  = column / BLOCK_SIZE;
+1190:         final int jColumn = column - jBlock * BLOCK_SIZE;
+1191:         final int jWidth  = blockWidth(jBlock);
+1192:         int outIndex      = 0;
+1193:         for (int iBlock = 0; iBlock < blockRows; ++iBlock) {
+1194:             final int iHeight = blockHeight(iBlock);
+1195:             final double[] block = blocks[iBlock * blockColumns + jBlock];
+1196:             for (int i = 0; i < iHeight; ++i) {
+1197:                 out[outIndex++] = block[i * jWidth + jColumn];
+1198:             }
+1199:         }
+1200: 
+1201:         return out;
+1202: 
+1203:     }
+
+[4] org.apache.commons.math.stat.regression.SimpleRegression#getTotalSumSquares  (lines 350-355)
+350:     public double getTotalSumSquares() {
+351:         if (n < 2) {
+352:             return Double.NaN;
+353:         }
+354:         return sumYY;
+355:     }
+
+[5] org.apache.commons.math.stat.correlation.PearsonsCorrelation#PearsonsCorrelation  (lines 77-81)
+77:     public PearsonsCorrelation(RealMatrix matrix) {
+78:         checkSufficientData(matrix);
+79:         nObs = matrix.getRowDimension();
+80:         correlationMatrix = computeCorrelationMatrix(matrix);
+81:     }
+
+[6] org.apache.commons.math.stat.correlation.PearsonsCorrelation#computeCorrelationMatrix  (lines 186-198)
+186:     public RealMatrix computeCorrelationMatrix(RealMatrix matrix) {
+187:         int nVars = matrix.getColumnDimension();
+188:         RealMatrix outMatrix = new BlockRealMatrix(nVars, nVars);
+189:         for (int i = 0; i < nVars; i++) {
+190:             for (int j = 0; j < i; j++) {
+191:               double corr = correlation(matrix.getColumn(i), matrix.getColumn(j));
+192:               outMatrix.setEntry(i, j, corr);
+193:               outMatrix.setEntry(j, i, corr);
+194:             }
+195:             outMatrix.setEntry(i, i, 1d);
+196:         }
+197:         return outMatrix;
+198:     }
+
+[7] org.apache.commons.math.special.Beta#logBeta  (lines 187-200)
+187:     public static double logBeta(double a, double b, double epsilon,
+188:         int maxIterations) {
+189: 
+190:         double ret;
+191: 
+192:         if (Double.isNaN(a) || Double.isNaN(b) || (a <= 0.0) || (b <= 0.0)) {
+193:             ret = Double.NaN;
+194:         } else {
+195:             ret = Gamma.logGamma(a) + Gamma.logGamma(b) -
+196:                 Gamma.logGamma(a + b);
+197:         }
+198: 
+199:         return ret;
+200:     }
+
+[8] org.apache.commons.math.special.Beta#regularizedBeta  (lines 51-55)
+51:     public static double regularizedBeta(double x, double a, double b)
+52:         throws MathException
+53:     {
+54:         return regularizedBeta(x, a, b, DEFAULT_EPSILON, Integer.MAX_VALUE);
+55:     }
+
+[9] org.apache.commons.math.linear.BlockRealMatrix#BlockRealMatrix  (lines 124-127)
+124:     public BlockRealMatrix(final double[][] rawData)
+125:         throws IllegalArgumentException {
+126:         this(rawData.length, rawData[0].length, toBlocksLayout(rawData), false);
+127:     }
+
+[10] org.apache.commons.math.distribution.TDistributionImpl#setDegreesOfFreedom  (lines 79-82)
+79:     @Deprecated
+80:     public void setDegreesOfFreedom(double degreesOfFreedom) {
+81:         setDegreesOfFreedomInternal(degreesOfFreedom);
+82:     }
+
+[11] org.apache.commons.math.stat.regression.SimpleRegression#addData  (lines 121-141)
+121:     public void addData(double x, double y) {
+122:         if (n == 0) {
+123:             xbar = x;
+124:             ybar = y;
+125:         } else {
+126:             double dx = x - xbar;
+127:             double dy = y - ybar;
+128:             sumXX += dx * dx * (double) n / (n + 1d);
+129:             sumYY += dy * dy * (double) n / (n + 1d);
+130:             sumXY += dx * dy * (double) n / (n + 1d);
+131:             xbar += dx / (n + 1.0);
+132:             ybar += dy / (n + 1.0);
+133:         }
+134:         sumX += x;
+135:         sumY += y;
+136:         n++;
+137: 
+138:         if (n > 2) {
+139:             distribution.setDegreesOfFreedom(n - 2);
+140:         }
+141:     }
+
+[12] org.apache.commons.math.special.Gamma#logGamma  (lines 94-114)
+94:     public static double logGamma(double x) {
+95:         double ret;
+96: 
+97:         if (Double.isNaN(x) || (x <= 0.0)) {
+98:             ret = Double.NaN;
+99:         } else {
+100:             double g = 607.0 / 128.0;
+101: 
+102:             double sum = 0.0;
+103:             for (int i = LANCZOS.length - 1; i > 0; --i) {
+104:                 sum = sum + (LANCZOS[i] / (x + i));
+105:             }
+106:             sum = sum + LANCZOS[0];
+107: 
+108:             double tmp = x + g + .5;
+109:             ret = ((x + .5) * Math.log(tmp)) - tmp +
+110:                 HALF_LOG_2_PI + Math.log(sum / x);
+111:         }
+112: 
+113:         return ret;
+114:     }
+
+[13] org.apache.commons.math.linear.BlockRealMatrix#BlockRealMatrix  (lines 144-179)
+144:     public BlockRealMatrix(final int rows, final int columns,
+145:                            final double[][] blockData, final boolean copyArray)
+146:         throws IllegalArgumentException {
+147: 
+148:         super(rows, columns);
+149:         this.rows    = rows;
+150:         this.columns = columns;
+151: 
+152:         // number of blocks
+153:         blockRows    = (rows    + BLOCK_SIZE - 1) / BLOCK_SIZE;
+154:         blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;
+155: 
+156:         if (copyArray) {
+157:             // allocate storage blocks, taking care of smaller ones at right and bottom
+158:             blocks = new double[blockRows * blockColumns][];
+159:         } else {
+160:             // reference existing array
+161:             blocks = blockData;
+162:         }
+163: 
+164:         int index = 0;
+165:         for (int iBlock = 0; iBlock < blockRows; ++iBlock) {
+166:             final int iHeight = blockHeight(iBlock);
+167:             for (int jBlock = 0; jBlock < blockColumns; ++jBlock, ++index) {
+168:                 if (blockData[index].length != iHeight * blockWidth(jBlock)) {
+169:                     throw MathRuntimeException.createIllegalArgumentException(
+170:                             "wrong array shape (block length = {0}, expected {1})",
+171:                             blockData[index].length, iHeight * blockWidth(jBlock));
+172:                 }
+173:                 if (copyArray) {
+174:                     blocks[index] = blockData[index].clone();
+175:                 }
+176:             }
+177:         }
+178: 
+179:     }
+
+[14] org.apache.commons.math.stat.correlation.PearsonsCorrelation#PearsonsCorrelation  (lines 67-69)
+67:     public PearsonsCorrelation(double[][] data) {
+68:         this(new BlockRealMatrix(data));
+69:     }
+
+[15] org.apache.commons.math.stat.regression.SimpleRegression#getRSquare  (lines 454-457)
+454:     public double getRSquare() {
+455:         double ssto = getTotalSumSquares();
+456:         return (ssto - getSumSquaredErrors()) / ssto;
+457:     }
+
+[16] org.apache.commons.math.linear.BlockRealMatrix#getRowDimension  (lines 1343-1346)
+1343:     @Override
+1344:     public int getRowDimension() {
+1345:         return rows;
+1346:     }
+
+[17] org.apache.commons.math.distribution.TDistributionImpl#cumulativeProbability  (lines 126-144)
+126:     public double cumulativeProbability(double x) throws MathException{
+127:         double ret;
+128:         if (x == 0.0) {
+129:             ret = 0.5;
+130:         } else {
+131:             double t =
+132:                 Beta.regularizedBeta(
+133:                     degreesOfFreedom / (degreesOfFreedom + (x * x)),
+134:                     0.5 * degreesOfFreedom,
+135:                     0.5);
+136:             if (x < 0.0) {
+137:                 ret = 0.5 * t;
+138:             } else {
+139:                 ret = 1.0 - 0.5 * t;
+140:             }
+141:         }
+142: 
+143:         return ret;
+144:     }
+
+[18] org.apache.commons.math.stat.regression.SimpleRegression#getSlope  (lines 297-305)
+297:     public double getSlope() {
+298:         if (n < 2) {
+299:             return Double.NaN; //not enough data
+300:         }
+301:         if (Math.abs(sumXX) < 10 * Double.MIN_VALUE) {
+302:             return Double.NaN; //not enough variation in x
+303:         }
+304:         return sumXY / sumXX;
+305:     }
+
+[19] org.apache.commons.math.linear.BlockRealMatrix#getEntry  (lines 1234-1248)
+1234:     @Override
+1235:     public double getEntry(final int row, final int column)
+1236:         throws MatrixIndexException {
+1237:         try {
+1238:             final int iBlock = row    / BLOCK_SIZE;
+1239:             final int jBlock = column / BLOCK_SIZE;
+1240:             final int k      = (row    - iBlock * BLOCK_SIZE) * blockWidth(jBlock) +
+1241:                                (column - jBlock * BLOCK_SIZE);
+1242:             return blocks[iBlock * blockColumns + jBlock][k];
+1243:         } catch (ArrayIndexOutOfBoundsException e) {
+1244:             throw new MatrixIndexException(
+1245:                     "no entry at indices ({0}, {1}) in a {2}x{3} matrix",
+1246:                     row, column, getRowDimension(), getColumnDimension());
+1247:         }
+1248:     }
+
+[20] org.apache.commons.math.stat.regression.SimpleRegression#SimpleRegression  (lines 103-106)
+103:     public SimpleRegression(TDistribution t) {
+104:         super();
+105:         setDistribution(t);
+106:     }
+
+[21] org.apache.commons.math.stat.regression.SimpleRegression#getSumSquaredErrors  (lines 336-338)
+336:     public double getSumSquaredErrors() {
+337:         return Math.max(0d, sumYY - sumXY * sumXY / sumXX);
+338:     }
+
+[22] org.apache.commons.math.stat.regression.SimpleRegression#setDistribution  (lines 613-620)
+613:     public void setDistribution(TDistribution value) {
+614:         distribution = value;
+615: 
+616:         // modify degrees of freedom
+617:         if (n > 2) {
+618:             distribution.setDegreesOfFreedom(n - 2);
+619:         }
+620:     }
+
+[23] org.apache.commons.math.util.ContinuedFraction#ContinuedFraction  (lines 45-47)
+45:     protected ContinuedFraction() {
+46:         super();
+47:     }
+
+[24] org.apache.commons.math.stat.regression.SimpleRegression#getR  (lines 431-438)
+431:     public double getR() {
+432:         double b1 = getSlope();
+433:         double result = Math.sqrt(getRSquare());
+434:         if (b1 < 0) {
+435:             result = -result;
+436:         }
+437:         return result;
+438:     }
+
+[25] org.apache.commons.math.stat.correlation.PearsonsCorrelation#checkSufficientData  (lines 272-280)
+272:     private void checkSufficientData(final RealMatrix matrix) {
+273:         int nRows = matrix.getRowDimension();
+274:         int nCols = matrix.getColumnDimension();
+275:         if (nRows < 2 || nCols < 2) {
+276:             throw MathRuntimeException.createIllegalArgumentException(
+277:                     "insufficient data: only {0} rows and {1} columns.",
+278:                     nRows, nCols);
+279:         }
+280:     }
+
+[26] org.apache.commons.math.stat.correlation.PearsonsCorrelation#getCorrelationPValues  (lines 160-176)
+160:     public RealMatrix getCorrelationPValues() throws MathException {
+161:         TDistribution tDistribution = new TDistributionImpl(nObs - 2);
+162:         int nVars = correlationMatrix.getColumnDimension();
+163:         double[][] out = new double[nVars][nVars];
+164:         for (int i = 0; i < nVars; i++) {
+165:             for (int j = 0; j < nVars; j++) {
+166:                 if (i == j) {
+167:                     out[i][j] = 0d;
+168:                 } else {
+169:                     double r = correlationMatrix.getEntry(i, j);
+170:                     double t = Math.abs(r * Math.sqrt((nObs - 2)/(1 - r * r)));
+171:                     out[i][j] = 2 * (1 - tDistribution.cumulativeProbability(t));
+172:                 }
+173:             }
+174:         }
+175:         return new BlockRealMatrix(out);
+176:     }
+
+[27] org.apache.commons.math.linear.BlockRealMatrix#blockHeight  (lines 1674-1676)
+1674:     private int blockHeight(final int blockRow) {
+1675:         return (blockRow == blockRows - 1) ? rows - blockRow * BLOCK_SIZE : BLOCK_SIZE;
+1676:     }
+
+[28] org.apache.commons.math.distribution.AbstractDistribution#AbstractDistribution  (lines 38-40)
+38:     protected AbstractDistribution() {
+39:         super();
+40:     }
+
+[29] org.apache.commons.math.linear.BlockRealMatrix#setEntry  (lines 1251-1265)
+1251:     @Override
+1252:     public void setEntry(final int row, final int column, final double value)
+1253:         throws MatrixIndexException {
+1254:         try {
+1255:             final int iBlock = row    / BLOCK_SIZE;
+1256:             final int jBlock = column / BLOCK_SIZE;
+1257:             final int k      = (row    - iBlock * BLOCK_SIZE) * blockWidth(jBlock) +
+1258:                                (column - jBlock * BLOCK_SIZE);
+1259:             blocks[iBlock * blockColumns + jBlock][k] = value;
+1260:         } catch (ArrayIndexOutOfBoundsException e) {
+1261:             throw new MatrixIndexException(
+1262:                     "no entry at indices ({0}, {1}) in a {2}x{3} matrix",
+1263:                     row, column, getRowDimension(), getColumnDimension());
+1264:         }
+1265:     }
+
+[30] org.apache.commons.math.linear.BlockRealMatrix#toBlocksLayout  (lines 203-251)
+203:     public static double[][] toBlocksLayout(final double[][] rawData)
+204:         throws IllegalArgumentException {
+205: 
+206:         final int rows         = rawData.length;
+207:         final int columns      = rawData[0].length;
+208:         final int blockRows    = (rows    + BLOCK_SIZE - 1) / BLOCK_SIZE;
+209:         final int blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;
+210: 
+211:         // safety checks
+212:         for (int i = 0; i < rawData.length; ++i) {
+213:             final int length = rawData[i].length;
+214:             if (length != columns) {
+215:                 throw MathRuntimeException.createIllegalArgumentException(
+216:                         "some rows have length {0} while others have length {1}",
+217:                         columns, length);
+218:             }
+219:         }
+220: 
+221:         // convert array
+222:         final double[][] blocks = new double[blockRows * blockColumns][];
+223:         int blockIndex = 0;
+224:         for (int iBlock = 0; iBlock < blockRows; ++iBlock) {
+225:             final int pStart  = iBlock * BLOCK_SIZE;
+226:             final int pEnd    = Math.min(pStart + BLOCK_SIZE, rows);
+227:             final int iHeight = pEnd - pStart;
+228:             for (int jBlock = 0; jBlock < blockColumns; ++jBlock) {
+229:                 final int qStart = jBlock * BLOCK_SIZE;
+230:                 final int qEnd   = Math.min(qStart + BLOCK_SIZE, columns);
+231:                 final int jWidth = qEnd - qStart;
+232: 
+233:                 // allocate new block
+234:                 final double[] block = new double[iHeight * jWidth];
+235:                 blocks[blockIndex] = block;
+236: 
+237:                 // copy data
+238:                 int index = 0;
+239:                 for (int p = pStart; p < pEnd; ++p) {
+240:                     System.arraycopy(rawData[p], qStart, block, index, jWidth);
+241:                     index += jWidth;
+242:                 }
+243: 
+244:                 ++blockIndex;
+245: 
+246:             }
+247:         }
+248: 
+249:         return blocks;
+250: 
+251:     }
+
+[31] org.apache.commons.math.linear.BlockRealMatrix#BlockRealMatrix  (lines 95-109)
+95:     public BlockRealMatrix(final int rows, final int columns)
+96:         throws IllegalArgumentException {
+97: 
+98:         super(rows, columns);
+99:         this.rows    = rows;
+100:         this.columns = columns;
+101: 
+102:         // number of blocks
+103:         blockRows    = (rows    + BLOCK_SIZE - 1) / BLOCK_SIZE;
+104:         blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;
+105: 
+106:         // allocate storage blocks, taking care of smaller ones at right and bottom
+107:         blocks = createBlocksLayout(rows, columns);
+108: 
+109:     }
+
+[32] org.apache.commons.math.linear.BlockRealMatrix#getColumnDimension  (lines 1349-1352)
+1349:     @Override
+1350:     public int getColumnDimension() {
+1351:         return columns;
+1352:     }
+
+[33] org.apache.commons.math.special.Beta#getA  (lines 146-149)
+146:                 @Override
+147:                 protected double getA(int n, double x) {
+148:                     return 1.0;
+149:                 }
+
+[34] org.apache.commons.math.distribution.TDistributionImpl#TDistributionImpl  (lines 70-72)
+70:     public TDistributionImpl(double degreesOfFreedom) {
+71:         this(degreesOfFreedom, DEFAULT_INVERSE_ABSOLUTE_ACCURACY);
+72:     }
+
+[35] org.apache.commons.math.stat.regression.SimpleRegression#SimpleRegression  (lines 93-95)
+93:     public SimpleRegression() {
+94:         this(new TDistributionImpl(1.0));
+95:     }
+
+[36] org.apache.commons.math.special.Beta#regularizedBeta  (lines 116-157)
+116:     public static double regularizedBeta(double x, final double a,
+117:         final double b, double epsilon, int maxIterations) throws MathException
+118:     {
+119:         double ret;
+120: 
+121:         if (Double.isNaN(x) || Double.isNaN(a) || Double.isNaN(b) || (x < 0) ||
+122:             (x > 1) || (a <= 0.0) || (b <= 0.0))
+123:         {
+124:             ret = Double.NaN;
+125:         } else if (x > (a + 1.0) / (a + b + 2.0)) {
+126:             ret = 1.0 - regularizedBeta(1.0 - x, b, a, epsilon, maxIterations);
+127:         } else {
+128:             ContinuedFraction fraction = new ContinuedFraction() {
+129: 
+130:                 @Override
+131:                 protected double getB(int n, double x) {
+132:                     double ret;
+133:                     double m;
+134:                     if (n % 2 == 0) { // even
+135:                         m = n / 2.0;
+136:                         ret = (m * (b - m) * x) /
+137:                             ((a + (2 * m) - 1) * (a + (2 * m)));
+138:                     } else {
+139:                         m = (n - 1.0) / 2.0;
+140:                         ret = -((a + m) * (a + b + m) * x) /
+141:                                 ((a + (2 * m)) * (a + (2 * m) + 1.0));
+142:                     }
+143:                     return ret;
+144:                 }
+145: 
+146:                 @Override
+147:                 protected double getA(int n, double x) {
+148:                     return 1.0;
+149:                 }
+150:             };
+151:             ret = Math.exp((a * Math.log(x)) + (b * Math.log(1.0 - x)) -
+152:                 Math.log(a) - logBeta(a, b, epsilon, maxIterations)) *
+153:                 1.0 / fraction.evaluate(x, epsilon, maxIterations);
+154:         }
+155: 
+156:         return ret;
+157:     }
+
+[37] org.apache.commons.math.linear.AbstractRealMatrix#AbstractRealMatrix  (lines 54-67)
+54:     protected AbstractRealMatrix(final int rowDimension, final int columnDimension)
+55:         throws IllegalArgumentException {
+56:         if (rowDimension <= 0 ) {
+57:             throw MathRuntimeException.createIllegalArgumentException(
+58:                     "invalid row dimension {0} (must be positive)",
+59:                     rowDimension);
+60:         }
+61:         if (columnDimension <= 0) {
+62:             throw MathRuntimeException.createIllegalArgumentException(
+63:                     "invalid column dimension {0} (must be positive)",
+64:                     columnDimension);
+65:         }
+66:         lu = null;
+67:     }
+
+[38] org.apache.commons.math.distribution.AbstractContinuousDistribution#AbstractContinuousDistribution  (lines 52-54)
+52:     protected AbstractContinuousDistribution() {
+53:         super();
+54:     }
+
+[39] org.apache.commons.math.linear.MatrixUtils#checkColumnIndex  (lines 542-548)
+542:     public static void checkColumnIndex(final AnyMatrix m, final int column)
+543:         throws MatrixIndexException {
+544:         if (column < 0 || column >= m.getColumnDimension()) {
+545:             throw new MatrixIndexException("column index {0} out of allowed range [{1}, {2}]",
+546:                                            column, 0, m.getColumnDimension() - 1);
+547:         }
+548:     }
+
+[40] org.apache.commons.math.distribution.TDistributionImpl#TDistributionImpl  (lines 60-64)
+60:     public TDistributionImpl(double degreesOfFreedom, double inverseCumAccuracy) {
+61:         super();
+62:         setDegreesOfFreedomInternal(degreesOfFreedom);
+63:         solverAbsoluteAccuracy = inverseCumAccuracy;
+64:     }
+
+[41] org.apache.commons.math.stat.correlation.PearsonsCorrelation#correlation  (lines 224-237)
+224:     public double correlation(final double[] xArray, final double[] yArray) throws IllegalArgumentException {
+225:         SimpleRegression regression = new SimpleRegression();
+226:         if(xArray.length == yArray.length && xArray.length > 1) {
+227:             for(int i=0; i<xArray.length; i++) {
+228:                 regression.addData(xArray[i], yArray[i]);
+229:             }
+230:             return regression.getR();
+231:         }
+232:         else {
+233:             throw MathRuntimeException.createIllegalArgumentException(
+234:                     "invalid array dimensions. xArray has size {0}; yArray has {1} elements",
+235:                     xArray.length, yArray.length);
+236:         }
+237:     }
+
+[42] org.apache.commons.math.linear.BlockRealMatrix#blockWidth  (lines 1683-1685)
+1683:     private int blockWidth(final int blockColumn) {
+1684:         return (blockColumn == blockColumns - 1) ? columns - blockColumn * BLOCK_SIZE : BLOCK_SIZE;
+1685:     }
+
+[43] org.apache.commons.math.special.Beta#getB  (lines 130-144)
+130:                 @Override
+131:                 protected double getB(int n, double x) {
+132:                     double ret;
+133:                     double m;
+134:                     if (n % 2 == 0) { // even
+135:                         m = n / 2.0;
+136:                         ret = (m * (b - m) * x) /
+137:                             ((a + (2 * m) - 1) * (a + (2 * m)));
+138:                     } else {
+139:                         m = (n - 1.0) / 2.0;
+140:                         ret = -((a + m) * (a + b + m) * x) /
+141:                                 ((a + (2 * m)) * (a + (2 * m) + 1.0));
+142:                     }
+143:                     return ret;
+144:                 }
+
+[44] org.apache.commons.math.linear.BlockRealMatrix#createBlocksLayout  (lines 265-287)
+265:     public static double[][] createBlocksLayout(final int rows, final int columns) {
+266: 
+267:         final int blockRows    = (rows    + BLOCK_SIZE - 1) / BLOCK_SIZE;
+268:         final int blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;
+269: 
+270:         final double[][] blocks = new double[blockRows * blockColumns][];
+271:         int blockIndex = 0;
+272:         for (int iBlock = 0; iBlock < blockRows; ++iBlock) {
+273:             final int pStart  = iBlock * BLOCK_SIZE;
+274:             final int pEnd    = Math.min(pStart + BLOCK_SIZE, rows);
+275:             final int iHeight = pEnd - pStart;
+276:             for (int jBlock = 0; jBlock < blockColumns; ++jBlock) {
+277:                 final int qStart = jBlock * BLOCK_SIZE;
+278:                 final int qEnd   = Math.min(qStart + BLOCK_SIZE, columns);
+279:                 final int jWidth = qEnd - qStart;
+280:                 blocks[blockIndex] = new double[iHeight * jWidth];
+281:                 ++blockIndex;
+282:             }
+283:         }
+284: 
+285:         return blocks;
+286: 
+287:     }

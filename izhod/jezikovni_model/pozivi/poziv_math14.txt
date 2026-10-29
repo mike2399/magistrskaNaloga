@@ -1,0 +1,377 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math3.fitting.PolynomialFitterTest::testLargeSample
+java.lang.OutOfMemoryError: Java heap space
+	at org.apache.commons.math3.linear.BlockRealMatrix.createBlocksLayout(BlockRealMatrix.java:271)
+	at org.apache.commons.math3.linear.BlockRealMatrix.<init>(BlockRealMatrix.java:107)
+	at org.apache.commons.math3.linear.MatrixUtils.createRealMatrix(MatrixUtils.java:81)
+	at org.apache.commons.math3.optim.nonlinear.vector.Weight.<init>(Weight.java:43)
+	at org.apache.commons.math3.fitting.CurveFitter.fit(CurveFitter.java:172)
+	at org.apache.commons.math3.fitting.CurveFitter.fit(CurveFitter.java:136)
+	at org.apache.commons.math3.fitting.PolynomialFitter.fit(PolynomialFitter.java:68)
+	at org.apache.commons.math3.fitting.PolynomialFitterTest.testLargeSample(PolynomialFitterTest.java:238)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math3.optim.MaxEval#MaxEval  (lines 35-41)
+35:     public MaxEval(int max) {
+36:         if (max <= 0) {
+37:             throw new NotStrictlyPositiveException(max);
+38:         }
+39: 
+40:         maxEval = max;
+41:     }
+
+[2] org.apache.commons.math3.optim.BaseMultivariateOptimizer#BaseMultivariateOptimizer  (lines 47-49)
+47:     protected BaseMultivariateOptimizer(ConvergenceChecker<PAIR> checker) {
+48:         super(checker);
+49:     }
+
+[3] org.apache.commons.math3.fitting.CurveFitter#fit  (lines 156-181)
+156:     public double[] fit(int maxEval, T f,
+157:                         final double[] initialGuess) {
+158:         // Prepare least squares problem.
+159:         double[] target  = new double[observations.size()];
+160:         double[] weights = new double[observations.size()];
+161:         int i = 0;
+162:         for (WeightedObservedPoint point : observations) {
+163:             target[i]  = point.getY();
+164:             weights[i] = point.getWeight();
+165:             ++i;
+166:         }
+167: 
+168:         // Input to the optimizer: the model and its Jacobian.
+169:         final TheoreticalValuesFunction model = new TheoreticalValuesFunction(f);
+170: 
+171:         // Perform the fit.
+172:         final PointVectorValuePair optimum
+173:             = optimizer.optimize(new MaxEval(maxEval),
+174:                                  model.getModelFunction(),
+175:                                  model.getModelFunctionJacobian(),
+176:                                  new Target(target),
+177:                                  new Weight(weights),
+178:                                  new InitialGuess(initialGuess));
+179:         // Extract the coefficients.
+180:         return optimum.getPointRef();
+181:     }
+
+[4] org.apache.commons.math3.util.Incrementor#Incrementor  (lines 79-86)
+79:     public Incrementor(int max,
+80:                        MaxCountExceededCallback cb) {
+81:         if (cb == null){
+82:             throw new NullArgumentException();
+83:         }
+84:         maximalCount = max;
+85:         maxCountCallback = cb;
+86:     }
+
+[5] org.apache.commons.math3.fitting.CurveFitter#TheoreticalValuesFunction  (lines 191-193)
+191:         public TheoreticalValuesFunction(final ParametricUnivariateFunction f) {
+192:             this.f = f;
+193:         }
+
+[6] org.apache.commons.math3.optim.nonlinear.vector.ModelFunction#ModelFunction  (lines 35-37)
+35:     public ModelFunction(MultivariateVectorFunction m) {
+36:         model = m;
+37:     }
+
+[7] org.apache.commons.math3.optim.BaseOptimizer#BaseOptimizer  (lines 47-52)
+47:     protected BaseOptimizer(ConvergenceChecker<PAIR> checker) {
+48:         this.checker = checker;
+49: 
+50:         evaluations = new Incrementor(0, new MaxEvalCallback());
+51:         iterations = new Incrementor(0, new MaxIterCallback());
+52:     }
+
+[8] org.apache.commons.math3.linear.BlockRealMatrix#createBlocksLayout  (lines 257-277)
+257:     public static double[][] createBlocksLayout(final int rows, final int columns) {
+258:         final int blockRows = (rows    + BLOCK_SIZE - 1) / BLOCK_SIZE;
+259:         final int blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;
+260: 
+261:         final double[][] blocks = new double[blockRows * blockColumns][];
+262:         int blockIndex = 0;
+263:         for (int iBlock = 0; iBlock < blockRows; ++iBlock) {
+264:             final int pStart = iBlock * BLOCK_SIZE;
+265:             final int pEnd = FastMath.min(pStart + BLOCK_SIZE, rows);
+266:             final int iHeight = pEnd - pStart;
+267:             for (int jBlock = 0; jBlock < blockColumns; ++jBlock) {
+268:                 final int qStart = jBlock * BLOCK_SIZE;
+269:                 final int qEnd = FastMath.min(qStart + BLOCK_SIZE, columns);
+270:                 final int jWidth = qEnd - qStart;
+271:                 blocks[blockIndex] = new double[iHeight * jWidth];
+272:                 ++blockIndex;
+273:             }
+274:         }
+275: 
+276:         return blocks;
+277:     }
+
+[9] org.apache.commons.math3.analysis.polynomials.PolynomialFunction#PolynomialFunction  (lines 67-80)
+67:     public PolynomialFunction(double c[])
+68:         throws NullArgumentException, NoDataException {
+69:         super();
+70:         MathUtils.checkNotNull(c);
+71:         int n = c.length;
+72:         if (n == 0) {
+73:             throw new NoDataException(LocalizedFormats.EMPTY_POLYNOMIALS_COEFFICIENTS_ARRAY);
+74:         }
+75:         while ((n > 1) && (c[n - 1] == 0)) {
+76:             --n;
+77:         }
+78:         this.coefficients = new double[n];
+79:         System.arraycopy(c, 0, this.coefficients, 0, n);
+80:     }
+
+[10] org.apache.commons.math3.analysis.polynomials.PolynomialFunction#value  (lines 93-95)
+93:     public double value(double x) {
+94:        return evaluate(coefficients, x);
+95:     }
+
+[11] org.apache.commons.math3.optim.nonlinear.vector.jacobian.AbstractLeastSquaresOptimizer#AbstractLeastSquaresOptimizer  (lines 52-54)
+52:     protected AbstractLeastSquaresOptimizer(ConvergenceChecker<PointVectorValuePair> checker) {
+53:         super(checker);
+54:     }
+
+[12] org.apache.commons.math3.optim.nonlinear.vector.jacobian.LevenbergMarquardtOptimizer#LevenbergMarquardtOptimizer  (lines 155-157)
+155:     public LevenbergMarquardtOptimizer() {
+156:         this(100, 1e-10, 1e-10, 1e-10, Precision.SAFE_MIN);
+157:     }
+
+[13] org.apache.commons.math3.fitting.CurveFitter#getModelFunction  (lines 198-212)
+198:         public ModelFunction getModelFunction() {
+199:             return new ModelFunction(new MultivariateVectorFunction() {
+200:                     /** {@inheritDoc} */
+201:                     public double[] value(double[] point) {
+202:                         // compute the residuals
+203:                         final double[] values = new double[observations.size()];
+204:                         int i = 0;
+205:                         for (WeightedObservedPoint observed : observations) {
+206:                             values[i++] = f.value(observed.getX(), point);
+207:                         }
+208: 
+209:                         return values;
+210:                     }
+211:                 });
+212:         }
+
+[14] org.apache.commons.math3.optim.nonlinear.vector.Target#Target  (lines 38-40)
+38:     public Target(double[] observations) {
+39:         target = observations.clone();
+40:     }
+
+[15] org.apache.commons.math3.fitting.PolynomialFitter#PolynomialFitter  (lines 36-38)
+36:     public PolynomialFitter(MultivariateVectorOptimizer optimizer) {
+37:         super(optimizer);
+38:     }
+
+[16] org.apache.commons.math3.fitting.CurveFitter#getModelFunctionJacobian  (lines 217-228)
+217:         public ModelFunctionJacobian getModelFunctionJacobian() {
+218:             return new ModelFunctionJacobian(new MultivariateMatrixFunction() {
+219:                     public double[][] value(double[] point) {
+220:                         final double[][] jacobian = new double[observations.size()][];
+221:                         int i = 0;
+222:                         for (WeightedObservedPoint observed : observations) {
+223:                             jacobian[i++] = f.gradient(observed.getX(), point);
+224:                         }
+225:                         return jacobian;
+226:                     }
+227:                 });
+228:         }
+
+[17] org.apache.commons.math3.util.MathUtils#checkNotNull  (lines 262-267)
+262:     public static void checkNotNull(Object o)
+263:         throws NullArgumentException {
+264:         if (o == null) {
+265:             throw new NullArgumentException();
+266:         }
+267:     }
+
+[18] org.apache.commons.math3.util.FastMath#min  (lines 3420-3422)
+3420:     public static int min(final int a, final int b) {
+3421:         return (a <= b) ? a : b;
+3422:     }
+
+[19] org.apache.commons.math3.fitting.CurveFitter#fit  (lines 135-137)
+135:     public double[] fit(T f, final double[] initialGuess) {
+136:         return fit(Integer.MAX_VALUE, f, initialGuess);
+137:     }
+
+[20] org.apache.commons.math3.linear.MatrixUtils#createRealMatrix  (lines 80-83)
+80:     public static RealMatrix createRealMatrix(final int rows, final int columns) {
+81:         return (rows * columns <= 4096) ?
+82:                 new Array2DRowRealMatrix(rows, columns) : new BlockRealMatrix(rows, columns);
+83:     }
+
+[21] org.apache.commons.math3.fitting.WeightedObservedPoint#WeightedObservedPoint  (lines 45-49)
+45:     public WeightedObservedPoint(final double weight, final double x, final double y) {
+46:         this.weight = weight;
+47:         this.x      = x;
+48:         this.y      = y;
+49:     }
+
+[22] org.apache.commons.math3.optim.nonlinear.vector.Weight#Weight  (lines 41-47)
+41:     public Weight(double[] weight) {
+42:         final int dim = weight.length;
+43:         weightMatrix = org.apache.commons.math3.linear.MatrixUtils.createRealMatrix(dim, dim);
+44:         for (int i = 0; i < dim; i++) {
+45:             weightMatrix.setEntry(i, i, weight[i]);
+46:         }
+47:     }
+
+[23] org.apache.commons.math3.fitting.PolynomialFitter#fit  (lines 67-69)
+67:     public double[] fit(double[] guess) {
+68:         return fit(new PolynomialFunction.Parametric(), guess);
+69:     }
+
+[24] org.apache.commons.math3.optim.nonlinear.vector.JacobianMultivariateVectorOptimizer#JacobianMultivariateVectorOptimizer  (lines 49-51)
+49:     protected JacobianMultivariateVectorOptimizer(ConvergenceChecker<PointVectorValuePair> checker) {
+50:         super(checker);
+51:     }
+
+[25] org.apache.commons.math3.linear.RealMatrixFormat#RealMatrixFormat  (lines 130-143)
+130:     public RealMatrixFormat(final String prefix, final String suffix,
+131:                             final String rowPrefix, final String rowSuffix,
+132:                             final String rowSeparator, final String columnSeparator,
+133:                             final NumberFormat format) {
+134:         this.prefix            = prefix;
+135:         this.suffix            = suffix;
+136:         this.rowPrefix         = rowPrefix;
+137:         this.rowSuffix         = rowSuffix;
+138:         this.rowSeparator      = rowSeparator;
+139:         this.columnSeparator   = columnSeparator;
+140:         this.format            = format;
+141:         // disable grouping to prevent parsing problems
+142:         this.format.setGroupingUsed(false);
+143:     }
+
+[26] org.apache.commons.math3.linear.RealMatrixFormat#RealMatrixFormat  (lines 112-117)
+112:     public RealMatrixFormat(final String prefix, final String suffix,
+113:                             final String rowPrefix, final String rowSuffix,
+114:                             final String rowSeparator, final String columnSeparator) {
+115:         this(prefix, suffix, rowPrefix, rowSuffix, rowSeparator, columnSeparator,
+116:                 CompositeFormat.getDefaultNumberFormat());
+117:     }
+
+[27] org.apache.commons.math3.linear.RealMatrixFormat#getInstance  (lines 214-216)
+214:     public static RealMatrixFormat getInstance() {
+215:         return getInstance(Locale.getDefault());
+216:     }
+
+[28] org.apache.commons.math3.linear.BlockRealMatrix#BlockRealMatrix  (lines 96-108)
+96:     public BlockRealMatrix(final int rows, final int columns)
+97:         throws NotStrictlyPositiveException {
+98:         super(rows, columns);
+99:         this.rows = rows;
+100:         this.columns = columns;
+101: 
+102:         // number of blocks
+103:         blockRows = (rows + BLOCK_SIZE - 1) / BLOCK_SIZE;
+104:         blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;
+105: 
+106:         // allocate storage blocks, taking care of smaller ones at right and bottom
+107:         blocks = createBlocksLayout(rows, columns);
+108:     }
+
+[29] org.apache.commons.math3.optim.nonlinear.vector.jacobian.LevenbergMarquardtOptimizer#LevenbergMarquardtOptimizer  (lines 263-274)
+263:     public LevenbergMarquardtOptimizer(double initialStepBoundFactor,
+264:                                        double costRelativeTolerance,
+265:                                        double parRelativeTolerance,
+266:                                        double orthoTolerance,
+267:                                        double threshold) {
+268:         super(null); // No custom convergence criterion.
+269:         this.initialStepBoundFactor = initialStepBoundFactor;
+270:         this.costRelativeTolerance = costRelativeTolerance;
+271:         this.parRelativeTolerance = parRelativeTolerance;
+272:         this.orthoTolerance = orthoTolerance;
+273:         this.qrRankingThreshold = threshold;
+274:     }
+
+[30] org.apache.commons.math3.util.CompositeFormat#getDefaultNumberFormat  (lines 42-44)
+42:     public static NumberFormat getDefaultNumberFormat() {
+43:         return getDefaultNumberFormat(Locale.getDefault());
+44:     }
+
+[31] org.apache.commons.math3.analysis.polynomials.PolynomialFunction#evaluate  (lines 128-140)
+128:     protected static double evaluate(double[] coefficients, double argument)
+129:         throws NullArgumentException, NoDataException {
+130:         MathUtils.checkNotNull(coefficients);
+131:         int n = coefficients.length;
+132:         if (n == 0) {
+133:             throw new NoDataException(LocalizedFormats.EMPTY_POLYNOMIALS_COEFFICIENTS_ARRAY);
+134:         }
+135:         double result = coefficients[n - 1];
+136:         for (int j = n - 2; j >= 0; j--) {
+137:             result = argument * result + coefficients[j];
+138:         }
+139:         return result;
+140:     }
+
+[32] org.apache.commons.math3.linear.AbstractRealMatrix#AbstractRealMatrix  (lines 65-74)
+65:     protected AbstractRealMatrix(final int rowDimension,
+66:         final int columnDimension)
+67:         throws NotStrictlyPositiveException {
+68:         if (rowDimension < 1) {
+69:             throw new NotStrictlyPositiveException(rowDimension);
+70:         }
+71:         if (columnDimension < 1) {
+72:             throw new NotStrictlyPositiveException(columnDimension);
+73:         }
+74:     }
+
+[33] org.apache.commons.math3.linear.RealMatrixFormat#getFormat  (lines 206-208)
+206:     public NumberFormat getFormat() {
+207:         return format;
+208:     }
+
+[34] org.apache.commons.math3.optim.nonlinear.vector.ModelFunctionJacobian#ModelFunctionJacobian  (lines 35-37)
+35:     public ModelFunctionJacobian(MultivariateMatrixFunction j) {
+36:         jacobian = j;
+37:     }
+
+[35] org.apache.commons.math3.linear.RealMatrixFormat#getInstance  (lines 223-225)
+223:     public static RealMatrixFormat getInstance(final Locale locale) {
+224:         return new RealMatrixFormat(CompositeFormat.getDefaultNumberFormat(locale));
+225:     }
+
+[36] org.apache.commons.math3.optim.nonlinear.vector.MultivariateVectorOptimizer#MultivariateVectorOptimizer  (lines 47-49)
+47:     protected MultivariateVectorOptimizer(ConvergenceChecker<PointVectorValuePair> checker) {
+48:         super(checker);
+49:     }
+
+[37] org.apache.commons.math3.fitting.WeightedObservedPoint#getY  (lines 74-76)
+74:     public double getY() {
+75:         return y;
+76:     }
+
+[38] org.apache.commons.math3.util.CompositeFormat#getDefaultNumberFormat  (lines 53-57)
+53:     public static NumberFormat getDefaultNumberFormat(final Locale locale) {
+54:         final NumberFormat nf = NumberFormat.getInstance(locale);
+55:         nf.setMaximumFractionDigits(10);
+56:         return nf;
+57:     }
+
+[39] org.apache.commons.math3.fitting.WeightedObservedPoint#getWeight  (lines 56-58)
+56:     public double getWeight() {
+57:         return weight;
+58:     }
+
+[40] org.apache.commons.math3.fitting.CurveFitter#addObservedPoint  (lines 91-93)
+91:     public void addObservedPoint(double weight, double x, double y) {
+92:         observations.add(new WeightedObservedPoint(weight, x, y));
+93:     }
+
+[41] org.apache.commons.math3.fitting.CurveFitter#CurveFitter  (lines 63-66)
+63:     public CurveFitter(final MultivariateVectorOptimizer optimizer) {
+64:         this.optimizer = optimizer;
+65:         observations = new ArrayList<WeightedObservedPoint>();
+66:     }
+
+[42] org.apache.commons.math3.linear.RealMatrixFormat#RealMatrixFormat  (lines 98-101)
+98:     public RealMatrixFormat(final NumberFormat format) {
+99:         this(DEFAULT_PREFIX, DEFAULT_SUFFIX, DEFAULT_ROW_PREFIX, DEFAULT_ROW_SUFFIX,
+100:                 DEFAULT_ROW_SEPARATOR, DEFAULT_COLUMN_SEPARATOR, format);
+101:     }

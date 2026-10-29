@@ -1,0 +1,589 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.lang3.builder.ToStringBuilderTest::testObjectCycle
+junit.framework.AssertionFailedError: Expected: <null> but was: {}
+	at org.apache.commons.lang3.builder.ToStringBuilderTest.validateNullToStringStyleRegistry(ToStringBuilderTest.java:586)
+	at org.apache.commons.lang3.builder.ToStringBuilderTest.testObjectCycle(ToStringBuilderTest.java:837)
+--- org.apache.commons.lang3.builder.ToStringBuilderTest::testReflectionHierarchy
+junit.framework.AssertionFailedError: Expected: <null> but was: {}
+	at org.apache.commons.lang3.builder.ToStringBuilderTest.validateNullToStringStyleRegistry(ToStringBuilderTest.java:586)
+	at org.apache.commons.lang3.builder.ToStringBuilderTest.testReflectionHierarchy(ToStringBuilderTest.java:335)
+--- org.apache.commons.lang3.builder.ToStringBuilderTest::testSelfInstanceTwoVarsReflectionObjectCycle
+junit.framework.AssertionFailedError: Expected: <null> but was: {}
+	at org.apache.commons.lang3.builder.ToStringBuilderTest.validateNullToStringStyleRegistry(ToStringBuilderTest.java:586)
+	at org.apache.commons.lang3.builder.ToStringBuilderTest.testSelfInstanceTwoVarsReflectionObjectCycle(ToStringBuilderTest.java:533)
+--- org.apache.commons.lang3.builder.ToStringBuilderTest::testReflectionArrayCycle
+junit.framework.AssertionFailedError: Expected: <null> but was: {}
+	at org.apache.commons.lang3.builder.ToStringBuilderTest.validateNullToStringStyleRegistry(ToStringBuilderTest.java:586)
+	at org.apache.commons.lang3.builder.ToStringBuilderTest.testReflectionArrayCycle(ToStringBuilderTest.java:382)
+... (23 more triggering tests omitted)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.lang3.builder.ReflectionToStringBuilder#appendFieldsIn  (lines 525-549)
+525:     protected void appendFieldsIn(Class<?> clazz) {
+526:         if (clazz.isArray()) {
+527:             this.reflectionAppendArray(this.getObject());
+528:             return;
+529:         }
+530:         Field[] fields = clazz.getDeclaredFields();
+531:         AccessibleObject.setAccessible(fields, true);
+532:         for (Field field : fields) {
+533:             String fieldName = field.getName();
+534:             if (this.accept(field)) {
+535:                 try {
+536:                     // Warning: Field.get(Object) creates wrappers objects
+537:                     // for primitive types.
+538:                     Object fieldValue = this.getValue(field);
+539:                     this.append(fieldName, fieldValue);
+540:                 } catch (IllegalAccessException ex) {
+541:                     //this can't happen. Would get a Security exception
+542:                     // instead
+543:                     //throw a runtime exception in case the impossible
+544:                     // happens.
+545:                     throw new InternalError("Unexpected IllegalAccessException: " + ex.getMessage());
+546:                 }
+547:             }
+548:         }
+549:     }
+
+[2] org.apache.commons.lang3.SystemUtils#getJavaVersionAsInt  (lines 1161-1177)
+1161:     private static int getJavaVersionAsInt() {
+1162:         if (JAVA_VERSION_TRIMMED == null) {
+1163:             return 0;
+1164:         }
+1165:         String str = JAVA_VERSION_TRIMMED.substring(0, 1);
+1166:         str = str + JAVA_VERSION_TRIMMED.substring(2, 3);
+1167:         if (JAVA_VERSION_TRIMMED.length() >= 5) {
+1168:             str = str + JAVA_VERSION_TRIMMED.substring(4, 5);
+1169:         } else {
+1170:             str = str + "0";
+1171:         }
+1172:         try {
+1173:             return Integer.parseInt(str);
+1174:         } catch (Exception ex) {
+1175:             return 0;
+1176:         }
+1177:     }
+
+[3] org.apache.commons.lang3.builder.ReflectionToStringBuilder#toString  (lines 693-705)
+693:     @Override
+694:     public String toString() {
+695:         if (this.getObject() == null) {
+696:             return this.getStyle().getNullText();
+697:         }
+698:         Class<?> clazz = this.getObject().getClass();
+699:         this.appendFieldsIn(clazz);
+700:         while (clazz.getSuperclass() != null && clazz != this.getUpToClass()) {
+701:             clazz = clazz.getSuperclass();
+702:             this.appendFieldsIn(clazz);
+703:         }
+704:         return super.toString();
+705:     }
+
+[4] org.apache.commons.lang3.builder.ReflectionToStringBuilder#getUpToClass  (lines 565-567)
+565:     public Class<?> getUpToClass() {
+566:         return this.upToClass;
+567:     }
+
+[5] org.apache.commons.lang3.builder.ToStringStyle#appendClassName  (lines 1449-1458)
+1449:     protected void appendClassName(StringBuffer buffer, Object object) {
+1450:         if (useClassName && object != null) {
+1451:             register(object);
+1452:             if (useShortClassName) {
+1453:                 buffer.append(getShortClassName(object.getClass()));
+1454:             } else {
+1455:                 buffer.append(object.getClass().getName());
+1456:             }
+1457:         }
+1458:     }
+
+[6] org.apache.commons.lang3.builder.ToStringStyle#isUseIdentityHashCode  (lines 1643-1645)
+1643:     protected boolean isUseIdentityHashCode() {
+1644:         return useIdentityHashCode;
+1645:     }
+
+[7] org.apache.commons.lang3.builder.ReflectionToStringBuilder#setAppendStatics  (lines 635-637)
+635:     public void setAppendStatics(boolean appendStatics) {
+636:         this.appendStatics = appendStatics;
+637:     }
+
+[8] org.apache.commons.lang3.builder.ToStringStyle#register  (lines 176-188)
+176:     static void register(Object value) {
+177:         if (value != null) {
+178:             WeakHashMap<Object, Object> m;
+179:             synchronized (ToStringStyle.class) {
+180:                 m = REGISTRY.get();
+181:                 if (m == null) {
+182:                     m = new WeakHashMap<Object, Object>();
+183:                     REGISTRY.set(m);
+184:                 }
+185:             }
+186:             m.put(value, null);
+187:         }
+188:     }
+
+[9] org.apache.commons.lang3.builder.ReflectionToStringBuilder#accept  (lines 491-510)
+491:     protected boolean accept(Field field) {
+492:         if (field.getName().indexOf(ClassUtils.INNER_CLASS_SEPARATOR_CHAR) != -1) {
+493:             // Reject field from inner class.
+494:             return false;
+495:         }
+496:         if (Modifier.isTransient(field.getModifiers()) && !this.isAppendTransients()) {
+497:             // Reject transient fields.
+498:             return false;
+499:         }
+500:         if (Modifier.isStatic(field.getModifiers()) && !this.isAppendStatics()) {
+501:             // Reject static fields.
+502:             return false;
+503:         }
+504:         if (this.excludeFieldNames != null
+505:             && Arrays.binarySearch(this.excludeFieldNames, field.getName()) >= 0) {
+506:             // Reject fields from the getExcludeFieldNames list.
+507:             return false;
+508:         }
+509:         return true;
+510:     }
+
+[10] org.apache.commons.lang3.builder.ToStringStyle#getRegistry  (lines 147-149)
+147:     static Map<Object, Object> getRegistry() {
+148:         return REGISTRY.get() != null ? REGISTRY.get() : Collections.<Object, Object>emptyMap();
+149:     }
+
+[11] org.apache.commons.lang3.builder.ToStringBuilder#getStyle  (lines 1044-1046)
+1044:     public ToStringStyle getStyle() {
+1045:         return style;
+1046:     }
+
+[12] org.apache.commons.lang3.builder.ToStringStyle#appendContentStart  (lines 1479-1481)
+1479:     protected void appendContentStart(StringBuffer buffer) {
+1480:         buffer.append(contentStart);
+1481:     }
+
+[13] org.apache.commons.lang3.builder.ReflectionToStringBuilder#toString  (lines 287-292)
+287:     public static <T> String toString(
+288:             T object, ToStringStyle style, boolean outputTransients,
+289:             boolean outputStatics, Class<? super T> reflectUpToClass) {
+290:         return new ReflectionToStringBuilder(object, style, null, reflectUpToClass, outputTransients, outputStatics)
+291:                 .toString();
+292:     }
+
+[14] org.apache.commons.lang3.builder.ToStringBuilder#ToStringBuilder  (lines 254-266)
+254:     public ToStringBuilder(Object object, ToStringStyle style, StringBuffer buffer) {
+255:         if (style == null) {
+256:             style = getDefaultStyle();
+257:         }
+258:         if (buffer == null) {
+259:             buffer = new StringBuffer(512);
+260:         }
+261:         this.buffer = buffer;
+262:         this.style = style;
+263:         this.object = object;
+264: 
+265:         style.appendStart(buffer, object);
+266:     }
+
+[15] org.apache.commons.lang3.builder.ToStringBuilder#reflectionToString  (lines 154-156)
+154:     public static String reflectionToString(Object object) {
+155:         return ReflectionToStringBuilder.toString(object);
+156:     }
+
+[16] org.apache.commons.lang3.builder.ToStringStyle#appendIdentityHashCode  (lines 1466-1472)
+1466:     protected void appendIdentityHashCode(StringBuffer buffer, Object object) {
+1467:         if (this.isUseIdentityHashCode() && object!=null) {
+1468:             register(object);
+1469:             buffer.append('@');
+1470:             buffer.append(Integer.toHexString(System.identityHashCode(object)));
+1471:         }
+1472:     }
+
+[17] org.apache.commons.lang3.builder.ToStringBuilder#getDefaultStyle  (lines 119-121)
+119:     public static ToStringStyle getDefaultStyle() {
+120:         return defaultStyle;
+121:     }
+
+[18] org.apache.commons.lang3.builder.ReflectionToStringBuilder#setAppendTransients  (lines 647-649)
+647:     public void setAppendTransients(boolean appendTransients) {
+648:         this.appendTransients = appendTransients;
+649:     }
+
+[19] org.apache.commons.lang3.builder.ReflectionToStringBuilder#ReflectionToStringBuilder  (lines 470-477)
+470:     public <T> ReflectionToStringBuilder(
+471:             T object, ToStringStyle style, StringBuffer buffer,
+472:             Class<? super T> reflectUpToClass, boolean outputTransients, boolean outputStatics) {
+473:         super(object, style, buffer);
+474:         this.setUpToClass(reflectUpToClass);
+475:         this.setAppendTransients(outputTransients);
+476:         this.setAppendStatics(outputStatics);
+477:     }
+
+[20] org.apache.commons.lang3.builder.ReflectionToStringBuilder#toString  (lines 122-124)
+122:     public static String toString(Object object) {
+123:         return toString(object, null, false, false, null);
+124:     }
+
+[21] org.apache.commons.lang3.builder.ToStringStyle#appendEnd  (lines 392-398)
+392:     public void appendEnd(StringBuffer buffer, Object object) {
+393:         if (this.fieldSeparatorAtEnd == false) {
+394:             removeLastFieldSeparator(buffer);
+395:         }
+396:         appendContentEnd(buffer);
+397:         unregister(object);
+398:     }
+
+[22] org.apache.commons.lang3.builder.ToStringStyle#ToStringStyle  (lines 323-325)
+323:     protected ToStringStyle() {
+324:         super();
+325:     }
+
+[23] org.apache.commons.lang3.builder.ToStringStyle#unregister  (lines 202-215)
+202:     static void unregister(Object value) {
+203:         if (value != null) {
+204:             WeakHashMap<Object, Object> m;
+205:             synchronized (ToStringStyle.class) {
+206:                 m = REGISTRY.get();
+207:                 if (m != null) {
+208:                     m.remove(value);
+209:                     if (m.isEmpty()) {
+210:                         REGISTRY.remove();
+211:                     }
+212:                 }
+213:             }
+214:         }
+215:     }
+
+[24] org.apache.commons.lang3.SystemUtils#getSystemProperty  (lines 1247-1258)
+1247:     private static String getSystemProperty(String property) {
+1248:         try {
+1249:             return System.getProperty(property);
+1250:         } catch (SecurityException ex) {
+1251:             // we are not allowed to look at this property
+1252:             System.err.println(
+1253:                 "Caught a SecurityException reading the system property '" + property 
+1254:                 + "'; the SystemUtils property value will default to null."
+1255:             );
+1256:             return null;
+1257:         }
+1258:     }
+
+[25] org.apache.commons.lang3.builder.ToStringStyle#SimpleToStringStyle  (lines 2223-2230)
+2223:         SimpleToStringStyle() {
+2224:             super();
+2225:             this.setUseClassName(false);
+2226:             this.setUseIdentityHashCode(false);
+2227:             this.setUseFieldNames(false);
+2228:             this.setContentStart("");
+2229:             this.setContentEnd("");
+2230:         }
+
+[26] org.apache.commons.lang3.SystemUtils#getJavaVersionAsFloat  (lines 1132-1145)
+1132:     private static float getJavaVersionAsFloat() {
+1133:         if (JAVA_VERSION_TRIMMED == null) {
+1134:             return 0f;
+1135:         }
+1136:         String str = JAVA_VERSION_TRIMMED.substring(0, 3);
+1137:         if (JAVA_VERSION_TRIMMED.length() >= 5) {
+1138:             str = str + JAVA_VERSION_TRIMMED.substring(4, 5);
+1139:         }
+1140:         try {
+1141:             return Float.parseFloat(str);
+1142:         } catch (Exception ex) {
+1143:             return 0;
+1144:         }
+1145:     }
+
+[27] org.apache.commons.lang3.builder.ReflectionToStringBuilder#reflectionAppendArray  (lines 621-624)
+621:     public ReflectionToStringBuilder reflectionAppendArray(Object array) {
+622:         this.getStyle().reflectionAppendArrayDetail(this.getStringBuffer(), null, array);
+623:         return this;
+624:     }
+
+[28] org.apache.commons.lang3.builder.ToStringStyle#appendNullText  (lines 1500-1502)
+1500:     protected void appendNullText(StringBuffer buffer, String fieldName) {
+1501:         buffer.append(nullText);
+1502:     }
+
+[29] org.apache.commons.lang3.builder.ToStringBuilder#toString  (lines 1058-1066)
+1058:     @Override
+1059:     public String toString() {
+1060:         if (this.getObject() == null) {
+1061:             this.getStringBuffer().append(this.getStyle().getNullText());
+1062:         } else {
+1063:             style.appendEnd(this.getStringBuffer(), this.getObject());
+1064:         }
+1065:         return this.getStringBuffer().toString();
+1066:     }
+
+[30] org.apache.commons.lang3.builder.ToStringStyle#appendContentEnd  (lines 1488-1490)
+1488:     protected void appendContentEnd(StringBuffer buffer) {
+1489:         buffer.append(contentEnd);
+1490:     }
+
+[31] org.apache.commons.lang3.builder.ToStringStyle#reflectionAppendArrayDetail  (lines 922-938)
+922:     protected void reflectionAppendArrayDetail(StringBuffer buffer, String fieldName, Object array) {
+923:         buffer.append(arrayStart);
+924:         int length = Array.getLength(array);
+925:         for (int i = 0; i < length; i++) {
+926:             Object item = Array.get(array, i);
+927:             if (i > 0) {
+928:                 buffer.append(arraySeparator);
+929:             }
+930:             if (item == null) {
+931:                 appendNullText(buffer, fieldName);
+932: 
+933:             } else {
+934:                 appendInternal(buffer, fieldName, item, arrayContentDetail);
+935:             }
+936:         }
+937:         buffer.append(arrayEnd);
+938:     }
+
+[32] org.apache.commons.lang3.builder.ToStringStyle#appendInternal  (lines 468-565)
+468:     protected void appendInternal(StringBuffer buffer, String fieldName, Object value, boolean detail) {
+469:         if (isRegistered(value)
+470:             && !(value instanceof Number || value instanceof Boolean || value instanceof Character)) {
+471:            appendCyclicObject(buffer, fieldName, value);
+472:            return;
+473:         }
+474: 
+475:         register(value);
+476: 
+477:         try {
+478:             if (value instanceof Collection<?>) {
+479:                 if (detail) {
+480:                     appendDetail(buffer, fieldName, (Collection<?>) value);
+481:                 } else {
+482:                     appendSummarySize(buffer, fieldName, ((Collection<?>) value).size());
+483:                 }
+484: 
+485:             } else if (value instanceof Map<?, ?>) {
+486:                 if (detail) {
+487:                     appendDetail(buffer, fieldName, (Map<?, ?>) value);
+488:                 } else {
+489:                     appendSummarySize(buffer, fieldName, ((Map<?, ?>) value).size());
+490:                 }
+491: 
+492:             } else if (value instanceof long[]) {
+493:                 if (detail) {
+494:                     appendDetail(buffer, fieldName, (long[]) value);
+495:                 } else {
+496:                     appendSummary(buffer, fieldName, (long[]) value);
+497:                 }
+498: 
+499:             } else if (value instanceof int[]) {
+500:                 if (detail) {
+501:                     appendDetail(buffer, fieldName, (int[]) value);
+502:                 } else {
+503:                     appendSummary(buffer, fieldName, (int[]) value);
+504:                 }
+505: 
+506:             } else if (value instanceof short[]) {
+507:                 if (detail) {
+508:                     appendDetail(buffer, fieldName, (short[]) value);
+509:                 } else {
+510:                     appendSummary(buffer, fieldName, (short[]) value);
+511:                 }
+512: 
+513:             } else if (value instanceof byte[]) {
+514:                 if (detail) {
+515:                     appendDetail(buffer, fieldName, (byte[]) value);
+516:                 } else {
+517:                     appendSummary(buffer, fieldName, (byte[]) value);
+518:                 }
+519: 
+520:             } else if (value instanceof char[]) {
+521:                 if (detail) {
+522:                     appendDetail(buffer, fieldName, (char[]) value);
+523:                 } else {
+524:                     appendSummary(buffer, fieldName, (char[]) value);
+525:                 }
+526: 
+527:             } else if (value instanceof double[]) {
+528:                 if (detail) {
+529:                     appendDetail(buffer, fieldName, (double[]) value);
+530:                 } else {
+531:                     appendSummary(buffer, fieldName, (double[]) value);
+532:                 }
+533: 
+534:             } else if (value instanceof float[]) {
+535:                 if (detail) {
+536:                     appendDetail(buffer, fieldName, (float[]) value);
+537:                 } else {
+538:                     appendSummary(buffer, fieldName, (float[]) value);
+539:                 }
+540: 
+541:             } else if (value instanceof boolean[]) {
+542:                 if (detail) {
+543:                     appendDetail(buffer, fieldName, (boolean[]) value);
+544:                 } else {
+545:                     appendSummary(buffer, fieldName, (boolean[]) value);
+546:                 }
+547: 
+548:             } else if (value.getClass().isArray()) {
+549:                 if (detail) {
+550:                     appendDetail(buffer, fieldName, (Object[]) value);
+551:                 } else {
+552:                     appendSummary(buffer, fieldName, (Object[]) value);
+553:                 }
+554: 
+555:             } else {
+556:                     if (detail) {
+557:                         appendDetail(buffer, fieldName, value);
+558:                     } else {
+559:                         appendSummary(buffer, fieldName, value);
+560:                     }
+561:             }
+562:         } finally {
+563:             unregister(value);
+564:         }
+565:     }
+
+[33] org.apache.commons.lang3.builder.ToStringStyle#MultiLineToStringStyle  (lines 2259-2265)
+2259:         MultiLineToStringStyle() {
+2260:             super();
+2261:             this.setContentStart("[");
+2262:             this.setFieldSeparator(SystemUtils.LINE_SEPARATOR + "  ");
+2263:             this.setFieldSeparatorAtStart(true);
+2264:             this.setContentEnd(SystemUtils.LINE_SEPARATOR + "]");
+2265:         }
+
+[34] org.apache.commons.lang3.builder.ToStringStyle#NoFieldNameToStringStyle  (lines 2157-2160)
+2157:         NoFieldNameToStringStyle() {
+2158:             super();
+2159:             this.setUseFieldNames(false);
+2160:         }
+
+[35] org.apache.commons.lang3.builder.ToStringBuilder#reflectionToString  (lines 181-183)
+181:     public static String reflectionToString(Object object, ToStringStyle style, boolean outputTransients) {
+182:         return ReflectionToStringBuilder.toString(object, style, outputTransients, false, null);
+183:     }
+
+[36] org.apache.commons.lang3.builder.ToStringStyle#appendCyclicObject  (lines 579-581)
+579:     protected void appendCyclicObject(StringBuffer buffer, String fieldName, Object value) {
+580:        ObjectUtils.identityToString(buffer, value);
+581:     }
+
+[37] org.apache.commons.lang3.builder.ToStringBuilder#getStringBuffer  (lines 1032-1034)
+1032:     public StringBuffer getStringBuffer() {
+1033:         return buffer;
+1034:     }
+
+[38] org.apache.commons.lang3.builder.ToStringStyle#appendStart  (lines 374-383)
+374:     public void appendStart(StringBuffer buffer, Object object) {
+375:         if (object != null) {
+376:             appendClassName(buffer, object);
+377:             appendIdentityHashCode(buffer, object);
+378:             appendContentStart(buffer);
+379:             if (fieldSeparatorAtStart) {
+380:                 appendFieldSeparator(buffer);
+381:             }
+382:         }
+383:     }
+
+[39] org.apache.commons.lang3.builder.ReflectionToStringBuilder#setUpToClass  (lines 676-684)
+676:     public void setUpToClass(Class<?> clazz) {
+677:         if (clazz != null) {
+678:             Object object = getObject();
+679:             if (object != null && clazz.isInstance(object) == false) {
+680:                 throw new IllegalArgumentException("Specified class is not a superclass of the object");
+681:             }
+682:         }
+683:         this.upToClass = clazz;
+684:     }
+
+[40] org.apache.commons.lang3.SystemUtils#getJavaVersionMatches  (lines 1202-1207)
+1202:     private static boolean getJavaVersionMatches(String versionPrefix) {
+1203:         if (JAVA_VERSION_TRIMMED == null) {
+1204:             return false;
+1205:         }
+1206:         return JAVA_VERSION_TRIMMED.startsWith(versionPrefix);
+1207:     }    
+
+[41] org.apache.commons.lang3.builder.ToStringStyle#DefaultToStringStyle  (lines 2124-2126)
+2124:         DefaultToStringStyle() {
+2125:             super();
+2126:         }
+
+[42] org.apache.commons.lang3.builder.ToStringStyle#isRegistered  (lines 162-165)
+162:     static boolean isRegistered(Object value) {
+163:         Map<Object, Object> m = getRegistry();
+164:         return m.containsKey(value);
+165:     }
+
+[43] org.apache.commons.lang3.SystemUtils#getOSMatches  (lines 1229-1234)
+1229:     private static boolean getOSMatches(String osNamePrefix, String osVersionPrefix) {
+1230:         if (OS_NAME == null || OS_VERSION == null) {
+1231:             return false;
+1232:         }
+1233:         return OS_NAME.startsWith(osNamePrefix) && OS_VERSION.startsWith(osVersionPrefix);
+1234:     }    
+
+[44] org.apache.commons.lang3.ObjectUtils#identityToString  (lines 214-221)
+214:     public static void identityToString(StringBuffer buffer, Object object) {
+215:         if (object == null) {
+216:             throw new NullPointerException("Cannot get the toString of a null identity");
+217:         }
+218:         buffer.append(object.getClass().getName())
+219:               .append('@')
+220:               .append(Integer.toHexString(System.identityHashCode(object)));
+221:     }
+
+[45] org.apache.commons.lang3.builder.ToStringBuilder#getObject  (lines 1023-1025)
+1023:     public Object getObject() {
+1024:         return object;
+1025:     }
+
+[46] org.apache.commons.lang3.builder.ToStringStyle#removeLastFieldSeparator  (lines 406-421)
+406:     protected void removeLastFieldSeparator(StringBuffer buffer) {
+407:         int len = buffer.length();
+408:         int sepLen = fieldSeparator.length();
+409:         if (len > 0 && sepLen > 0 && len >= sepLen) {
+410:             boolean match = true;
+411:             for (int i = 0; i < sepLen; i++) {
+412:                 if (buffer.charAt(len - 1 - i) != fieldSeparator.charAt(sepLen - 1 - i)) {
+413:                     match = false;
+414:                     break;
+415:                 }
+416:             }
+417:             if (match) {
+418:                 buffer.setLength(len - sepLen);
+419:             }
+420:         }
+421:     }
+
+[47] org.apache.commons.lang3.SystemUtils#getJavaVersionTrimmed  (lines 1184-1194)
+1184:     private static String getJavaVersionTrimmed() {
+1185:         if (JAVA_VERSION != null) {
+1186:             for (int i = 0; i < JAVA_VERSION.length(); i++) {
+1187:                 char ch = JAVA_VERSION.charAt(i);
+1188:                 if (ch >= '0' && ch <= '9') {
+1189:                     return JAVA_VERSION.substring(i);
+1190:                 }
+1191:             }
+1192:         }
+1193:         return null;
+1194:     }
+
+[48] org.apache.commons.lang3.builder.ToStringStyle#appendDetail  (lines 592-594)
+592:     protected void appendDetail(StringBuffer buffer, String fieldName, Object value) {
+593:         buffer.append(value);
+594:     }
+
+[49] org.apache.commons.lang3.builder.ToStringStyle#ShortPrefixToStringStyle  (lines 2191-2195)
+2191:         ShortPrefixToStringStyle() {
+2192:             super();
+2193:             this.setUseShortClassName(true);
+2194:             this.setUseIdentityHashCode(false);
+2195:         }
+
+[50] org.apache.commons.lang3.SystemUtils#getOSMatches  (lines 1215-1220)
+1215:     private static boolean getOSMatches(String osNamePrefix) {
+1216:         if (OS_NAME == null) {
+1217:             return false;
+1218:         }
+1219:         return OS_NAME.startsWith(osNamePrefix);
+1220:     }    

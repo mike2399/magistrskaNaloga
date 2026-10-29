@@ -1,0 +1,171 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math3.optimization.fitting.HarmonicFitterTest::testMath844
+junit.framework.AssertionFailedError: Expected exception: org.apache.commons.math3.exception.MathIllegalStateException
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math3.optimization.fitting.HarmonicFitter#guess  (lines 214-219)
+214:         public double[] guess() {
+215:             sortObservations();
+216:             guessAOmega();
+217:             guessPhi();
+218:             return new double[] { a, omega, phi };
+219:         }
+
+[2] org.apache.commons.math3.optimization.fitting.HarmonicFitter#guessPhi  (lines 334-357)
+334:         private void guessPhi() {
+335:             // initialize the means
+336:             double fcMean = 0;
+337:             double fsMean = 0;
+338: 
+339:             double currentX = observations[0].getX();
+340:             double currentY = observations[0].getY();
+341:             for (int i = 1; i < observations.length; ++i) {
+342:                 // one step forward
+343:                 final double previousX = currentX;
+344:                 final double previousY = currentY;
+345:                 currentX = observations[i].getX();
+346:                 currentY = observations[i].getY();
+347:                 final double currentYPrime = (currentY - previousY) / (currentX - previousX);
+348: 
+349:                 double omegaX = omega * currentX;
+350:                 double cosine = FastMath.cos(omegaX);
+351:                 double sine = FastMath.sin(omegaX);
+352:                 fcMean += omega * currentY * cosine - currentYPrime * sine;
+353:                 fsMean += omega * currentY * sine + currentYPrime * cosine;
+354:             }
+355: 
+356:             phi = FastMath.atan2(-fsMean, fcMean);
+357:         }
+
+[3] org.apache.commons.math3.optimization.fitting.HarmonicFitter#guessAOmega  (lines 257-329)
+257:         private void guessAOmega() {
+258:             // initialize the sums for the linear model between the two integrals
+259:             double sx2 = 0;
+260:             double sy2 = 0;
+261:             double sxy = 0;
+262:             double sxz = 0;
+263:             double syz = 0;
+264: 
+265:             double currentX = observations[0].getX();
+266:             double currentY = observations[0].getY();
+267:             double f2Integral = 0;
+268:             double fPrime2Integral = 0;
+269:             final double startX = currentX;
+270:             for (int i = 1; i < observations.length; ++i) {
+271:                 // one step forward
+272:                 final double previousX = currentX;
+273:                 final double previousY = currentY;
+274:                 currentX = observations[i].getX();
+275:                 currentY = observations[i].getY();
+276: 
+277:                 // update the integrals of f<sup>2</sup> and f'<sup>2</sup>
+278:                 // considering a linear model for f (and therefore constant f')
+279:                 final double dx = currentX - previousX;
+280:                 final double dy = currentY - previousY;
+281:                 final double f2StepIntegral =
+282:                     dx * (previousY * previousY + previousY * currentY + currentY * currentY) / 3;
+283:                 final double fPrime2StepIntegral = dy * dy / dx;
+284: 
+285:                 final double x = currentX - startX;
+286:                 f2Integral += f2StepIntegral;
+287:                 fPrime2Integral += fPrime2StepIntegral;
+288: 
+289:                 sx2 += x * x;
+290:                 sy2 += f2Integral * f2Integral;
+291:                 sxy += x * f2Integral;
+292:                 sxz += x * fPrime2Integral;
+293:                 syz += f2Integral * fPrime2Integral;
+294:             }
+295: 
+296:             // compute the amplitude and pulsation coefficients
+297:             double c1 = sy2 * sxz - sxy * syz;
+298:             double c2 = sxy * sxz - sx2 * syz;
+299:             double c3 = sx2 * sy2 - sxy * sxy;
+300:             if ((c1 / c2 < 0) || (c2 / c3 < 0)) {
+301:                 final int last = observations.length - 1;
+302:                 // Range of the observations, assuming that the
+303:                 // observations are sorted.
+304:                 final double xRange = observations[last].getX() - observations[0].getX();
+305:                 if (xRange == 0) {
+306:                     throw new ZeroException();
+307:                 }
+308:                 omega = 2 * Math.PI / xRange;
+309: 
+310:                 double yMin = Double.POSITIVE_INFINITY;
+311:                 double yMax = Double.NEGATIVE_INFINITY;
+312:                 for (int i = 1; i < observations.length; ++i) {
+313:                     final double y = observations[i].getY();
+314:                     if (y < yMin) {
+315:                         yMin = y;
+316:                     }
+317:                     if (y > yMax) {
+318:                         yMax = y;
+319:                     }
+320:                 }
+321:                 a = 0.5 * (yMax - yMin);
+322:             } else {
+323:                     // In some ill-conditioned cases (cf. MATH-844), the guesser
+324:                     // procedure cannot produce sensible results.
+325: 
+326:                 a = FastMath.sqrt(c1 / c2);
+327:                 omega = FastMath.sqrt(c2 / c3);
+328:             }
+329:         }
+
+[4] org.apache.commons.math3.optimization.fitting.HarmonicFitter#ParameterGuesser  (lines 195-202)
+195:         public ParameterGuesser(WeightedObservedPoint[] observations) {
+196:             if (observations.length < 4) {
+197:                 throw new NumberIsTooSmallException(LocalizedFormats.INSUFFICIENT_OBSERVED_POINTS_IN_SAMPLE,
+198:                                                     observations.length, 4, true);
+199:             }
+200: 
+201:             this.observations = observations.clone();
+202:         }
+
+[5] org.apache.commons.math3.optimization.fitting.WeightedObservedPoint#getX  (lines 63-65)
+63:     public double getX() {
+64:         return x;
+65:     }
+
+[6] org.apache.commons.math3.optimization.fitting.WeightedObservedPoint#getY  (lines 70-72)
+70:     public double getY() {
+71:         return y;
+72:     }
+
+[7] org.apache.commons.math3.optimization.fitting.HarmonicFitter#sortObservations  (lines 224-246)
+224:         private void sortObservations() {
+225:             // Since the samples are almost always already sorted, this
+226:             // method is implemented as an insertion sort that reorders the
+227:             // elements in place. Insertion sort is very efficient in this case.
+228:             WeightedObservedPoint curr = observations[0];
+229:             for (int j = 1; j < observations.length; ++j) {
+230:                 WeightedObservedPoint prec = curr;
+231:                 curr = observations[j];
+232:                 if (curr.getX() < prec.getX()) {
+233:                     // the current element should be inserted closer to the beginning
+234:                     int i = j - 1;
+235:                     WeightedObservedPoint mI = observations[i];
+236:                     while ((i >= 0) && (curr.getX() < mI.getX())) {
+237:                         observations[i + 1] = mI;
+238:                         if (i-- != 0) {
+239:                             mI = observations[i];
+240:                         }
+241:                     }
+242:                     observations[i + 1] = curr;
+243:                     curr = observations[j];
+244:                 }
+245:             }
+246:         }
+
+[8] org.apache.commons.math3.optimization.fitting.WeightedObservedPoint#WeightedObservedPoint  (lines 47-51)
+47:     public WeightedObservedPoint(final double weight, final double x, final double y) {
+48:         this.weight = weight;
+49:         this.x      = x;
+50:         this.y      = y;
+51:     }

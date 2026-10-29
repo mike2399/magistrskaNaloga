@@ -1,0 +1,1160 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math.ode.nonstiff.ClassicalRungeKuttaIntegratorTest::testMissedEndEvent
+junit.framework.AssertionFailedError: expected:<1.8782503799999986E9> but was:<1.878250439999994E9>
+	at org.apache.commons.math.ode.nonstiff.ClassicalRungeKuttaIntegratorTest.testMissedEndEvent(ClassicalRungeKuttaIntegratorTest.java:70)
+--- org.apache.commons.math.ode.nonstiff.DormandPrince853IntegratorTest::testMissedEndEvent
+junit.framework.AssertionFailedError: expected:<1.8782503799999986E9> but was:<1.878250479999994E9>
+	at org.apache.commons.math.ode.nonstiff.DormandPrince853IntegratorTest.testMissedEndEvent(DormandPrince853IntegratorTest.java:72)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#getCurrentTime  (lines 234-236)
+234:   public double getCurrentTime() {
+235:     return currentTime;
+236:   }
+
+[2] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#isForward  (lines 250-252)
+250:   public boolean isForward() {
+251:     return forward;
+252:   }
+
+[3] org.apache.commons.math.ode.sampling.DummyStepInterpolator#computeInterpolatedStateAndDerivatives  (lines 104-109)
+104:   @Override
+105:   protected void computeInterpolatedStateAndDerivatives(final double theta, final double oneMinusThetaH)
+106:     throws DerivativeException {
+107:       System.arraycopy(currentState,      0, interpolatedState,       0, currentState.length);
+108:       System.arraycopy(currentDerivative, 0, interpolatedDerivatives, 0, currentDerivative.length);
+109:   }
+
+[4] org.apache.commons.math.ode.AbstractIntegrator#g  (lines 266-268)
+266:         public double g(double t, double[] y) {
+267:             return t - endTime;
+268:         }
+
+[5] org.apache.commons.math.ode.nonstiff.ClassicalRungeKuttaIntegrator#ClassicalRungeKuttaIntegrator  (lines 70-73)
+70:   public ClassicalRungeKuttaIntegrator(final double step) {
+71:     super("classical Runge-Kutta", STATIC_C, STATIC_A, STATIC_B,
+72:           new ClassicalRungeKuttaStepInterpolator(), step);
+73:   }
+
+[6] org.apache.commons.math.ode.nonstiff.DormandPrince853Integrator#estimateError  (lines 245-279)
+245:   @Override
+246:   protected double estimateError(final double[][] yDotK,
+247:                                  final double[] y0, final double[] y1,
+248:                                  final double h) {
+249:     double error1 = 0;
+250:     double error2 = 0;
+251: 
+252:     for (int j = 0; j < y0.length; ++j) {
+253:       final double errSum1 = E1_01 * yDotK[0][j]  + E1_06 * yDotK[5][j] +
+254:                              E1_07 * yDotK[6][j]  + E1_08 * yDotK[7][j] +
+255:                              E1_09 * yDotK[8][j]  + E1_10 * yDotK[9][j] +
+256:                              E1_11 * yDotK[10][j] + E1_12 * yDotK[11][j];
+257:       final double errSum2 = E2_01 * yDotK[0][j]  + E2_06 * yDotK[5][j] +
+258:                              E2_07 * yDotK[6][j]  + E2_08 * yDotK[7][j] +
+259:                              E2_09 * yDotK[8][j]  + E2_10 * yDotK[9][j] +
+260:                              E2_11 * yDotK[10][j] + E2_12 * yDotK[11][j];
+261: 
+262:       final double yScale = Math.max(Math.abs(y0[j]), Math.abs(y1[j]));
+263:       final double tol = (vecAbsoluteTolerance == null) ?
+264:                          (scalAbsoluteTolerance + scalRelativeTolerance * yScale) :
+265:                          (vecAbsoluteTolerance[j] + vecRelativeTolerance[j] * yScale);
+266:       final double ratio1  = errSum1 / tol;
+267:       error1        += ratio1 * ratio1;
+268:       final double ratio2  = errSum2 / tol;
+269:       error2        += ratio2 * ratio2;
+270:     }
+271: 
+272:     double den = error1 + 0.01 * error2;
+273:     if (den <= 0.0) {
+274:       den = 1.0;
+275:     }
+276: 
+277:     return Math.abs(h) * error1 / Math.sqrt(y0.length * den);
+278: 
+279:   }
+
+[7] org.apache.commons.math.ode.events.CombinedEventsManager#getEventTime  (lines 186-188)
+186:     public double getEventTime() {
+187:         return (first == null) ? Double.NaN : first.getEventTime();
+188:     }
+
+[8] org.apache.commons.math.ode.events.EventState#evaluateStep  (lines 167-274)
+167:     public boolean evaluateStep(final StepInterpolator interpolator)
+168:         throws DerivativeException, EventException, ConvergenceException {
+169: 
+170:         try {
+171: 
+172:             forward = interpolator.isForward();
+173:             final double t1 = interpolator.getCurrentTime();
+174:             final int    n  = Math.max(1, (int) Math.ceil(Math.abs(t1 - t0) / maxCheckInterval));
+175:             final double h  = (t1 - t0) / n;
+176: 
+177:             double ta = t0;
+178:             double ga = g0;
+179:             double tb = t0 + (interpolator.isForward() ? convergence : -convergence);
+180:             for (int i = 0; i < n; ++i) {
+181: 
+182:                 // evaluate handler value at the end of the substep
+183:                 tb += h;
+184:                 interpolator.setInterpolatedTime(tb);
+185:                 final double gb = handler.g(tb, interpolator.getInterpolatedState());
+186: 
+187:                 // check events occurrence
+188:                 if (g0Positive ^ (gb >= 0)) {
+189:                     // there is a sign change: an event is expected during this step
+190: 
+191:                     if (ga * gb > 0) {
+192:                         // this is a corner case:
+193:                         // - there was an event near ta,
+194:                         // - there is another event between ta and tb
+195:                         // - when ta was computed, convergence was reached on the "wrong side" of the interval
+196:                         // this implies that the real sign of ga is the same as gb, so we need to slightly
+197:                         // shift ta to make sure ga and gb get opposite signs and the solver won't complain
+198:                         // about bracketing
+199:                         final double epsilon = (forward ? 0.25 : -0.25) * convergence;
+200:                         for (int k = 0; (k < 4) && (ga * gb > 0); ++k) {
+201:                             ta += epsilon;
+202:                             interpolator.setInterpolatedTime(ta);
+203:                             ga = handler.g(ta, interpolator.getInterpolatedState());
+204:                         }
+205:                         if (ga * gb > 0) {
+206:                             // this should never happen
+207:                             throw MathRuntimeException.createInternalError(null);
+208:                         }
+209:                     }
+210: 
+211:                     // variation direction, with respect to the integration direction
+212:                     increasing = gb >= ga;
+213: 
+214:                     final UnivariateRealFunction f = new UnivariateRealFunction() {
+215:                         public double value(final double t) throws FunctionEvaluationException {
+216:                             try {
+217:                                 interpolator.setInterpolatedTime(t);
+218:                                 return handler.g(t, interpolator.getInterpolatedState());
+219:                             } catch (DerivativeException e) {
+220:                                 throw new FunctionEvaluationException(e, t);
+221:                             } catch (EventException e) {
+222:                                 throw new FunctionEvaluationException(e, t);
+223:                             }
+224:                         }
+225:                     };
+226:                     final BrentSolver solver = new BrentSolver();
+227:                     solver.setAbsoluteAccuracy(convergence);
+228:                     solver.setMaximalIterationCount(maxIterationCount);
+229:                     final double root = (ta <= tb) ? solver.solve(f, ta, tb) : solver.solve(f, tb, ta);
+230:                     if ((Math.abs(root - ta) <= convergence) &&
+231:                          (Math.abs(root - previousEventTime) <= convergence)) {
+232:                         // we have either found nothing or found (again ?) a past event, we simply ignore it
+233:                         ta = tb;
+234:                         ga = gb;
+235:                     } else if (Double.isNaN(previousEventTime) ||
+236:                                (Math.abs(previousEventTime - root) > convergence)) {
+237:                         pendingEventTime = root;
+238:                         if (pendingEvent && (Math.abs(t1 - pendingEventTime) <= convergence)) {
+239:                             // we were already waiting for this event which was
+240:                             // found during a previous call for a step that was
+241:                             // rejected, this step must now be accepted since it
+242:                             // properly ends exactly at the event occurrence
+243:                             return false;
+244:                         }
+245:                         // either we were not waiting for the event or it has
+246:                         // moved in such a way the step cannot be accepted
+247:                         pendingEvent = true;
+248:                         return true;
+249:                     }
+250: 
+251:                 } else {
+252:                     // no sign change: there is no event for now
+253:                     ta = tb;
+254:                     ga = gb;
+255:                 }
+256: 
+257:             }
+258: 
+259:             // no event during the whole step
+260:             pendingEvent     = false;
+261:             pendingEventTime = Double.NaN;
+262:             return false;
+263: 
+264:         } catch (FunctionEvaluationException e) {
+265:             final Throwable cause = e.getCause();
+266:             if ((cause != null) && (cause instanceof DerivativeException)) {
+267:                 throw (DerivativeException) cause;
+268:             } else if ((cause != null) && (cause instanceof EventException)) {
+269:                 throw (EventException) cause;
+270:             }
+271:             throw new EventException(e);
+272:         }
+273: 
+274:     }
+
+[9] org.apache.commons.math.ode.nonstiff.EmbeddedRungeKuttaIntegrator#EmbeddedRungeKuttaIntegrator  (lines 109-131)
+109:   protected EmbeddedRungeKuttaIntegrator(final String name, final boolean fsal,
+110:                                          final double[] c, final double[][] a, final double[] b,
+111:                                          final RungeKuttaStepInterpolator prototype,
+112:                                          final double minStep, final double maxStep,
+113:                                          final double scalAbsoluteTolerance,
+114:                                          final double scalRelativeTolerance) {
+115: 
+116:     super(name, minStep, maxStep, scalAbsoluteTolerance, scalRelativeTolerance);
+117: 
+118:     this.fsal      = fsal;
+119:     this.c         = c;
+120:     this.a         = a;
+121:     this.b         = b;
+122:     this.prototype = prototype;
+123: 
+124:     exp = -1.0 / getOrder();
+125: 
+126:     // set the default values of the algorithm control parameters
+127:     setSafety(0.9);
+128:     setMinReduction(0.2);
+129:     setMaxGrowth(10.0);
+130: 
+131:   }
+
+[10] org.apache.commons.math.ode.nonstiff.DormandPrince853Integrator#DormandPrince853Integrator  (lines 213-219)
+213:   public DormandPrince853Integrator(final double minStep, final double maxStep,
+214:                                     final double scalAbsoluteTolerance,
+215:                                     final double scalRelativeTolerance) {
+216:     super(METHOD_NAME, true, STATIC_C, STATIC_A, STATIC_B,
+217:           new DormandPrince853StepInterpolator(),
+218:           minStep, maxStep, scalAbsoluteTolerance, scalRelativeTolerance);
+219:   }
+
+[11] org.apache.commons.math.ode.events.EventState#value  (lines 215-224)
+215:                         public double value(final double t) throws FunctionEvaluationException {
+216:                             try {
+217:                                 interpolator.setInterpolatedTime(t);
+218:                                 return handler.g(t, interpolator.getInterpolatedState());
+219:                             } catch (DerivativeException e) {
+220:                                 throw new FunctionEvaluationException(e, t);
+221:                             } catch (EventException e) {
+222:                                 throw new FunctionEvaluationException(e, t);
+223:                             }
+224:                         }
+
+[12] org.apache.commons.math.ode.AbstractIntegrator#computeDerivatives  (lines 177-183)
+177:     public void computeDerivatives(final double t, final double[] y, final double[] yDot)
+178:         throws DerivativeException {
+179:         if (++evaluations > maxEvaluations) {
+180:             throw new DerivativeException(new MaxEvaluationsExceededException(maxEvaluations));
+181:         }
+182:         equations.computeDerivatives(t, y, yDot);
+183:     }
+
+[13] org.apache.commons.math.ode.AbstractIntegrator#requiresDenseOutput  (lines 122-129)
+122:     protected boolean requiresDenseOutput() {
+123:         for (StepHandler handler : stepHandlers) {
+124:             if (handler.requiresDenseOutput()) {
+125:                 return true;
+126:             }
+127:         }
+128:         return false;
+129:     }
+
+[14] org.apache.commons.math.ode.AbstractIntegrator#EndTimeChecker  (lines 256-258)
+256:         public EndTimeChecker(final double endTime) {
+257:             this.endTime = endTime;
+258:         }
+
+[15] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#storeTime  (lines 217-226)
+217:   public void storeTime(final double t) {
+218: 
+219:     currentTime = t;
+220:     h           = currentTime - previousTime;
+221:     setInterpolatedTime(t);
+222: 
+223:     // the step is not finalized anymore
+224:     finalized  = false;
+225: 
+226:   }
+
+[16] org.apache.commons.math.ode.AbstractIntegrator#setEquations  (lines 166-168)
+166:     protected void setEquations(final FirstOrderDifferentialEquations equations) {
+167:         this.equations = equations;
+168:     }
+
+[17] org.apache.commons.math.ode.events.CombinedEventsManager#stepAccepted  (lines 199-208)
+199:     public void stepAccepted(final double t, final double[] y)
+200:     throws IntegratorException {
+201:         try {
+202:             for (EventState state : states) {
+203:                 state.stepAccepted(t, y);
+204:             }
+205:         } catch (EventException se) {
+206:             throw new IntegratorException(se);
+207:         }
+208:     }
+
+[18] org.apache.commons.math.ode.nonstiff.AdaptiveStepsizeIntegrator#filterStep  (lines 277-299)
+277:   protected double filterStep(final double h, final boolean forward, final boolean acceptSmall)
+278:     throws IntegratorException {
+279: 
+280:       double filteredH = h;
+281:       if (Math.abs(h) < minStep) {
+282:           if (acceptSmall) {
+283:               filteredH = forward ? minStep : -minStep;
+284:           } else {
+285:               throw new IntegratorException(
+286:                       "minimal step size ({0,number,0.00E00}) reached, integration needs {1,number,0.00E00}",
+287:                       minStep, Math.abs(h));
+288:           }
+289:       }
+290: 
+291:       if (filteredH > maxStep) {
+292:           filteredH = maxStep;
+293:       } else if (filteredH < -maxStep) {
+294:           filteredH = -maxStep;
+295:       }
+296: 
+297:       return filteredH;
+298: 
+299:   }
+
+[19] org.apache.commons.math.analysis.solvers.UnivariateRealSolverImpl#verifyInterval  (lines 207-213)
+207:     protected void verifyInterval(final double lower, final double upper) {
+208:         if (lower >= upper) {
+209:             throw MathRuntimeException.createIllegalArgumentException(
+210:                     "endpoints do not specify an interval: [{0}, {1}]",
+211:                     lower, upper);
+212:         }
+213:     }
+
+[20] org.apache.commons.math.ode.nonstiff.EmbeddedRungeKuttaIntegrator#integrate  (lines 191-366)
+191:   @Override
+192:   public double integrate(final FirstOrderDifferentialEquations equations,
+193:                           final double t0, final double[] y0,
+194:                           final double t, final double[] y)
+195:   throws DerivativeException, IntegratorException {
+196: 
+197:     sanityChecks(equations, t0, y0, t, y);
+198:     setEquations(equations);
+199:     resetEvaluations();
+200:     final boolean forward = t > t0;
+201: 
+202:     // create some internal working arrays
+203:     final int stages = c.length + 1;
+204:     if (y != y0) {
+205:       System.arraycopy(y0, 0, y, 0, y0.length);
+206:     }
+207:     final double[][] yDotK = new double[stages][y0.length];
+208:     final double[] yTmp = new double[y0.length];
+209: 
+210:     // set up an interpolator sharing the integrator arrays
+211:     AbstractStepInterpolator interpolator;
+212:     if (requiresDenseOutput() || (! eventsHandlersManager.isEmpty())) {
+213:       final RungeKuttaStepInterpolator rki = (RungeKuttaStepInterpolator) prototype.copy();
+214:       rki.reinitialize(this, yTmp, yDotK, forward);
+215:       interpolator = rki;
+216:     } else {
+217:       interpolator = new DummyStepInterpolator(yTmp, yDotK[stages - 1], forward);
+218:     }
+219:     interpolator.storeTime(t0);
+220: 
+221:     // set up integration control objects
+222:     stepStart         = t0;
+223:     double  hNew      = 0;
+224:     boolean firstTime = true;
+225:     for (StepHandler handler : stepHandlers) {
+226:         handler.reset();
+227:     }
+228:     CombinedEventsManager manager = addEndTimeChecker(t0, t, eventsHandlersManager);
+229:     boolean lastStep = false;
+230: 
+231:     // main integration loop
+232:     while (!lastStep) {
+233: 
+234:       interpolator.shift();
+235: 
+236:       double error = 0;
+237:       for (boolean loop = true; loop;) {
+238: 
+239:         if (firstTime || !fsal) {
+240:           // first stage
+241:           computeDerivatives(stepStart, y, yDotK[0]);
+242:         }
+243: 
+244:         if (firstTime) {
+245:           final double[] scale = new double[y0.length];
+246:           if (vecAbsoluteTolerance == null) {
+247:               for (int i = 0; i < scale.length; ++i) {
+248:                 scale[i] = scalAbsoluteTolerance + scalRelativeTolerance * Math.abs(y[i]);
+249:               }
+250:             } else {
+251:               for (int i = 0; i < scale.length; ++i) {
+252:                 scale[i] = vecAbsoluteTolerance[i] + vecRelativeTolerance[i] * Math.abs(y[i]);
+253:               }
+254:             }
+255:           hNew = initializeStep(equations, forward, getOrder(), scale,
+256:                                 stepStart, y, yDotK[0], yTmp, yDotK[1]);
+257:           firstTime = false;
+258:         }
+259: 
+260:         stepSize = hNew;
+261: 
+262:         // next stages
+263:         for (int k = 1; k < stages; ++k) {
+264: 
+265:           for (int j = 0; j < y0.length; ++j) {
+266:             double sum = a[k-1][0] * yDotK[0][j];
+267:             for (int l = 1; l < k; ++l) {
+268:               sum += a[k-1][l] * yDotK[l][j];
+269:             }
+270:             yTmp[j] = y[j] + stepSize * sum;
+271:           }
+272: 
+273:           computeDerivatives(stepStart + c[k-1] * stepSize, yTmp, yDotK[k]);
+274: 
+275:         }
+276: 
+277:         // estimate the state at the end of the step
+278:         for (int j = 0; j < y0.length; ++j) {
+279:           double sum    = b[0] * yDotK[0][j];
+280:           for (int l = 1; l < stages; ++l) {
+281:             sum    += b[l] * yDotK[l][j];
+282:           }
+283:           yTmp[j] = y[j] + stepSize * sum;
+284:         }
+285: 
+286:         // estimate the error at the end of the step
+287:         error = estimateError(yDotK, y, yTmp, stepSize);
+288:         if (error <= 1.0) {
+289: 
+290:           // discrete events handling
+291:           interpolator.storeTime(stepStart + stepSize);
+292:           if (manager.evaluateStep(interpolator)) {
+293:               final double dt = manager.getEventTime() - stepStart;
+294:               if (Math.abs(dt) <= Math.ulp(stepStart)) {
+295:                   // we cannot simply truncate the step, reject the current computation
+296:                   // and let the loop compute another state with the truncated step.
+297:                   // it is so small (much probably exactly 0 due to limited accuracy)
+298:                   // that the code above would fail handling it.
+299:                   // So we set up an artificial 0 size step by copying states
+300:                   loop     = false;
+301:               } else {
+302:                   // reject the step to match exactly the next switch time
+303:                   hNew = dt;
+304:               }
+305:           } else {
+306:             // accept the step
+307:             loop = false;
+308:           }
+309: 
+310:         } else {
+311:           // reject the step and attempt to reduce error by stepsize control
+312:           final double factor =
+313:               Math.min(maxGrowth,
+314:                        Math.max(minReduction, safety * Math.pow(error, exp)));
+315:           hNew = filterStep(stepSize * factor, forward, false);
+316:         }
+317: 
+318:       }
+319: 
+320:       // the step has been accepted
+321:       final double nextStep = stepStart + stepSize;
+322:       System.arraycopy(yTmp, 0, y, 0, y0.length);
+323:       manager.stepAccepted(nextStep, y);
+324:       lastStep = manager.stop();
+325: 
+326:       // provide the step data to the step handler
+327:       interpolator.storeTime(nextStep);
+328:       for (StepHandler handler : stepHandlers) {
+329:           handler.handleStep(interpolator, lastStep);
+330:       }
+331:       stepStart = nextStep;
+332: 
+333:       if (fsal) {
+334:         // save the last evaluation for the next step
+335:         System.arraycopy(yDotK[stages - 1], 0, yDotK[0], 0, y0.length);
+336:       }
+337: 
+338:       if (manager.reset(stepStart, y) && ! lastStep) {
+339:         // some event handler has triggered changes that
+340:         // invalidate the derivatives, we need to recompute them
+341:         computeDerivatives(stepStart, y, yDotK[0]);
+342:       }
+343: 
+344:       if (! lastStep) {
+345:         // in some rare cases we may get here with stepSize = 0, for example
+346:         // when an event occurs at integration start, reducing the first step
+347:         // to zero; we have to reset the step to some safe non zero value
+348:           stepSize = filterStep(stepSize, forward, true);
+349: 
+350:         // stepsize control for next step
+351:         final double factor = Math.min(maxGrowth,
+352:                                        Math.max(minReduction,
+353:                                                 safety * Math.pow(error, exp)));
+354:         final double  scaledH    = stepSize * factor;
+355:         final double  nextT      = stepStart + scaledH;
+356:         final boolean nextIsLast = forward ? (nextT >= t) : (nextT <= t);
+357:         hNew = filterStep(scaledH, forward, nextIsLast);
+358:       }
+359: 
+360:     }
+361: 
+362:     final double stopTime = stepStart;
+363:     resetInternalState();
+364:     return stopTime;
+365: 
+366:   }
+
+[21] org.apache.commons.math.ode.nonstiff.AdaptiveStepsizeIntegrator#setInitialStepSize  (lines 149-155)
+149:   public void setInitialStepSize(final double initialStepSize) {
+150:     if ((initialStepSize < minStep) || (initialStepSize > maxStep)) {
+151:       initialStep = -1.0;
+152:     } else {
+153:       initialStep = initialStepSize;
+154:     }
+155:   }
+
+[22] org.apache.commons.math.ode.events.CombinedEventsManager#stop  (lines 214-221)
+214:     public boolean stop() {
+215:         for (EventState state : states) {
+216:             if (state.stop()) {
+217:                 return true;
+218:             }
+219:         }
+220:         return false;
+221:     }
+
+[23] org.apache.commons.math.analysis.solvers.UnivariateRealSolverImpl#setResult  (lines 140-144)
+140:     protected final void setResult(final double newResult, final int iterationCount) {
+141:         this.result         = newResult;
+142:         this.iterationCount = iterationCount;
+143:         this.resultComputed = true;
+144:     }
+
+[24] org.apache.commons.math.ode.events.EventState#EventState  (lines 94-111)
+94:     public EventState(final EventHandler handler, final double maxCheckInterval,
+95:                       final double convergence, final int maxIterationCount) {
+96:         this.handler           = handler;
+97:         this.maxCheckInterval  = maxCheckInterval;
+98:         this.convergence       = Math.abs(convergence);
+99:         this.maxIterationCount = maxIterationCount;
+100: 
+101:         // some dummy values ...
+102:         t0                = Double.NaN;
+103:         g0                = Double.NaN;
+104:         g0Positive        = true;
+105:         pendingEvent      = false;
+106:         pendingEventTime  = Double.NaN;
+107:         previousEventTime = Double.NaN;
+108:         increasing        = true;
+109:         nextAction        = EventHandler.CONTINUE;
+110: 
+111:     }
+
+[25] org.apache.commons.math.ode.nonstiff.RungeKuttaIntegrator#integrate  (lines 95-220)
+95:   public double integrate(final FirstOrderDifferentialEquations equations,
+96:                           final double t0, final double[] y0,
+97:                           final double t, final double[] y)
+98:   throws DerivativeException, IntegratorException {
+99: 
+100:     sanityChecks(equations, t0, y0, t, y);
+101:     setEquations(equations);
+102:     resetEvaluations();
+103:     final boolean forward = t > t0;
+104: 
+105:     // create some internal working arrays
+106:     final int stages = c.length + 1;
+107:     if (y != y0) {
+108:       System.arraycopy(y0, 0, y, 0, y0.length);
+109:     }
+110:     final double[][] yDotK = new double[stages][];
+111:     for (int i = 0; i < stages; ++i) {
+112:       yDotK [i] = new double[y0.length];
+113:     }
+114:     final double[] yTmp = new double[y0.length];
+115: 
+116:     // set up an interpolator sharing the integrator arrays
+117:     AbstractStepInterpolator interpolator;
+118:     if (requiresDenseOutput() || (! eventsHandlersManager.isEmpty())) {
+119:       final RungeKuttaStepInterpolator rki = (RungeKuttaStepInterpolator) prototype.copy();
+120:       rki.reinitialize(this, yTmp, yDotK, forward);
+121:       interpolator = rki;
+122:     } else {
+123:       interpolator = new DummyStepInterpolator(yTmp, yDotK[stages - 1], forward);
+124:     }
+125:     interpolator.storeTime(t0);
+126: 
+127:     // set up integration control objects
+128:     stepStart = t0;
+129:     stepSize  = forward ? step : -step;
+130:     for (StepHandler handler : stepHandlers) {
+131:         handler.reset();
+132:     }
+133:     CombinedEventsManager manager = addEndTimeChecker(t0, t, eventsHandlersManager);
+134:     boolean lastStep = false;
+135: 
+136:     // main integration loop
+137:     while (!lastStep) {
+138: 
+139:       interpolator.shift();
+140: 
+141:       for (boolean loop = true; loop;) {
+142: 
+143:         // first stage
+144:         computeDerivatives(stepStart, y, yDotK[0]);
+145: 
+146:         // next stages
+147:         for (int k = 1; k < stages; ++k) {
+148: 
+149:           for (int j = 0; j < y0.length; ++j) {
+150:             double sum = a[k-1][0] * yDotK[0][j];
+151:             for (int l = 1; l < k; ++l) {
+152:               sum += a[k-1][l] * yDotK[l][j];
+153:             }
+154:             yTmp[j] = y[j] + stepSize * sum;
+155:           }
+156: 
+157:           computeDerivatives(stepStart + c[k-1] * stepSize, yTmp, yDotK[k]);
+158: 
+159:         }
+160: 
+161:         // estimate the state at the end of the step
+162:         for (int j = 0; j < y0.length; ++j) {
+163:           double sum    = b[0] * yDotK[0][j];
+164:           for (int l = 1; l < stages; ++l) {
+165:             sum    += b[l] * yDotK[l][j];
+166:           }
+167:           yTmp[j] = y[j] + stepSize * sum;
+168:         }
+169: 
+170:         // discrete events handling
+171:         interpolator.storeTime(stepStart + stepSize);
+172:         if (manager.evaluateStep(interpolator)) {
+173:             final double dt = manager.getEventTime() - stepStart;
+174:             if (Math.abs(dt) <= Math.ulp(stepStart)) {
+175:                 // we cannot simply truncate the step, reject the current computation
+176:                 // and let the loop compute another state with the truncated step.
+177:                 // it is so small (much probably exactly 0 due to limited accuracy)
+178:                 // that the code above would fail handling it.
+179:                 // So we set up an artificial 0 size step by copying states
+180:                 loop     = false;
+181:             } else {
+182:                 // reject the step to match exactly the next switch time
+183:                 stepSize = dt;
+184:             }
+185:         } else {
+186:           loop = false;
+187:         }
+188: 
+189:       }
+190: 
+191:       // the step has been accepted
+192:       final double nextStep = stepStart + stepSize;
+193:       System.arraycopy(yTmp, 0, y, 0, y0.length);
+194:       manager.stepAccepted(nextStep, y);
+195:       lastStep = manager.stop();
+196: 
+197:       // provide the step data to the step handler
+198:       interpolator.storeTime(nextStep);
+199:       for (StepHandler handler : stepHandlers) {
+200:           handler.handleStep(interpolator, lastStep);
+201:       }
+202:       stepStart = nextStep;
+203: 
+204:       if (manager.reset(stepStart, y) && ! lastStep) {
+205:         // some events handler has triggered changes that
+206:         // invalidate the derivatives, we need to recompute them
+207:         computeDerivatives(stepStart, y, yDotK[0]);
+208:       }
+209: 
+210:       // make sure step size is set to default before next step
+211:       stepSize = forward ? step : -step;
+212: 
+213:     }
+214: 
+215:     final double stopTime = stepStart;
+216:     stepStart = Double.NaN;
+217:     stepSize  = Double.NaN;
+218:     return stopTime;
+219: 
+220:   }
+
+[26] org.apache.commons.math.ode.nonstiff.AdaptiveStepsizeIntegrator#AdaptiveStepsizeIntegrator  (lines 88-106)
+88:   public AdaptiveStepsizeIntegrator(final String name,
+89:                                     final double minStep, final double maxStep,
+90:                                     final double scalAbsoluteTolerance,
+91:                                     final double scalRelativeTolerance) {
+92: 
+93:     super(name);
+94: 
+95:     this.minStep     = Math.abs(minStep);
+96:     this.maxStep     = Math.abs(maxStep);
+97:     this.initialStep = -1.0;
+98: 
+99:     this.scalAbsoluteTolerance = scalAbsoluteTolerance;
+100:     this.scalRelativeTolerance = scalRelativeTolerance;
+101:     this.vecAbsoluteTolerance  = null;
+102:     this.vecRelativeTolerance  = null;
+103: 
+104:     resetInternalState();
+105: 
+106:   }
+
+[27] org.apache.commons.math.ode.events.CombinedEventsManager#CombinedEventsManager  (lines 52-56)
+52:     public CombinedEventsManager() {
+53:         states      = new ArrayList<EventState>();
+54:         first       = null;
+55:         initialized = false;
+56:     }
+
+[28] org.apache.commons.math.ode.events.EventState#stop  (lines 314-316)
+314:     public boolean stop() {
+315:         return nextAction == EventHandler.STOP;
+316:     }
+
+[29] org.apache.commons.math.analysis.solvers.BrentSolver#solve  (lines 254-349)
+254:     private double solve(final UnivariateRealFunction f,
+255:                          double x0, double y0,
+256:                          double x1, double y1,
+257:                          double x2, double y2)
+258:     throws MaxIterationsExceededException, FunctionEvaluationException {
+259: 
+260:         double delta = x1 - x0;
+261:         double oldDelta = delta;
+262: 
+263:         int i = 0;
+264:         while (i < maximalIterationCount) {
+265:             if (Math.abs(y2) < Math.abs(y1)) {
+266:                 // use the bracket point if is better than last approximation
+267:                 x0 = x1;
+268:                 x1 = x2;
+269:                 x2 = x0;
+270:                 y0 = y1;
+271:                 y1 = y2;
+272:                 y2 = y0;
+273:             }
+274:             if (Math.abs(y1) <= functionValueAccuracy) {
+275:                 // Avoid division by very small values. Assume
+276:                 // the iteration has converged (the problem may
+277:                 // still be ill conditioned)
+278:                 setResult(x1, i);
+279:                 return result;
+280:             }
+281:             double dx = x2 - x1;
+282:             double tolerance =
+283:                 Math.max(relativeAccuracy * Math.abs(x1), absoluteAccuracy);
+284:             if (Math.abs(dx) <= tolerance) {
+285:                 setResult(x1, i);
+286:                 return result;
+287:             }
+288:             if ((Math.abs(oldDelta) < tolerance) ||
+289:                     (Math.abs(y0) <= Math.abs(y1))) {
+290:                 // Force bisection.
+291:                 delta = 0.5 * dx;
+292:                 oldDelta = delta;
+293:             } else {
+294:                 double r3 = y1 / y0;
+295:                 double p;
+296:                 double p1;
+297:                 // the equality test (x0 == x2) is intentional,
+298:                 // it is part of the original Brent's method,
+299:                 // it should NOT be replaced by proximity test
+300:                 if (x0 == x2) {
+301:                     // Linear interpolation.
+302:                     p = dx * r3;
+303:                     p1 = 1.0 - r3;
+304:                 } else {
+305:                     // Inverse quadratic interpolation.
+306:                     double r1 = y0 / y2;
+307:                     double r2 = y1 / y2;
+308:                     p = r3 * (dx * r1 * (r1 - r2) - (x1 - x0) * (r2 - 1.0));
+309:                     p1 = (r1 - 1.0) * (r2 - 1.0) * (r3 - 1.0);
+310:                 }
+311:                 if (p > 0.0) {
+312:                     p1 = -p1;
+313:                 } else {
+314:                     p = -p;
+315:                 }
+316:                 if (2.0 * p >= 1.5 * dx * p1 - Math.abs(tolerance * p1) ||
+317:                         p >= Math.abs(0.5 * oldDelta * p1)) {
+318:                     // Inverse quadratic interpolation gives a value
+319:                     // in the wrong direction, or progress is slow.
+320:                     // Fall back to bisection.
+321:                     delta = 0.5 * dx;
+322:                     oldDelta = delta;
+323:                 } else {
+324:                     oldDelta = delta;
+325:                     delta = p / p1;
+326:                 }
+327:             }
+328:             // Save old X1, Y1
+329:             x0 = x1;
+330:             y0 = y1;
+331:             // Compute new X1, Y1
+332:             if (Math.abs(delta) > tolerance) {
+333:                 x1 = x1 + delta;
+334:             } else if (dx > 0.0) {
+335:                 x1 = x1 + 0.5 * tolerance;
+336:             } else if (dx <= 0.0) {
+337:                 x1 = x1 - 0.5 * tolerance;
+338:             }
+339:             y1 = f.value(x1);
+340:             if ((y1 > 0) == (y2 > 0)) {
+341:                 x2 = x0;
+342:                 y2 = y0;
+343:                 delta = x1 - x0;
+344:                 oldDelta = delta;
+345:             }
+346:             i++;
+347:         }
+348:         throw new MaxIterationsExceededException(maximalIterationCount);
+349:     }
+
+[30] org.apache.commons.math.ode.events.EventState#reinitializeBegin  (lines 149-154)
+149:     public void reinitializeBegin(final double tStart, final double[] yStart)
+150:         throws EventException {
+151:         t0 = tStart;
+152:         g0 = handler.g(tStart, yStart);
+153:         g0Positive = g0 >= 0;
+154:     }
+
+[31] org.apache.commons.math.analysis.solvers.BrentSolver#solve  (lines 194-235)
+194:     public double solve(final UnivariateRealFunction f,
+195:                         final double min, final double max)
+196:         throws MaxIterationsExceededException,
+197:         FunctionEvaluationException {
+198: 
+199:         clearResult();
+200:         verifyInterval(min, max);
+201: 
+202:         double ret = Double.NaN;
+203: 
+204:         double yMin = f.value(min);
+205:         double yMax = f.value(max);
+206: 
+207:         // Verify bracketing
+208:         double sign = yMin * yMax;
+209:         if (sign > 0) {
+210:             // check if either value is close to a zero
+211:             if (Math.abs(yMin) <= functionValueAccuracy) {
+212:                 setResult(min, 0);
+213:                 ret = min;
+214:             } else if (Math.abs(yMax) <= functionValueAccuracy) {
+215:                 setResult(max, 0);
+216:                 ret = max;
+217:             } else {
+218:                 // neither value is close to zero and min and max do not bracket root.
+219:                 throw MathRuntimeException.createIllegalArgumentException(
+220:                         NON_BRACKETING_MESSAGE, min, max, yMin, yMax);
+221:             }
+222:         } else if (sign < 0){
+223:             // solve using only the first endpoint as initial guess
+224:             ret = solve(f, min, yMin, max, yMax, min, yMin);
+225:         } else {
+226:             // either min or max is a root
+227:             if (yMin == 0.0) {
+228:                 ret = min;
+229:             } else {
+230:                 ret = max;
+231:             }
+232:         }
+233: 
+234:         return ret;
+235:     }
+
+[32] org.apache.commons.math.ode.events.CombinedEventsManager#evaluateStep  (lines 122-178)
+122:     public boolean evaluateStep(final StepInterpolator interpolator)
+123:     throws DerivativeException, IntegratorException {
+124: 
+125:         try {
+126: 
+127:             first = null;
+128:             if (states.isEmpty()) {
+129:                 // there is nothing to do, return now to avoid setting the
+130:                 // interpolator time (and hence avoid unneeded calls to the
+131:                 // user function due to interpolator finalization)
+132:                 return false;
+133:             }
+134: 
+135:             if (! initialized) {
+136: 
+137:                 // initialize the events states
+138:                 final double t0 = interpolator.getPreviousTime();
+139:                 interpolator.setInterpolatedTime(t0);
+140:                 final double [] y = interpolator.getInterpolatedState();
+141:                 for (EventState state : states) {
+142:                     state.reinitializeBegin(t0, y);
+143:                 }
+144: 
+145:                 initialized = true;
+146: 
+147:             }
+148: 
+149:             // check events occurrence
+150:             for (EventState state : states) {
+151: 
+152:                 if (state.evaluateStep(interpolator)) {
+153:                     if (first == null) {
+154:                         first = state;
+155:                     } else {
+156:                         if (interpolator.isForward()) {
+157:                             if (state.getEventTime() < first.getEventTime()) {
+158:                                 first = state;
+159:                             }
+160:                         } else {
+161:                             if (state.getEventTime() > first.getEventTime()) {
+162:                                 first = state;
+163:                             }
+164:                         }
+165:                     }
+166:                 }
+167: 
+168:             }
+169: 
+170:             return first != null;
+171: 
+172:         } catch (EventException se) {
+173:             throw new IntegratorException(se);
+174:         } catch (ConvergenceException ce) {
+175:             throw new IntegratorException(ce);
+176:         }
+177: 
+178:     }
+
+[33] org.apache.commons.math.ode.nonstiff.AdaptiveStepsizeIntegrator#initializeStep  (lines 203-266)
+203:   public double initializeStep(final FirstOrderDifferentialEquations equations,
+204:                                final boolean forward, final int order, final double[] scale,
+205:                                final double t0, final double[] y0, final double[] yDot0,
+206:                                final double[] y1, final double[] yDot1)
+207:       throws DerivativeException {
+208: 
+209:     if (initialStep > 0) {
+210:       // use the user provided value
+211:       return forward ? initialStep : -initialStep;
+212:     }
+213: 
+214:     // very rough first guess : h = 0.01 * ||y/scale|| / ||y'/scale||
+215:     // this guess will be used to perform an Euler step
+216:     double ratio;
+217:     double yOnScale2 = 0;
+218:     double yDotOnScale2 = 0;
+219:     for (int j = 0; j < y0.length; ++j) {
+220:       ratio         = y0[j] / scale[j];
+221:       yOnScale2    += ratio * ratio;
+222:       ratio         = yDot0[j] / scale[j];
+223:       yDotOnScale2 += ratio * ratio;
+224:     }
+225: 
+226:     double h = ((yOnScale2 < 1.0e-10) || (yDotOnScale2 < 1.0e-10)) ?
+227:                1.0e-6 : (0.01 * Math.sqrt(yOnScale2 / yDotOnScale2));
+228:     if (! forward) {
+229:       h = -h;
+230:     }
+231: 
+232:     // perform an Euler step using the preceding rough guess
+233:     for (int j = 0; j < y0.length; ++j) {
+234:       y1[j] = y0[j] + h * yDot0[j];
+235:     }
+236:     computeDerivatives(t0 + h, y1, yDot1);
+237: 
+238:     // estimate the second derivative of the solution
+239:     double yDDotOnScale = 0;
+240:     for (int j = 0; j < y0.length; ++j) {
+241:       ratio         = (yDot1[j] - yDot0[j]) / scale[j];
+242:       yDDotOnScale += ratio * ratio;
+243:     }
+244:     yDDotOnScale = Math.sqrt(yDDotOnScale) / h;
+245: 
+246:     // step size is computed such that
+247:     // h^order * max (||y'/tol||, ||y''/tol||) = 0.01
+248:     final double maxInv2 = Math.max(Math.sqrt(yDotOnScale2), yDDotOnScale);
+249:     final double h1 = (maxInv2 < 1.0e-15) ?
+250:                       Math.max(1.0e-6, 0.001 * Math.abs(h)) :
+251:                       Math.pow(0.01 / maxInv2, 1.0 / order);
+252:     h = Math.min(100.0 * Math.abs(h), h1);
+253:     h = Math.max(h, 1.0e-12 * Math.abs(t0));  // avoids cancellation when computing t1 - t0
+254:     if (h < getMinStep()) {
+255:       h = getMinStep();
+256:     }
+257:     if (h > getMaxStep()) {
+258:       h = getMaxStep();
+259:     }
+260:     if (! forward) {
+261:       h = -h;
+262:     }
+263: 
+264:     return h;
+265: 
+266:   }
+
+[34] org.apache.commons.math.ode.nonstiff.EmbeddedRungeKuttaIntegrator#setMinReduction  (lines 378-380)
+378:   public void setMinReduction(final double minReduction) {
+379:     this.minReduction = minReduction;
+380:   }
+
+[35] org.apache.commons.math.ode.sampling.DummyStepInterpolator#DummyStepInterpolator  (lines 71-74)
+71:   public DummyStepInterpolator(final double[] y, final double[] yDot, final boolean forward) {
+72:     super(y, forward);
+73:     currentDerivative = yDot;
+74:   }
+
+[36] org.apache.commons.math.ConvergingAlgorithmImpl#ConvergingAlgorithmImpl  (lines 60-69)
+60:     protected ConvergingAlgorithmImpl(final int defaultMaximalIterationCount,
+61:                                       final double defaultAbsoluteAccuracy) {
+62:         this.defaultAbsoluteAccuracy = defaultAbsoluteAccuracy;
+63:         this.defaultRelativeAccuracy = 1.0e-14;
+64:         this.absoluteAccuracy = defaultAbsoluteAccuracy;
+65:         this.relativeAccuracy = defaultRelativeAccuracy;
+66:         this.defaultMaximalIterationCount = defaultMaximalIterationCount;
+67:         this.maximalIterationCount = defaultMaximalIterationCount;
+68:         this.iterationCount = 0;
+69:     }
+
+[37] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#AbstractStepInterpolator  (lines 107-122)
+107:   protected AbstractStepInterpolator(final double[] y, final boolean forward) {
+108: 
+109:     previousTime      = Double.NaN;
+110:     currentTime       = Double.NaN;
+111:     h                 = Double.NaN;
+112:     interpolatedTime  = Double.NaN;
+113: 
+114:     currentState            = y;
+115:     interpolatedState       = new double[y.length];
+116:     interpolatedDerivatives = new double[y.length];
+117: 
+118:     finalized         = false;
+119:     this.forward      = forward;
+120:     this.dirtyState   = true;
+121: 
+122:   }
+
+[38] org.apache.commons.math.ode.AbstractIntegrator#addEndTimeChecker  (lines 230-245)
+230:     protected CombinedEventsManager addEndTimeChecker(final double startTime,
+231:                                                       final double endTime,
+232:                                                       final CombinedEventsManager manager) {
+233:         CombinedEventsManager newManager = new CombinedEventsManager();
+234:         for (final EventState state : manager.getEventsStates()) {
+235:             newManager.addEventHandler(state.getEventHandler(),
+236:                                        state.getMaxCheckInterval(),
+237:                                        state.getConvergence(),
+238:                                        state.getMaxIterationCount());
+239:         }
+240:         newManager.addEventHandler(new EndTimeChecker(endTime),
+241:                                    Double.POSITIVE_INFINITY,
+242:                                    Math.ulp(Math.max(Math.abs(startTime), Math.abs(endTime))),
+243:                                    100);
+244:         return newManager;
+245:     }
+
+[39] org.apache.commons.math.ode.nonstiff.RungeKuttaIntegrator#RungeKuttaIntegrator  (lines 82-92)
+82:   protected RungeKuttaIntegrator(final String name,
+83:                                  final double[] c, final double[][] a, final double[] b,
+84:                                  final RungeKuttaStepInterpolator prototype,
+85:                                  final double step) {
+86:     super(name);
+87:     this.c          = c;
+88:     this.a          = a;
+89:     this.b          = b;
+90:     this.prototype  = prototype;
+91:     this.step       = Math.abs(step);
+92:   }
+
+[40] org.apache.commons.math.ode.events.CombinedEventsManager#addEventHandler  (lines 69-73)
+69:     public void addEventHandler(final EventHandler handler, final double maxCheckInterval,
+70:                                 final double convergence, final int maxIterationCount) {
+71:         states.add(new EventState(handler, maxCheckInterval,
+72:                                   convergence, maxIterationCount));
+73:     }
+
+[41] org.apache.commons.math.ode.events.CombinedEventsManager#getEventsStates  (lines 101-103)
+101:     public Collection<EventState> getEventsStates() {
+102:         return states;
+103:     }
+
+[42] org.apache.commons.math.ode.events.EventState#stepAccepted  (lines 293-308)
+293:     public void stepAccepted(final double t, final double[] y)
+294:         throws EventException {
+295: 
+296:         t0 = t;
+297:         g0 = handler.g(t, y);
+298: 
+299:         if (pendingEvent) {
+300:             // force the sign to its value "just after the event"
+301:             previousEventTime = t;
+302:             g0Positive        = increasing;
+303:             nextAction        = handler.eventOccurred(t, y, !(increasing ^ forward));
+304:         } else {
+305:             g0Positive = g0 >= 0;
+306:             nextAction = EventHandler.CONTINUE;
+307:         }
+308:     }
+
+[43] org.apache.commons.math.ode.events.CombinedEventsManager#isEmpty  (lines 108-110)
+108:     public boolean isEmpty() {
+109:         return states.isEmpty();
+110:     }
+
+[44] org.apache.commons.math.ode.nonstiff.EmbeddedRungeKuttaIntegrator#setMaxGrowth  (lines 392-394)
+392:   public void setMaxGrowth(final double maxGrowth) {
+393:     this.maxGrowth = maxGrowth;
+394:   }
+
+[45] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#shift  (lines 210-212)
+210:   public void shift() {
+211:     previousTime = currentTime;
+212:   }
+
+[46] org.apache.commons.math.ode.AbstractIntegrator#AbstractIntegrator  (lines 64-72)
+64:     public AbstractIntegrator(final String name) {
+65:         this.name = name;
+66:         stepHandlers = new ArrayList<StepHandler>();
+67:         stepStart = Double.NaN;
+68:         stepSize  = Double.NaN;
+69:         eventsHandlersManager = new CombinedEventsManager();
+70:         setMaxEvaluations(-1);
+71:         resetEvaluations();
+72:     }
+
+[47] org.apache.commons.math.ode.nonstiff.EmbeddedRungeKuttaIntegrator#setSafety  (lines 186-188)
+186:   public void setSafety(final double safety) {
+187:     this.safety = safety;
+188:   }
+
+[48] org.apache.commons.math.ode.AbstractIntegrator#sanityChecks  (lines 193-218)
+193:     protected void sanityChecks(final FirstOrderDifferentialEquations ode,
+194:                                 final double t0, final double[] y0,
+195:                                 final double t, final double[] y)
+196:         throws IntegratorException {
+197: 
+198:         if (ode.getDimension() != y0.length) {
+199:             throw new IntegratorException(
+200:                     "dimensions mismatch: ODE problem has dimension {0}," +
+201:                     " initial state vector has dimension {1}",
+202:                     ode.getDimension(), y0.length);
+203:         }
+204: 
+205:         if (ode.getDimension() != y.length) {
+206:             throw new IntegratorException(
+207:                     "dimensions mismatch: ODE problem has dimension {0}," +
+208:                     " final state vector has dimension {1}",
+209:                     ode.getDimension(), y.length);
+210:         }
+211: 
+212:         if (Math.abs(t - t0) <= 1.0e-12 * Math.max(Math.abs(t0), Math.abs(t))) {
+213:             throw new IntegratorException(
+214:                     "too small integration interval: length = {0}",
+215:                     Math.abs(t - t0));
+216:         }
+217: 
+218:     }
+
+[49] org.apache.commons.math.ode.nonstiff.DormandPrince853Integrator#getOrder  (lines 239-242)
+239:   @Override
+240:   public int getOrder() {
+241:     return 8;
+242:   }
+
+[50] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#getPreviousTime  (lines 229-231)
+229:   public double getPreviousTime() {
+230:     return previousTime;
+231:   }

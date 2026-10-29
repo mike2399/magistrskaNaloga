@@ -1,0 +1,523 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math.linear.CholeskyDecompositionImplTest::testMath274
+junit.framework.AssertionFailedError: Expected exception: org.apache.commons.math.linear.NotPositiveDefiniteMatrixException
+--- org.apache.commons.math.linear.CholeskyDecompositionImplTest::testNotPositiveDefinite
+junit.framework.AssertionFailedError: Expected exception: org.apache.commons.math.linear.NotPositiveDefiniteMatrixException
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math.linear.CholeskyDecompositionImpl#getL  (lines 154-159)
+154:     public RealMatrix getL() {
+155:         if (cachedL == null) {
+156:             cachedL = getLT().transpose();
+157:         }
+158:         return cachedL;
+159:     }
+
+[2] org.apache.commons.math.linear.MatrixUtils#createRealMatrix  (lines 87-89)
+87:     public static RealMatrix createRealMatrix(double[][] data) {
+88:         return new DenseRealMatrix(data);
+89:     }
+
+[3] org.apache.commons.math.linear.DenseRealMatrix#getColumnDimension  (lines 1321-1324)
+1321:     @Override
+1322:     public int getColumnDimension() {
+1323:         return columns;
+1324:     }
+
+[4] org.apache.commons.math.linear.AbstractRealMatrix#AbstractRealMatrix  (lines 54-67)
+54:     protected AbstractRealMatrix(final int rowDimension, final int columnDimension)
+55:         throws IllegalArgumentException {
+56:         if (rowDimension <= 0 ) {
+57:             throw MathRuntimeException.createIllegalArgumentException(
+58:                     "invalid row dimension {0} (must be positive)",
+59:                     rowDimension);
+60:         }
+61:         if (columnDimension <= 0) {
+62:             throw MathRuntimeException.createIllegalArgumentException(
+63:                     "invalid column dimension {0} (must be positive)",
+64:                     columnDimension);
+65:         }
+66:         lu = null;
+67:     }
+
+[5] org.apache.commons.math.linear.DenseRealMatrix#DenseRealMatrix  (lines 144-179)
+144:     public DenseRealMatrix(final int rows, final int columns,
+145:                            final double[][] blockData, final boolean copyArray)
+146:         throws IllegalArgumentException {
+147: 
+148:         super(rows, columns);
+149:         this.rows    = rows;
+150:         this.columns = columns;
+151: 
+152:         // number of blocks
+153:         blockRows    = (rows    + BLOCK_SIZE - 1) / BLOCK_SIZE;
+154:         blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;
+155: 
+156:         if (copyArray) {
+157:             // allocate storage blocks, taking care of smaller ones at right and bottom
+158:             blocks = new double[blockRows * blockColumns][];
+159:         } else {
+160:             // reference existing array
+161:             blocks = blockData;
+162:         }
+163: 
+164:         int index = 0;
+165:         for (int iBlock = 0; iBlock < blockRows; ++iBlock) {
+166:             final int iHeight = blockHeight(iBlock);
+167:             for (int jBlock = 0; jBlock < blockColumns; ++jBlock, ++index) {
+168:                 if (blockData[index].length != iHeight * blockWidth(jBlock)) {
+169:                     throw MathRuntimeException.createIllegalArgumentException(
+170:                             "wrong array shape (block length = {0}, expected {1})",
+171:                             blockData[index].length, iHeight * blockWidth(jBlock));
+172:                 }
+173:                 if (copyArray) {
+174:                     blocks[index] = blockData[index].clone();
+175:                 }
+176:             }
+177:         }
+178: 
+179:     }
+
+[6] org.apache.commons.math.linear.CholeskyDecompositionImpl#CholeskyDecompositionImpl  (lines 93-151)
+93:     public CholeskyDecompositionImpl(final RealMatrix matrix,
+94:                                      final double relativeSymmetryThreshold,
+95:                                      final double absolutePositivityThreshold)
+96:         throws NonSquareMatrixException,
+97:                NotSymmetricMatrixException, NotPositiveDefiniteMatrixException {
+98: 
+99:         if (!matrix.isSquare()) {
+100:             throw new NonSquareMatrixException(matrix.getRowDimension(),
+101:                                                matrix.getColumnDimension());
+102:         }
+103: 
+104:         final int order = matrix.getRowDimension();
+105:         lTData   = matrix.getData();
+106:         cachedL  = null;
+107:         cachedLT = null;
+108: 
+109:         // check the matrix before transformation
+110:         for (int i = 0; i < order; ++i) {
+111: 
+112:             final double[] lI = lTData[i];
+113: 
+114:             if (lTData[i][i] < absolutePositivityThreshold) {
+115:                 throw new NotPositiveDefiniteMatrixException();
+116:             }
+117:             // check off-diagonal elements (and reset them to 0)
+118:             for (int j = i + 1; j < order; ++j) {
+119:                 final double[] lJ = lTData[j];
+120:                 final double lIJ = lI[j];
+121:                 final double lJI = lJ[i];
+122:                 final double maxDelta =
+123:                     relativeSymmetryThreshold * Math.max(Math.abs(lIJ), Math.abs(lJI));
+124:                 if (Math.abs(lIJ - lJI) > maxDelta) {
+125:                     throw new NotSymmetricMatrixException();
+126:                 }
+127:                 lJ[i] = 0;
+128:            }
+129:         }
+130: 
+131:         // transform the matrix
+132:         for (int i = 0; i < order; ++i) {
+133: 
+134:             final double[] ltI = lTData[i];
+135: 
+136:             // check diagonal element
+137: 
+138:             ltI[i] = Math.sqrt(ltI[i]);
+139:             final double inverse = 1.0 / ltI[i];
+140: 
+141:             for (int q = order - 1; q > i; --q) {
+142:                 ltI[q] *= inverse;
+143:                 final double[] ltQ = lTData[q];
+144:                 for (int p = q; p < order; ++p) {
+145:                     ltQ[p] -= ltI[q] * ltI[p];
+146:                 }
+147:             }
+148: 
+149:         }
+150: 
+151:     }
+
+[7] org.apache.commons.math.linear.DenseRealMatrix#transpose  (lines 1278-1312)
+1278:     @Override
+1279:     public DenseRealMatrix transpose() {
+1280: 
+1281:         final int nRows = getRowDimension();
+1282:         final int nCols = getColumnDimension();
+1283:         final DenseRealMatrix out = new DenseRealMatrix(nCols, nRows);
+1284: 
+1285:         // perform transpose block-wise, to ensure good cache behavior
+1286:         int blockIndex = 0;
+1287:         for (int iBlock = 0; iBlock < blockColumns; ++iBlock) {
+1288:             for (int jBlock = 0; jBlock < blockRows; ++jBlock) {
+1289: 
+1290:                 // transpose current block
+1291:                 final double[] outBlock = out.blocks[blockIndex];
+1292:                 final double[] tBlock   = blocks[jBlock * blockColumns + iBlock];
+1293:                 final int      pStart   = iBlock * BLOCK_SIZE;
+1294:                 final int      pEnd     = Math.min(pStart + BLOCK_SIZE, columns);
+1295:                 final int      qStart   = jBlock * BLOCK_SIZE;
+1296:                 final int      qEnd     = Math.min(qStart + BLOCK_SIZE, rows);
+1297:                 for (int p = pStart, k = 0; p < pEnd; ++p) {
+1298:                     final int lInc = pEnd - pStart;
+1299:                     for (int q = qStart, l = p - pStart; q < qEnd; ++q, l+= lInc) {
+1300:                         outBlock[k++] = tBlock[l];
+1301:                     }
+1302:                 }
+1303: 
+1304:                 // go to next block
+1305:                 ++blockIndex;
+1306: 
+1307:             }
+1308:         }
+1309: 
+1310:         return out;
+1311: 
+1312:     }
+
+[8] org.apache.commons.math.linear.AbstractRealMatrix#toString  (lines 989-1015)
+989:     @Override
+990:     public String toString() {
+991:         final int nRows = getRowDimension();
+992:         final int nCols = getColumnDimension();
+993:         final StringBuffer res = new StringBuffer();
+994:         String fullClassName = getClass().getName();
+995:         String shortClassName = fullClassName.substring(fullClassName.lastIndexOf('.') + 1);
+996:         res.append(shortClassName).append("{");
+997: 
+998:         for (int i = 0; i < nRows; ++i) {
+999:             if (i > 0) {
+1000:                 res.append(",");
+1001:             }
+1002:             res.append("{");
+1003:             for (int j = 0; j < nCols; ++j) {
+1004:                 if (j > 0) {
+1005:                     res.append(",");
+1006:                 }
+1007:                 res.append(getEntry(i, j));
+1008:             } 
+1009:             res.append("}");
+1010:         } 
+1011: 
+1012:         res.append("}");
+1013:         return res.toString();
+1014: 
+1015:     } 
+
+[9] org.apache.commons.math.linear.CholeskyDecompositionImpl#getLT  (lines 162-171)
+162:     public RealMatrix getLT() {
+163: 
+164:         if (cachedLT == null) {
+165:             cachedLT = MatrixUtils.createRealMatrix(lTData);
+166:         }
+167: 
+168:         // return the cached matrix
+169:         return cachedLT;
+170: 
+171:     }
+
+[10] org.apache.commons.math.linear.DenseRealMatrix#blockHeight  (lines 1625-1627)
+1625:     private int blockHeight(final int blockRow) {
+1626:         return (blockRow == blockRows - 1) ? rows - blockRow * BLOCK_SIZE : BLOCK_SIZE;
+1627:     }
+
+[11] org.apache.commons.math.linear.DenseRealMatrix#createBlocksLayout  (lines 260-280)
+260:     public static double[][] createBlocksLayout(final int rows, final int columns) {
+261: 
+262:         final int blockRows    = (rows    + BLOCK_SIZE - 1) / BLOCK_SIZE;
+263:         final int blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;
+264: 
+265:         final double[][] blocks = new double[blockRows * blockColumns][];
+266:         for (int iBlock = 0, blockIndex = 0; iBlock < blockRows; ++iBlock) {
+267:             final int pStart  = iBlock * BLOCK_SIZE;
+268:             final int pEnd    = Math.min(pStart + BLOCK_SIZE, rows);
+269:             final int iHeight = pEnd - pStart;
+270:             for (int jBlock = 0; jBlock < blockColumns; ++jBlock, ++blockIndex) {
+271:                 final int qStart = jBlock * BLOCK_SIZE;
+272:                 final int qEnd   = Math.min(qStart + BLOCK_SIZE, columns);
+273:                 final int jWidth = qEnd - qStart;
+274:                 blocks[blockIndex] = new double[iHeight * jWidth];
+275:             }
+276:         }
+277: 
+278:         return blocks;
+279: 
+280:     }
+
+[12] org.apache.commons.math.linear.DenseRealMatrix#multiply  (lines 488-542)
+488:     @Override
+489:     public DenseRealMatrix multiply(final RealMatrix m)
+490:         throws IllegalArgumentException {
+491:         try {
+492:             return multiply((DenseRealMatrix) m);
+493:         } catch (ClassCastException cce) {
+494: 
+495:             // safety check
+496:             MatrixUtils.checkMultiplicationCompatible(this, m);
+497: 
+498:             final DenseRealMatrix out = new DenseRealMatrix(rows, m.getColumnDimension());
+499: 
+500:             // perform multiplication block-wise, to ensure good cache behavior
+501:             int blockIndex = 0;
+502:             for (int iBlock = 0; iBlock < out.blockRows; ++iBlock) {
+503: 
+504:                 final int pStart = iBlock * BLOCK_SIZE;
+505:                 final int pEnd   = Math.min(pStart + BLOCK_SIZE, rows);
+506: 
+507:                 for (int jBlock = 0; jBlock < out.blockColumns; ++jBlock) {
+508: 
+509:                     final int qStart = jBlock * BLOCK_SIZE;
+510:                     final int qEnd   = Math.min(qStart + BLOCK_SIZE, m.getColumnDimension());
+511: 
+512:                     // select current block
+513:                     final double[] outBlock = out.blocks[blockIndex];
+514: 
+515:                     // perform multiplication on current block
+516:                     for (int kBlock = 0; kBlock < blockColumns; ++kBlock) {
+517:                         final int kWidth      = blockWidth(kBlock);
+518:                         final double[] tBlock = blocks[iBlock * blockColumns + kBlock];
+519:                         final int rStart      = kBlock * BLOCK_SIZE;
+520:                         for (int p = pStart, k = 0; p < pEnd; ++p) {
+521:                             final int lStart = (p - pStart) * kWidth;
+522:                             final int lEnd   = lStart + kWidth;
+523:                             for (int q = qStart; q < qEnd; ++q) {
+524:                                 double sum = 0;
+525:                                 for (int l = lStart, r = rStart; l < lEnd; ++l, ++r) {
+526:                                     sum += tBlock[l] * m.getEntry(r, q);
+527:                                 }
+528:                                 outBlock[k++] += sum;
+529:                             }
+530:                         }
+531:                     }
+532: 
+533:                     // go to next block
+534:                     ++blockIndex;
+535: 
+536:                 }
+537:             }
+538: 
+539:             return out;
+540: 
+541:         }
+542:     }
+
+[13] org.apache.commons.math.linear.DenseRealMatrix#blockWidth  (lines 1634-1636)
+1634:     private int blockWidth(final int blockColumn) {
+1635:         return (blockColumn == blockColumns - 1) ? columns - blockColumn * BLOCK_SIZE : BLOCK_SIZE;
+1636:     }
+
+[14] org.apache.commons.math.linear.DenseRealMatrix#DenseRealMatrix  (lines 124-127)
+124:     public DenseRealMatrix(final double[][] rawData)
+125:         throws IllegalArgumentException {
+126:         this(rawData.length, rawData[0].length, toBlocksLayout(rawData), false);
+127:     }
+
+[15] org.apache.commons.math.linear.DenseRealMatrix#getRowDimension  (lines 1315-1318)
+1315:     @Override
+1316:     public int getRowDimension() {
+1317:         return rows;
+1318:     }
+
+[16] org.apache.commons.math.linear.CholeskyDecompositionImpl#CholeskyDecompositionImpl  (lines 71-76)
+71:     public CholeskyDecompositionImpl(final RealMatrix matrix)
+72:         throws NonSquareMatrixException,
+73:                NotSymmetricMatrixException, NotPositiveDefiniteMatrixException {
+74:         this(matrix, DEFAULT_RELATIVE_SYMMETRY_THRESHOLD,
+75:              DEFAULT_ABSOLUTE_POSITIVITY_THRESHOLD);
+76:     }
+
+[17] org.apache.commons.math.linear.DenseRealMatrix#getData  (lines 615-642)
+615:     @Override
+616:     public double[][] getData() {
+617: 
+618:         final double[][] data = new double[getRowDimension()][getColumnDimension()];
+619:         final int lastColumns = columns - (blockColumns - 1) * BLOCK_SIZE;
+620: 
+621:         for (int iBlock = 0; iBlock < blockRows; ++iBlock) {
+622:             final int pStart = iBlock * BLOCK_SIZE;
+623:             final int pEnd   = Math.min(pStart + BLOCK_SIZE, rows);
+624:             int regularPos   = 0;
+625:             int lastPos      = 0;
+626:             for (int p = pStart; p < pEnd; ++p) {
+627:                 final double[] dataP = data[p];
+628:                 int blockIndex = iBlock * blockColumns;
+629:                 int dataPos    = 0;
+630:                 for (int jBlock = 0; jBlock < blockColumns - 1; ++jBlock) {
+631:                     System.arraycopy(blocks[blockIndex++], regularPos, dataP, dataPos, BLOCK_SIZE);
+632:                     dataPos += BLOCK_SIZE;
+633:                 }
+634:                 System.arraycopy(blocks[blockIndex], lastPos, dataP, dataPos, lastColumns);
+635:                 regularPos += BLOCK_SIZE;
+636:                 lastPos    += lastColumns;
+637:             }
+638:         }
+639: 
+640:         return data;
+641:         
+642:     }
+
+[18] org.apache.commons.math.linear.DenseRealMatrix#getEntry  (lines 1210-1224)
+1210:     @Override
+1211:     public double getEntry(final int row, final int column)
+1212:         throws MatrixIndexException {
+1213:         try {
+1214:             final int iBlock = row    / BLOCK_SIZE;
+1215:             final int jBlock = column / BLOCK_SIZE;
+1216:             final int k      = (row    - iBlock * BLOCK_SIZE) * blockWidth(jBlock) +
+1217:                                (column - jBlock * BLOCK_SIZE);
+1218:             return blocks[iBlock * blockColumns + jBlock][k];
+1219:         } catch (ArrayIndexOutOfBoundsException e) {
+1220:             throw new MatrixIndexException(
+1221:                     "no entry at indices ({0}, {1}) in a {2}x{3} matrix",
+1222:                     row, column, getRowDimension(), getColumnDimension());
+1223:         }
+1224:     }
+
+[19] org.apache.commons.math.linear.AbstractRealMatrix#isSquare  (lines 638-640)
+638:     public boolean isSquare() {
+639:         return (getColumnDimension() == getRowDimension());
+640:     }
+
+[20] org.apache.commons.math.linear.MatrixUtils#checkMultiplicationCompatible  (lines 625-633)
+625:     public static void checkMultiplicationCompatible(final AnyMatrix left, final AnyMatrix right)
+626:         throws IllegalArgumentException {
+627:         if (left.getColumnDimension() != right.getRowDimension()) {
+628:             throw MathRuntimeException.createIllegalArgumentException(
+629:                     "{0}x{1} and {2}x{3} matrices are not multiplication compatible",
+630:                     left.getRowDimension(), left.getColumnDimension(),
+631:                     right.getRowDimension(), right.getColumnDimension());
+632:         }
+633:     }
+
+[21] org.apache.commons.math.linear.DenseRealMatrix#DenseRealMatrix  (lines 95-109)
+95:     public DenseRealMatrix(final int rows, final int columns)
+96:         throws IllegalArgumentException {
+97: 
+98:         super(rows, columns);
+99:         this.rows    = rows;
+100:         this.columns = columns;
+101: 
+102:         // number of blocks
+103:         blockRows    = (rows    + BLOCK_SIZE - 1) / BLOCK_SIZE;
+104:         blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;
+105: 
+106:         // allocate storage blocks, taking care of smaller ones at right and bottom
+107:         blocks = createBlocksLayout(rows, columns);
+108: 
+109:     }
+
+[22] org.apache.commons.math.linear.DenseRealMatrix#toBlocksLayout  (lines 203-246)
+203:     public static double[][] toBlocksLayout(final double[][] rawData)
+204:         throws IllegalArgumentException {
+205: 
+206:         final int rows         = rawData.length;
+207:         final int columns      = rawData[0].length;
+208:         final int blockRows    = (rows    + BLOCK_SIZE - 1) / BLOCK_SIZE;
+209:         final int blockColumns = (columns + BLOCK_SIZE - 1) / BLOCK_SIZE;
+210: 
+211:         // safety checks
+212:         for (int i = 0; i < rawData.length; ++i) {
+213:             final int length = rawData[i].length;
+214:             if (length != columns) {
+215:                 throw MathRuntimeException.createIllegalArgumentException(
+216:                         "some rows have length {0} while others have length {1}",
+217:                         columns, length); 
+218:             }
+219:         }
+220: 
+221:         // convert array
+222:         final double[][] blocks = new double[blockRows * blockColumns][];
+223:         for (int iBlock = 0, blockIndex = 0; iBlock < blockRows; ++iBlock) {
+224:             final int pStart  = iBlock * BLOCK_SIZE;
+225:             final int pEnd    = Math.min(pStart + BLOCK_SIZE, rows);
+226:             final int iHeight = pEnd - pStart;
+227:             for (int jBlock = 0; jBlock < blockColumns; ++jBlock, ++blockIndex) {
+228:                 final int qStart = jBlock * BLOCK_SIZE;
+229:                 final int qEnd   = Math.min(qStart + BLOCK_SIZE, columns);
+230:                 final int jWidth = qEnd - qStart;
+231: 
+232:                 // allocate new block
+233:                 final double[] block = new double[iHeight * jWidth];
+234:                 blocks[blockIndex] = block;
+235: 
+236:                 // copy data
+237:                 for (int p = pStart, index = 0; p < pEnd; ++p, index += jWidth) {
+238:                     System.arraycopy(rawData[p], qStart, block, index, jWidth);
+239:                 }
+240: 
+241:             }
+242:         }
+243: 
+244:         return blocks;
+245: 
+246:     }
+
+[23] org.apache.commons.math.linear.DenseRealMatrix#multiply  (lines 552-612)
+552:     public DenseRealMatrix multiply(DenseRealMatrix m) throws IllegalArgumentException {
+553: 
+554:         // safety check
+555:         MatrixUtils.checkMultiplicationCompatible(this, m);
+556: 
+557:         final DenseRealMatrix out = new DenseRealMatrix(rows, m.columns);
+558: 
+559:         // perform multiplication block-wise, to ensure good cache behavior
+560:         int blockIndex = 0;
+561:         for (int iBlock = 0; iBlock < out.blockRows; ++iBlock) {
+562: 
+563:             final int pStart = iBlock * BLOCK_SIZE;
+564:             final int pEnd   = Math.min(pStart + BLOCK_SIZE, rows);
+565: 
+566:             for (int jBlock = 0; jBlock < out.blockColumns; ++jBlock) {
+567:                 final int jWidth = out.blockWidth(jBlock);
+568:                 final int jWidth2 = jWidth  + jWidth;
+569:                 final int jWidth3 = jWidth2 + jWidth;
+570:                 final int jWidth4 = jWidth3 + jWidth;
+571: 
+572:                 // select current block
+573:                 final double[] outBlock = out.blocks[blockIndex];
+574: 
+575:                 // perform multiplication on current block
+576:                 for (int kBlock = 0; kBlock < blockColumns; ++kBlock) {
+577:                     final int kWidth = blockWidth(kBlock);
+578:                     final double[] tBlock = blocks[iBlock * blockColumns + kBlock];
+579:                     final double[] mBlock = m.blocks[kBlock * m.blockColumns + jBlock];
+580:                     for (int p = pStart, k = 0; p < pEnd; ++p) {
+581:                         final int lStart = (p - pStart) * kWidth;
+582:                         final int lEnd   = lStart + kWidth;
+583:                         for (int nStart = 0; nStart < jWidth; ++nStart) {
+584:                             double sum = 0;
+585:                             int l = lStart;
+586:                             int n = nStart;
+587:                             while (l < lEnd - 3) {
+588:                                 sum += tBlock[l] * mBlock[n] +
+589:                                        tBlock[l + 1] * mBlock[n + jWidth] +
+590:                                        tBlock[l + 2] * mBlock[n + jWidth2] +
+591:                                        tBlock[l + 3] * mBlock[n + jWidth3];
+592:                                 l += 4;
+593:                                 n += jWidth4;
+594:                             }
+595:                             while (l < lEnd) {
+596:                                 sum += tBlock[l++] * mBlock[n];
+597:                                 n += jWidth;
+598:                             }
+599:                             outBlock[k++] += sum;
+600:                         }
+601:                     }
+602:                 }
+603: 
+604:                 // go to next block
+605:                 ++blockIndex;
+606: 
+607:             }
+608:         }
+609: 
+610:         return out;
+611: 
+612:     }

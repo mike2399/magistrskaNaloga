@@ -1,0 +1,1367 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.LiveVariableAnalysisTest::testExpressionInForIn
+java.lang.IllegalStateException
+	at com.google.common.base.Preconditions.checkState(Preconditions.java:129)
+	at com.google.javascript.jscomp.LiveVariablesAnalysis.addToSetIfLocal(LiveVariablesAnalysis.java:266)
+	at com.google.javascript.jscomp.LiveVariablesAnalysis.computeGenKill(LiveVariablesAnalysis.java:206)
+	at com.google.javascript.jscomp.LiveVariablesAnalysis.flowThrough(LiveVariablesAnalysis.java:159)
+	at com.google.javascript.jscomp.LiveVariablesAnalysis.flowThrough(LiveVariablesAnalysis.java:47)
+	at com.google.javascript.jscomp.DataFlowAnalysis.flow(DataFlowAnalysis.java:275)
+	at com.google.javascript.jscomp.DataFlowAnalysis.analyze(DataFlowAnalysis.java:212)
+	at com.google.javascript.jscomp.DataFlowAnalysis.analyze(DataFlowAnalysis.java:180)
+	at com.google.javascript.jscomp.LiveVariableAnalysisTest.computeLiveness(LiveVariableAnalysisTest.java:366)
+	at com.google.javascript.jscomp.LiveVariableAnalysisTest.getFlowStateAtX(LiveVariableAnalysisTest.java:312)
+	at com.google.javascript.jscomp.LiveVariableAnalysisTest.assertLiveBeforeX(LiveVariableAnalysisTest.java:279)
+	at com.google.javascript.jscomp.LiveVariableAnalysisTest.testExpressionInForIn(LiveVariableAnalysisTest.java:210)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.Compiler#getParserConfig  (lines 1762-1787)
+1762:   @Override
+1763:   Config getParserConfig() {
+1764:     if (parserConfig == null) {
+1765:       Config.LanguageMode mode;
+1766:       switch (options.getLanguageIn()) {
+1767:         case ECMASCRIPT3:
+1768:           mode = Config.LanguageMode.ECMASCRIPT3;
+1769:           break;
+1770:         case ECMASCRIPT5:
+1771:           mode = Config.LanguageMode.ECMASCRIPT5;
+1772:           break;
+1773:         case ECMASCRIPT5_STRICT:
+1774:           mode = Config.LanguageMode.ECMASCRIPT5_STRICT;
+1775:           break;
+1776:         default:
+1777:           throw new IllegalStateException("unexpected language mode");
+1778:       }
+1779: 
+1780:       parserConfig = ParserRunner.createConfig(
+1781:         isIdeMode(),
+1782:         mode,
+1783:         acceptConstKeyword(),
+1784:         options.extraAnnotationNames);
+1785:     }
+1786:     return parserConfig;
+1787:   }
+
+[2] com.google.javascript.jscomp.Compiler#parseTestCode  (lines 1321-1331)
+1321:   @Override
+1322:   Node parseTestCode(String js) {
+1323:     initCompilerOptionsIfTesting();
+1324:     CompilerInput input = new CompilerInput(
+1325:         JSSourceFile.fromCode(" [testcode] ", js));
+1326:     if (inputsById == null) {
+1327:       inputsById = Maps.newHashMap();
+1328:     }
+1329:     inputsById.put(input.getInputId(), input);
+1330:     return input.getAstRoot(this);
+1331:   }
+
+[3] com.google.javascript.jscomp.parsing.IRFactory#newNode  (lines 1283-1285)
+1283:   private Node newNode(int type, Node child1, Node child2, Node child3) {
+1284:     return new Node(type, child1, child2, child3).clonePropsFrom(templateNode);
+1285:   }
+
+[4] com.google.javascript.jscomp.LiveVariablesAnalysis#apply  (lines 54-61)
+54:     @Override
+55:     public LiveVariableLattice apply(List<LiveVariableLattice> in) {
+56:       LiveVariableLattice result = new LiveVariableLattice(in.get(0));
+57:       for (int i = 1; i < in.size(); i++) {
+58:         result.liveSet.or(in.get(i).liveSet);
+59:       }
+60:       return result;
+61:     }
+
+[5] com.google.javascript.jscomp.DataFlowAnalysis#analyze  (lines 179-181)
+179:   final void analyze() {
+180:     analyze(MAX_STEPS);
+181:   }
+
+[6] com.google.javascript.jscomp.parsing.IRFactory#newNumberNode  (lines 1295-1297)
+1295:   private Node newNumberNode(Double value) {
+1296:     return Node.newNumber(value).clonePropsFrom(templateNode);
+1297:   }
+
+[7] com.google.javascript.rhino.Node#getChildBefore  (lines 647-659)
+647:   public Node getChildBefore(Node child) {
+648:     if (child == first) {
+649:       return null;
+650:     }
+651:     Node n = first;
+652:     while (n.next != child) {
+653:       n = n.next;
+654:       if (n == null) {
+655:         throw new RuntimeException("node is not a child");
+656:       }
+657:     }
+658:     return n;
+659:   }
+
+[8] com.google.javascript.jscomp.ControlFlowAnalysis#prioritizeFromEntryNode  (lines 196-215)
+196:   private void prioritizeFromEntryNode(DiGraphNode<Node, Branch> entry) {
+197:     PriorityQueue<DiGraphNode<Node, Branch>> worklist =
+198:         new PriorityQueue<DiGraphNode<Node, Branch>>(10, priorityComparator);
+199:     worklist.add(entry);
+200: 
+201:     while (!worklist.isEmpty()) {
+202:       DiGraphNode<Node, Branch> current = worklist.remove();
+203:       if (nodePriorities.containsKey(current)) {
+204:         continue;
+205:       }
+206: 
+207:       nodePriorities.put(current, ++priorityCounter);
+208: 
+209:       List<DiGraphNode<Node, Branch>> successors =
+210:           cfg.getDirectedSuccNodes(current);
+211:       for (DiGraphNode<Node, Branch> candidate : successors) {
+212:         worklist.add(candidate);
+213:       }
+214:     }
+215:   }
+
+[9] com.google.javascript.jscomp.ControlFlowAnalysis#handleStmtList  (lines 482-521)
+482:   private void handleStmtList(Node node) {
+483:     Node parent = node.getParent();
+484:     // Special case, don't add a block of empty CATCH block to the graph.
+485:     if (node.getType() == Token.BLOCK && parent != null &&
+486:         parent.getType() == Token.TRY &&
+487:         NodeUtil.getCatchBlock(parent) == node &&
+488:         !NodeUtil.hasCatchHandler(node)) {
+489:       return;
+490:     }
+491: 
+492:     // A block transfer control to its first child if it is not empty.
+493:     Node child = node.getFirstChild();
+494: 
+495:     // Function declarations are skipped since control doesn't go into that
+496:     // function (unless it is called)
+497:     while (child != null && child.getType() == Token.FUNCTION) {
+498:       child = child.getNext();
+499:     }
+500: 
+501:     if (child != null) {
+502:       createEdge(node, Branch.UNCOND, computeFallThrough(child));
+503:     } else {
+504:       createEdge(node, Branch.UNCOND, computeFollowNode(node, this));
+505:     }
+506: 
+507:     // Synthetic blocks
+508:     if (parent != null) {
+509:       switch (parent.getType()) {
+510:         case Token.DEFAULT:
+511:         case Token.CASE:
+512:         case Token.TRY:
+513:           break;
+514:         default:
+515:           if (node.getType() == Token.BLOCK && node.isSyntheticBlock()) {
+516:             createEdge(node, Branch.SYN_BLOCK, computeFollowNode(node, this));
+517:           }
+518:           break;
+519:       }
+520:     }
+521:   }
+
+[10] com.google.javascript.jscomp.LiveVariablesAnalysis#isForward  (lines 131-134)
+131:   @Override
+132:   boolean isForward() {
+133:     return false;
+134:   }
+
+[11] com.google.javascript.jscomp.ControlFlowAnalysis#shouldTraverse  (lines 217-292)
+217:   @Override
+218:   public boolean shouldTraverse(
+219:       NodeTraversal nodeTraversal, Node n, Node parent) {
+220:     astPosition.put(n, astPositionCounter++);
+221: 
+222:     switch (n.getType()) {
+223:       case Token.FUNCTION:
+224:         if (shouldTraverseFunctions || n == cfg.getEntry().getValue()) {
+225:           exceptionHandler.push(n);
+226:           return true;
+227:         }
+228:         return false;
+229:       case Token.TRY:
+230:         exceptionHandler.push(n);
+231:         return true;
+232:     }
+233: 
+234:     /*
+235:      * We are going to stop the traversal depending on what the node's parent
+236:      * is.
+237:      *
+238:      * We are only interested in adding edges between nodes that change control
+239:      * flow. The most obvious ones are loops and IF-ELSE's. A statement
+240:      * transfers control to its next sibling.
+241:      *
+242:      * In case of an expression tree, there is no control flow within the tree
+243:      * even when there are short circuited operators and conditionals. When we
+244:      * are doing data flow analysis, we will simply synthesize lattices up the
+245:      * expression tree by finding the meet at each expression node.
+246:      *
+247:      * For example: within a Token.SWITCH, the expression in question does not
+248:      * change the control flow and need not to be considered.
+249:      */
+250:     if (parent != null) {
+251:       switch (parent.getType()) {
+252:         case Token.FOR:
+253:           // Only traverse the body of the for loop.
+254:           return n == parent.getLastChild();
+255: 
+256:         // Skip the conditions.
+257:         case Token.IF:
+258:         case Token.WHILE:
+259:         case Token.WITH:
+260:           return n != parent.getFirstChild();
+261:         case Token.DO:
+262:           return n != parent.getFirstChild().getNext();
+263:         // Only traverse the body of the cases
+264:         case Token.SWITCH:
+265:         case Token.CASE:
+266:         case Token.CATCH:
+267:         case Token.LABEL:
+268:           return n != parent.getFirstChild();
+269:         case Token.FUNCTION:
+270:           return n == parent.getFirstChild().getNext().getNext();
+271:         case Token.CONTINUE:
+272:         case Token.BREAK:
+273:         case Token.EXPR_RESULT:
+274:         case Token.VAR:
+275:         case Token.RETURN:
+276:         case Token.THROW:
+277:           return false;
+278:         case Token.TRY:
+279:           /* Just before we are about to visit the second child of the TRY node,
+280:            * we know that we will be visiting either the CATCH or the FINALLY.
+281:            * In other words, we know that the post order traversal of the TRY
+282:            * block has been finished, no more exceptions can be caught by the
+283:            * handler at this TRY block and should be taken out of the stack.
+284:            */
+285:           if (n == parent.getFirstChild().getNext()) {
+286:             Preconditions.checkState(exceptionHandler.peek() == parent);
+287:             exceptionHandler.pop();
+288:           }
+289:       }
+290:     }
+291:     return true;
+292:   }
+
+[12] com.google.javascript.rhino.Node#removeFirstChild  (lines 2005-2011)
+2005:   public Node removeFirstChild() {
+2006:     Node child = first;
+2007:     if (child != null) {
+2008:       removeChild(child);
+2009:     }
+2010:     return child;
+2011:   }
+
+[13] com.google.javascript.jscomp.parsing.IRFactory#processForInLoop  (lines 566-573)
+566:     @Override
+567:     Node processForInLoop(ForInLoop loopNode) {
+568:       return newNode(
+569:           Token.FOR,
+570:           transform(loopNode.getIterator()),
+571:           transform(loopNode.getIteratedObject()),
+572:           transformBlock(loopNode.getBody()));
+573:     }
+
+[14] com.google.javascript.jscomp.DiagnosticGroup#DiagnosticGroup  (lines 61-64)
+61:   private DiagnosticGroup(DiagnosticType type) {
+62:     this.name = null;
+63:     this.types = ImmutableSet.of(type);
+64:   }
+
+[15] com.google.javascript.jscomp.SourceFile#fromCode  (lines 314-316)
+314:   public static SourceFile fromCode(String fileName, String code) {
+315:     return new Preloaded(fileName, code);
+316:   }
+
+[16] com.google.javascript.jscomp.parsing.IRFactory#processAstRoot  (lines 440-448)
+440:     @Override
+441:     Node processAstRoot(AstRoot rootNode) {
+442:       Node node = newNode(Token.SCRIPT);
+443:       for (com.google.javascript.jscomp.mozilla.rhino.Node child : rootNode) {
+444:         node.addChildToBack(transform((AstNode)child));
+445:       }
+446:       parseDirectives(node);
+447:       return node;
+448:     }
+
+[17] com.google.javascript.jscomp.LiveVariablesAnalysis#computeGenKill  (lines 178-263)
+178:   private void computeGenKill(Node n, BitSet gen, BitSet kill,
+179:       boolean conditional) {
+180: 
+181:     switch (n.getType()) {
+182:       case Token.SCRIPT:
+183:       case Token.BLOCK:
+184:       case Token.FUNCTION:
+185:         return;
+186: 
+187:       case Token.WHILE:
+188:       case Token.DO:
+189:       case Token.IF:
+190:         computeGenKill(NodeUtil.getConditionExpression(n), gen, kill,
+191:             conditional);
+192:         return;
+193: 
+194:       case Token.FOR:
+195:         if (!NodeUtil.isForIn(n)) {
+196:           computeGenKill(NodeUtil.getConditionExpression(n), gen, kill,
+197:               conditional);
+198:         } else {
+199:           // for(x in y) {...}
+200:           Node lhs = n.getFirstChild();
+201:           Node rhs = lhs.getNext();
+202:           if (NodeUtil.isVar(lhs)) {
+203:             // for(var x in y) {...}
+204:             lhs = lhs.getLastChild();
+205:           }
+206:             addToSetIfLocal(lhs, kill);
+207:             addToSetIfLocal(lhs, gen);
+208:           computeGenKill(rhs, gen, kill, conditional);
+209:         }
+210:         return;
+211: 
+212:       case Token.VAR:
+213:         for (Node c = n.getFirstChild(); c != null; c = c.getNext()) {
+214:           if (c.hasChildren()) {
+215:             computeGenKill(c.getFirstChild(), gen, kill, conditional);
+216:             if (!conditional) {
+217:               addToSetIfLocal(c, kill);
+218:             }
+219:           }
+220:         }
+221:         return;
+222: 
+223:       case Token.AND:
+224:       case Token.OR:
+225:         computeGenKill(n.getFirstChild(), gen, kill, conditional);
+226:         // May short circuit.
+227:         computeGenKill(n.getLastChild(), gen, kill, true);
+228:         return;
+229: 
+230:       case Token.HOOK:
+231:         computeGenKill(n.getFirstChild(), gen, kill, conditional);
+232:         // Assume both sides are conditional.
+233:         computeGenKill(n.getFirstChild().getNext(), gen, kill, true);
+234:         computeGenKill(n.getLastChild(), gen, kill, true);
+235:         return;
+236: 
+237:       case Token.NAME:
+238:         if (isArgumentsName(n)) {
+239:           markAllParametersEscaped();
+240:         } else {
+241:           addToSetIfLocal(n, gen);
+242:         }
+243:         return;
+244: 
+245:       default:
+246:         if (NodeUtil.isAssignmentOp(n) && NodeUtil.isName(n.getFirstChild())) {
+247:           Node lhs = n.getFirstChild();
+248:           if (!conditional) {
+249:             addToSetIfLocal(lhs, kill);
+250:           }
+251:           if (!NodeUtil.isAssign(n)) {
+252:             // assignments such as a += 1 reads a.
+253:             addToSetIfLocal(lhs, gen);
+254:           }
+255:           computeGenKill(lhs.getNext(), gen, kill, conditional);
+256:         } else {
+257:           for (Node c = n.getFirstChild(); c != null; c = c.getNext()) {
+258:             computeGenKill(c, gen, kill, conditional);
+259:           }
+260:         }
+261:         return;
+262:     }
+263:   }
+
+[18] com.google.javascript.jscomp.ControlFlowAnalysis#visit  (lines 294-355)
+294:   @Override
+295:   public void visit(NodeTraversal t, Node n, Node parent) {
+296:     switch (n.getType()) {
+297:       case Token.IF:
+298:         handleIf(n);
+299:         return;
+300:       case Token.WHILE:
+301:         handleWhile(n);
+302:         return;
+303:       case Token.DO:
+304:         handleDo(n);
+305:         return;
+306:       case Token.FOR:
+307:         handleFor(n);
+308:         return;
+309:       case Token.SWITCH:
+310:         handleSwitch(n);
+311:         return;
+312:       case Token.CASE:
+313:         handleCase(n);
+314:         return;
+315:       case Token.DEFAULT:
+316:         handleDefault(n);
+317:         return;
+318:       case Token.BLOCK:
+319:       case Token.SCRIPT:
+320:         handleStmtList(n);
+321:         return;
+322:       case Token.FUNCTION:
+323:         handleFunction(n);
+324:         return;
+325:       case Token.EXPR_RESULT:
+326:         handleExpr(n);
+327:         return;
+328:       case Token.THROW:
+329:         handleThrow(n);
+330:         return;
+331:       case Token.TRY:
+332:         handleTry(n);
+333:         return;
+334:       case Token.CATCH:
+335:         handleCatch(n);
+336:         return;
+337:       case Token.BREAK:
+338:         handleBreak(n);
+339:         return;
+340:       case Token.CONTINUE:
+341:         handleContinue(n);
+342:         return;
+343:       case Token.RETURN:
+344:         handleReturn(n);
+345:         return;
+346:       case Token.WITH:
+347:         handleWith(n);
+348:         return;
+349:       case Token.LABEL:
+350:         return;
+351:       default:
+352:         handleStmt(n);
+353:         return;
+354:     }
+355:   }
+
+[19] com.google.javascript.jscomp.parsing.IRFactory#processGeneric  (lines 380-387)
+380:     private Node processGeneric(
+381:         com.google.javascript.jscomp.mozilla.rhino.Node n) {
+382:       Node node = newNode(transformTokenType(n.getType()));
+383:       for (com.google.javascript.jscomp.mozilla.rhino.Node child : n) {
+384:         node.addChildToBack(transform((AstNode)child));
+385:       }
+386:       return node;
+387:     }
+
+[20] com.google.javascript.jscomp.parsing.IRFactory#processScope  (lines 857-860)
+857:     @Override
+858:     Node processScope(Scope scopeNode) {
+859:       return processGeneric(scopeNode);
+860:     }
+
+[21] com.google.javascript.jscomp.LiveVariablesAnalysis#flowThrough  (lines 146-165)
+146:   @Override
+147:   LiveVariableLattice flowThrough(Node node, LiveVariableLattice input) {
+148:     final BitSet gen = new BitSet(input.liveSet.size());
+149:     final BitSet kill = new BitSet(input.liveSet.size());
+150: 
+151:     // Make kills conditional if the node can end abruptly by an exception.
+152:     boolean conditional = false;
+153:     List<DiGraphEdge<Node, Branch>> edgeList = getCfg().getOutEdges(node);
+154:     for (DiGraphEdge<Node, Branch> edge : edgeList) {
+155:       if (Branch.ON_EX.equals(edge.getValue())) {
+156:         conditional = true;
+157:       }
+158:     }
+159:     computeGenKill(node, gen, kill, conditional);
+160:     LiveVariableLattice result = new LiveVariableLattice(input);
+161:     // L_in = L_out - Kill + Gen
+162:     result.liveSet.andNot(kill);
+163:     result.liveSet.or(gen);
+164:     return result;
+165:   }
+
+[22] com.google.javascript.jscomp.ControlFlowAnalysis#computeFallThrough  (lines 786-800)
+786:   static Node computeFallThrough(Node n) {
+787:     switch (n.getType()) {
+788:       case Token.DO:
+789:         return computeFallThrough(n.getFirstChild());
+790:       case Token.FOR:
+791:         if (NodeUtil.isForIn(n)) {
+792:           return n;
+793:         }
+794:         return computeFallThrough(n.getFirstChild());
+795:       case Token.LABEL:
+796:         return computeFallThrough(n.getLastChild());
+797:       default:
+798:         return n;
+799:     }
+800:   }
+
+[23] com.google.javascript.jscomp.CompilerOptions#isOn  (lines 1355-1357)
+1355:     boolean isOn() {
+1356:       return this != OFF;
+1357:     }
+
+[24] com.google.javascript.rhino.Node#removeChild  (lines 782-791)
+782:   public void removeChild(Node child) {
+783:     Node prev = getChildBefore(child);
+784:     if (prev == null)
+785:         first = first.next;
+786:     else
+787:         prev.next = child.next;
+788:     if (child == last) last = prev;
+789:     child.next = null;
+790:     child.parent = null;
+791:   }
+
+[25] com.google.javascript.jscomp.parsing.TypeSafeDispatcher#process  (lines 118-282)
+118:   public T process(AstNode node) {
+119:     switch (node.getType()) {
+120:       case Token.ADD:
+121:       case Token.AND:
+122:       case Token.BITAND:
+123:       case Token.BITOR:
+124:       case Token.BITXOR:
+125:       case Token.COMMA:
+126:       case Token.DIV:
+127:       case Token.EQ:
+128:       case Token.GE:
+129:       case Token.GT:
+130:       case Token.IN:
+131:       case Token.INSTANCEOF:
+132:       case Token.LE:
+133:       case Token.LSH:
+134:       case Token.LT:
+135:       case Token.MOD:
+136:       case Token.MUL:
+137:       case Token.NE:
+138:       case Token.OR:
+139:       case Token.RSH:
+140:       case Token.SHEQ:
+141:       case Token.SHNE:
+142:       case Token.SUB:
+143:       case Token.URSH:
+144:         return processInfixExpression((InfixExpression) node);
+145:       case Token.ARRAYLIT:
+146:         return processArrayLiteral((ArrayLiteral) node);
+147:       case Token.ASSIGN:
+148:       case Token.ASSIGN_ADD:
+149:       case Token.ASSIGN_BITAND:
+150:       case Token.ASSIGN_BITOR:
+151:       case Token.ASSIGN_BITXOR:
+152:       case Token.ASSIGN_DIV:
+153:       case Token.ASSIGN_LSH:
+154:       case Token.ASSIGN_MOD:
+155:       case Token.ASSIGN_MUL:
+156:       case Token.ASSIGN_RSH:
+157:       case Token.ASSIGN_SUB:
+158:       case Token.ASSIGN_URSH:
+159:         return processAssignment((Assignment) node);
+160:       case Token.BITNOT:
+161:       case Token.DEC:
+162:       case Token.DELPROP:
+163:       case Token.INC:
+164:       case Token.NEG:
+165:       case Token.NOT:
+166:       case Token.POS:
+167:       case Token.TYPEOF:
+168:       case Token.VOID:
+169:         return processUnaryExpression((UnaryExpression) node);
+170:       case Token.BLOCK:
+171:         if (node instanceof Block) {
+172:           return processBlock((Block) node);
+173:         } else  if (node instanceof Scope) {
+174:           return processScope((Scope) node);
+175:         } else {
+176:           throw new IllegalStateException("Unexpected node type.  class: " +
+177:                                           node.getClass() +
+178:                                           " type: " +
+179:                                           Token.typeToName(node.getType()));
+180:         }
+181:       case Token.BREAK:
+182:         return processBreakStatement((BreakStatement) node);
+183:       case Token.CALL:
+184:         return processFunctionCall((FunctionCall) node);
+185:       case Token.CASE:
+186:       case Token.DEFAULT:
+187:         return processSwitchCase((SwitchCase) node);
+188:       case Token.CATCH:
+189:       case Token.FINALLY:
+190:         return processCatchClause((CatchClause) node);
+191:       case Token.COLON:
+192:         return processObjectProperty((ObjectProperty) node);
+193:       case Token.CONTINUE:
+194:         return processContinueStatement((ContinueStatement) node);
+195:       case Token.DO:
+196:         return processDoLoop((DoLoop) node);
+197:       case Token.EMPTY:
+198:         return processEmptyExpression((EmptyExpression) node);
+199:       case Token.EXPR_RESULT:
+200:       case Token.EXPR_VOID:
+201:         if (node instanceof ExpressionStatement) {
+202:           return processExpressionStatement((ExpressionStatement) node);
+203:         } else  if (node instanceof LabeledStatement) {
+204:           return processLabeledStatement((LabeledStatement) node);
+205:         } else {
+206:           throw new IllegalStateException("Unexpected node type.  class: " +
+207:                                           node.getClass() +
+208:                                           " type: " +
+209:                                           Token.typeToName(node.getType()));
+210:         }
+211:       case Token.DEBUGGER:
+212:       case Token.FALSE:
+213:       case Token.NULL:
+214:       case Token.THIS:
+215:       case Token.TRUE:
+216:         return processKeywordLiteral((KeywordLiteral) node);
+217:       case Token.FOR:
+218:         if (node instanceof ForInLoop) {
+219:           return processForInLoop((ForInLoop) node);
+220:         } else  if (node instanceof ForLoop) {
+221:           return processForLoop((ForLoop) node);
+222:         } else {
+223:           throw new IllegalStateException("Unexpected node type.  class: " +
+224:                                           node.getClass() +
+225:                                           " type: " +
+226:                                           Token.typeToName(node.getType()));
+227:         }
+228:       case Token.FUNCTION:
+229:         return processFunctionNode((FunctionNode) node);
+230:       case Token.GETELEM:
+231:         return processElementGet((ElementGet) node);
+232:       case Token.GETPROP:
+233:         return processPropertyGet((PropertyGet) node);
+234:       case Token.HOOK:
+235:         return processConditionalExpression((ConditionalExpression) node);
+236:       case Token.IF:
+237:         return processIfStatement((IfStatement) node);
+238:       case Token.LABEL:
+239:         return processLabel((Label) node);
+240:       case Token.LP:
+241:         return processParenthesizedExpression((ParenthesizedExpression) node);
+242:       case Token.NAME:
+243:         return processName((Name) node);
+244:       case Token.NEW:
+245:         return processNewExpression((NewExpression) node);
+246:       case Token.NUMBER:
+247:         return processNumberLiteral((NumberLiteral) node);
+248:       case Token.OBJECTLIT:
+249:         return processObjectLiteral((ObjectLiteral) node);
+250:       case Token.REGEXP:
+251:         return processRegExpLiteral((RegExpLiteral) node);
+252:       case Token.RETURN:
+253:         return processReturnStatement((ReturnStatement) node);
+254:       case Token.SCRIPT:
+255:         return processAstRoot((AstRoot) node);
+256:       case Token.STRING:
+257:         return processStringLiteral((StringLiteral) node);
+258:       case Token.SWITCH:
+259:         return processSwitchStatement((SwitchStatement) node);
+260:       case Token.THROW:
+261:         return processThrowStatement((ThrowStatement) node);
+262:       case Token.TRY:
+263:         return processTryStatement((TryStatement) node);
+264:       case Token.CONST:
+265:       case Token.VAR:
+266:         if (node instanceof VariableDeclaration) {
+267:           return processVariableDeclaration((VariableDeclaration) node);
+268:         } else  if (node instanceof VariableInitializer) {
+269:           return processVariableInitializer((VariableInitializer) node);
+270:         } else {
+271:           throw new IllegalStateException("Unexpected node type.  class: " +
+272:                                           node.getClass() +
+273:                                           " type: " +
+274:                                           Token.typeToName(node.getType()));
+275:         }
+276:       case Token.WHILE:
+277:         return processWhileLoop((WhileLoop) node);
+278:       case Token.WITH:
+279:         return processWithStatement((WithStatement) node);
+280:     }
+281:     return processIllegalToken(node);
+282:   }
+
+[26] com.google.javascript.jscomp.parsing.IRFactory#processLabel  (lines 695-698)
+695:     @Override
+696:     Node processLabel(Label labelNode) {
+697:       return newStringNode(Token.LABEL_NAME, labelNode.getName());
+698:     }
+
+[27] com.google.javascript.jscomp.ControlFlowAnalysis#computeFollowNode  (lines 682-779)
+682:   private static Node computeFollowNode(
+683:       Node fromNode, Node node, ControlFlowAnalysis cfa) {
+684:     /*
+685:      * This is the case where:
+686:      *
+687:      * 1. Parent is null implies that we are transferring control to the end of
+688:      * the script.
+689:      *
+690:      * 2. Parent is a function implies that we are transferring control back to
+691:      * the caller of the function.
+692:      *
+693:      * 3. If the node is a return statement, we should also transfer control
+694:      * back to the caller of the function.
+695:      *
+696:      * 4. If the node is root then we have reached the end of what we have been
+697:      * asked to traverse.
+698:      *
+699:      * In all cases we should transfer control to a "symbolic return" node.
+700:      * This will make life easier for DFAs.
+701:      */
+702:     Node parent = node.getParent();
+703:     if (parent == null || parent.getType() == Token.FUNCTION ||
+704:         (cfa != null && node == cfa.root)) {
+705:       return null;
+706:     }
+707: 
+708:     // If we are just before a IF/WHILE/DO/FOR:
+709:     switch (parent.getType()) {
+710:       // The follow() of any of the path from IF would be what follows IF.
+711:       case Token.IF:
+712:         return computeFollowNode(fromNode, parent, cfa);
+713:       case Token.CASE:
+714:       case Token.DEFAULT:
+715:         // After the body of a CASE, the control goes to the body of the next
+716:         // case, without having to go to the case condition.
+717:         if (parent.getNext() != null) {
+718:           if (parent.getNext().getType() == Token.CASE) {
+719:             return parent.getNext().getFirstChild().getNext();
+720:           } else if (parent.getNext().getType() == Token.DEFAULT) {
+721:             return parent.getNext().getFirstChild();
+722:           } else {
+723:             Preconditions.checkState(false, "Not reachable");
+724:           }
+725:         } else {
+726:           return computeFollowNode(fromNode, parent, cfa);
+727:         }
+728:         break;
+729:       case Token.FOR:
+730:         if (NodeUtil.isForIn(parent)) {
+731:           return parent;
+732:         } else {
+733:           return parent.getFirstChild().getNext().getNext();
+734:         }
+735:       case Token.WHILE:
+736:       case Token.DO:
+737:         return parent;
+738:       case Token.TRY:
+739:         // If we are coming out of the TRY block...
+740:         if (parent.getFirstChild() == node) {
+741:           if (NodeUtil.hasFinally(parent)) { // and have FINALLY block.
+742:             return computeFallThrough(parent.getLastChild());
+743:           } else { // and have no FINALLY.
+744:             return computeFollowNode(fromNode, parent, cfa);
+745:           }
+746:         // CATCH block.
+747:         } else if (NodeUtil.getCatchBlock(parent) == node){
+748:           if (NodeUtil.hasFinally(parent)) { // and have FINALLY block.
+749:             return computeFallThrough(node.getNext());
+750:           } else {
+751:             return computeFollowNode(fromNode, parent, cfa);
+752:           }
+753:         // If we are coming out of the FINALLY block...
+754:         } else if (parent.getLastChild() == node){
+755:           if (cfa != null) {
+756:             for (Node finallyNode : cfa.finallyMap.get(parent)) {
+757:               cfa.createEdge(fromNode, Branch.UNCOND, finallyNode);
+758:             }
+759:           }
+760:           return computeFollowNode(fromNode, parent, cfa);
+761:         }
+762:     }
+763: 
+764:     // Now that we are done with the special cases follow should be its
+765:     // immediate sibling, unless its sibling is a function
+766:     Node nextSibling = node.getNext();
+767: 
+768:     // Skip function declarations because control doesn't get pass into it.
+769:     while (nextSibling != null && nextSibling.getType() == Token.FUNCTION) {
+770:       nextSibling = nextSibling.getNext();
+771:     }
+772: 
+773:     if (nextSibling != null) {
+774:       return computeFallThrough(nextSibling);
+775:     } else {
+776:       // If there are no more siblings, control is transfered up the AST.
+777:       return computeFollowNode(fromNode, parent, cfa);
+778:     }
+779:   }
+
+[28] com.google.javascript.jscomp.SourceFile#getName  (lines 181-184)
+181:   @Override
+182:   public String getName() {
+183:     return fileName;
+184:   }
+
+[29] com.google.javascript.jscomp.Compiler#initOptions  (lines 228-291)
+228:   public void initOptions(CompilerOptions options) {
+229:     this.options = options;
+230:     if (errorManager == null) {
+231:       if (outStream == null) {
+232:         setErrorManager(
+233:             new LoggerErrorManager(createMessageFormatter(), logger));
+234:       } else {
+235:         PrintStreamErrorManager printer =
+236:             new PrintStreamErrorManager(createMessageFormatter(), outStream);
+237:         printer.setSummaryDetailLevel(options.summaryDetailLevel);
+238:         setErrorManager(printer);
+239:       }
+240:     }
+241: 
+242:     // DiagnosticGroups override the plain checkTypes option.
+243:     if (options.enables(DiagnosticGroups.CHECK_TYPES)) {
+244:       options.checkTypes = true;
+245:     } else if (options.disables(DiagnosticGroups.CHECK_TYPES)) {
+246:       options.checkTypes = false;
+247:     } else if (!options.checkTypes) {
+248:       // If DiagnosticGroups did not override the plain checkTypes
+249:       // option, and checkTypes is enabled, then turn off the
+250:       // parser type warnings.
+251:       options.setWarningLevel(
+252:           DiagnosticGroup.forType(
+253:               RhinoErrorReporter.TYPE_PARSE_ERROR),
+254:           CheckLevel.OFF);
+255:     }
+256: 
+257:     if (options.checkGlobalThisLevel.isOn() &&
+258:         !options.disables(DiagnosticGroups.GLOBAL_THIS)) {
+259:       options.setWarningLevel(
+260:           DiagnosticGroups.GLOBAL_THIS,
+261:           options.checkGlobalThisLevel);
+262:     }
+263: 
+264:     if (options.getLanguageIn() == LanguageMode.ECMASCRIPT5_STRICT) {
+265:       options.setWarningLevel(
+266:           DiagnosticGroups.ES5_STRICT,
+267:           CheckLevel.ERROR);
+268:     }
+269: 
+270:     // Initialize the warnings guard.
+271:     List<WarningsGuard> guards = Lists.newArrayList();
+272:     guards.add(
+273:         new SuppressDocWarningsGuard(
+274:             getDiagnosticGroups().getRegisteredGroups()));
+275:     guards.add(options.getWarningsGuard());
+276: 
+277:     ComposeWarningsGuard composedGuards = new ComposeWarningsGuard(guards);
+278: 
+279:     // All passes must run the variable check. This synthesizes
+280:     // variables later so that the compiler doesn't crash. It also
+281:     // checks the externs file for validity. If you don't want to warn
+282:     // about missing variable declarations, we shut that specific
+283:     // error off.
+284:     if (!options.checkSymbols &&
+285:         !composedGuards.enables(DiagnosticGroups.CHECK_VARIABLES)) {
+286:       composedGuards.addGuard(new DiagnosticGroupWarningsGuard(
+287:           DiagnosticGroups.CHECK_VARIABLES, CheckLevel.OFF));
+288:     }
+289: 
+290:     this.warningsGuard = composedGuards;
+291:   }
+
+[30] com.google.javascript.jscomp.parsing.IRFactory#processNumberLiteral  (lines 756-759)
+756:     @Override
+757:     Node processNumberLiteral(NumberLiteral literalNode) {
+758:       return newNumberNode(literalNode.getNumber());
+759:     }
+
+[31] com.google.javascript.jscomp.parsing.IRFactory#processArrayLiteral  (lines 413-425)
+413:     @Override
+414:     Node processArrayLiteral(ArrayLiteral literalNode) {
+415:       if (literalNode.isDestructuring()) {
+416:         reportDestructuringAssign(literalNode);
+417:       }
+418: 
+419:       Node node = newNode(Token.ARRAYLIT);
+420:       for (AstNode child : literalNode.getElements()) {
+421:         Node c = transform(child);
+422:         node.addChildToBack(c);
+423:       }
+424:       return node;
+425:     }
+
+[32] com.google.javascript.jscomp.parsing.IRFactory#processVariableInitializer  (lines 1004-1013)
+1004:     @Override
+1005:     Node processVariableInitializer(VariableInitializer initializerNode) {
+1006:       Node node = transform(initializerNode.getTarget());
+1007:       if (initializerNode.getInitializer() != null) {
+1008:         node.addChildToBack(transform(initializerNode.getInitializer()));
+1009:         node.setLineno(node.getLineno());
+1010:         maybeSetLengthFrom(node, initializerNode);
+1011:       }
+1012:       return node;
+1013:     }
+
+[33] com.google.javascript.jscomp.CompilerOptions#CompilerOptions  (lines 738-884)
+738:   public CompilerOptions() {
+739:     // Accepted language
+740:     languageIn = LanguageMode.ECMASCRIPT3;
+741: 
+742:     // Language variation
+743:     acceptConstKeyword = false;
+744: 
+745:     // Checks
+746:     skipAllPasses = false;
+747:     nameAnonymousFunctionsOnly = false;
+748:     devMode = DevMode.OFF;
+749:     checkSymbols = false;
+750:     checkShadowVars = CheckLevel.OFF;
+751:     aggressiveVarCheck = CheckLevel.OFF;
+752:     checkFunctions = CheckLevel.OFF;
+753:     checkMethods = CheckLevel.OFF;
+754:     checkDuplicateMessages = false;
+755:     allowLegacyJsMessages = false;
+756:     strictMessageReplacement = false;
+757:     checkSuspiciousCode = false;
+758:     checkControlStructures = false;
+759:     checkTypes = false;
+760:     tightenTypes = false;
+761:     inferTypesInGlobalScope = false;
+762:     checkTypedPropertyCalls = false;
+763:     reportMissingOverride = CheckLevel.OFF;
+764:     reportUnknownTypes = CheckLevel.OFF;
+765:     checkRequires = CheckLevel.OFF;
+766:     checkProvides = CheckLevel.OFF;
+767:     checkGlobalNamesLevel = CheckLevel.OFF;
+768:     brokenClosureRequiresLevel = CheckLevel.ERROR;
+769:     checkGlobalThisLevel = CheckLevel.OFF;
+770:     checkUnreachableCode = CheckLevel.OFF;
+771:     checkMissingReturn = CheckLevel.OFF;
+772:     checkMissingGetCssNameLevel = CheckLevel.OFF;
+773:     checkMissingGetCssNameBlacklist = null;
+774:     checkCaja = false;
+775:     computeFunctionSideEffects = false;
+776:     chainCalls = false;
+777:     extraAnnotationNames = null;
+778: 
+779:     // Optimizations
+780:     foldConstants = false;
+781:     coalesceVariableNames = false;
+782:     deadAssignmentElimination = false;
+783:     inlineConstantVars = false;
+784:     inlineFunctions = false;
+785:     inlineLocalFunctions = false;
+786:     assumeStrictThis = false;
+787:     crossModuleCodeMotion = false;
+788:     crossModuleMethodMotion = false;
+789:     inlineGetters = false;
+790:     inlineVariables = false;
+791:     inlineLocalVariables = false;
+792:     smartNameRemoval = false;
+793:     removeDeadCode = false;
+794:     extractPrototypeMemberDeclarations = false;
+795:     removeUnusedPrototypeProperties = false;
+796:     removeUnusedPrototypePropertiesInExterns = false;
+797:     removeUnusedVars = false;
+798:     removeUnusedLocalVars = false;
+799:     aliasExternals = false;
+800:     collapseVariableDeclarations = false;
+801:     groupVariableDeclarations = false;
+802:     collapseAnonymousFunctions = false;
+803:     aliasableStrings = Collections.emptySet();
+804:     aliasStringsBlacklist = "";
+805:     aliasAllStrings = false;
+806:     outputJsStringUsage = false;
+807:     convertToDottedProperties = false;
+808:     rewriteFunctionExpressions = false;
+809:     optimizeParameters = false;
+810:     optimizeReturns = false;
+811: 
+812:     // Renaming
+813:     variableRenaming = VariableRenamingPolicy.OFF;
+814:     propertyRenaming = PropertyRenamingPolicy.OFF;
+815:     propertyAffinity = false;
+816:     labelRenaming = false;
+817:     generatePseudoNames = false;
+818:     shadowVariables = false;
+819:     renamePrefix = null;
+820:     aliasKeywords = false;
+821:     collapseProperties = false;
+822:     collapsePropertiesOnExternTypes = false;
+823:     collapseObjectLiterals = false;
+824:     devirtualizePrototypeMethods = false;
+825:     disambiguateProperties = false;
+826:     ambiguateProperties = false;
+827:     anonymousFunctionNaming = AnonymousFunctionNamingPolicy.OFF;
+828:     exportTestFunctions = false;
+829: 
+830:     // Alterations
+831:     runtimeTypeCheck = false;
+832:     runtimeTypeCheckLogFunction = null;
+833:     instrumentForCoverage = false;
+834:     instrumentForCoverageOnly = false;
+835:     ignoreCajaProperties = false;
+836:     syntheticBlockStartMarker = null;
+837:     syntheticBlockEndMarker = null;
+838:     locale = null;
+839:     markAsCompiled = false;
+840:     removeTryCatchFinally = false;
+841:     closurePass = false;
+842:     rewriteNewDateGoogNow = true;
+843:     removeAbstractMethods = true;
+844:     removeClosureAsserts = false;
+845:     stripTypes = Collections.emptySet();
+846:     stripNameSuffixes = Collections.emptySet();
+847:     stripNamePrefixes = Collections.emptySet();
+848:     stripTypePrefixes = Collections.emptySet();
+849:     customPasses = null;
+850:     markNoSideEffectCalls = false;
+851:     defineReplacements = Maps.newHashMap();
+852:     tweakProcessing = TweakProcessing.OFF;
+853:     tweakReplacements = Maps.newHashMap();
+854:     moveFunctionDeclarations = false;
+855:     instrumentationTemplate = null;
+856:     appNameStr = "";
+857:     recordFunctionInformation = false;
+858:     generateExports = false;
+859:     cssRenamingMap = null;
+860:     processObjectPropertyString = false;
+861:     idGenerators = Collections.emptySet();
+862:     replaceStringsFunctionDescriptions = Collections.emptyList();
+863:     replaceStringsPlaceholderToken = "";
+864:     replaceStringsReservedStrings = Collections.emptySet();
+865: 
+866:     // Output
+867:     printInputDelimiter = false;
+868:     prettyPrint = false;
+869:     lineBreak = false;
+870:     reportPath = null;
+871:     tracer = TracerMode.OFF;
+872:     colorizeErrorOutput = false;
+873:     errorFormat = ErrorFormat.SINGLELINE;
+874:     debugFunctionSideEffectsPath = null;
+875:     jsOutputFile = "";
+876:     externExports = false;
+877:     nameReferenceReportPath = null;
+878:     nameReferenceGraphPath = null;
+879: 
+880:     // Debugging
+881:     aliasHandler = NULL_ALIAS_TRANSFORMATION_HANDLER;
+882: 
+883:     operaCompoundAssignFix = true;
+884:   }
+
+[34] com.google.javascript.rhino.Node#Node  (lines 496-514)
+496:   public Node(int nodeType, Node left, Node mid, Node right) {
+497:     Preconditions.checkArgument(left.parent == null);
+498:     Preconditions.checkArgument(left.next == null);
+499:     Preconditions.checkArgument(mid.parent == null);
+500:     Preconditions.checkArgument(mid.next == null);
+501:     Preconditions.checkArgument(right.parent == null);
+502:     Preconditions.checkArgument(right.next == null);
+503:     type = nodeType;
+504:     parent = null;
+505:     first = left;
+506:     last = right;
+507:     left.next = mid;
+508:     left.parent = this;
+509:     mid.next = right;
+510:     mid.parent = this;
+511:     right.next = null;
+512:     right.parent = this;
+513:     sourcePosition = -1;
+514:   }
+
+[35] com.google.javascript.jscomp.parsing.IRFactory#transformBlock  (lines 202-217)
+202:   private Node transformBlock(AstNode node) {
+203:     Node irNode = transform(node);
+204:     if (irNode.getType() != Token.BLOCK) {
+205:       if (irNode.getType() == Token.EMPTY) {
+206:         irNode.setType(Token.BLOCK);
+207:         irNode.setWasEmptyNode(true);
+208:       } else {
+209:         Node newBlock = newNode(Token.BLOCK, irNode);
+210:         newBlock.setLineno(irNode.getLineno());
+211:         newBlock.setCharno(irNode.getCharno());
+212:         maybeSetLengthFrom(newBlock, node);
+213:         irNode = newBlock;
+214:       }
+215:     }
+216:     return irNode;
+217:   }
+
+[36] com.google.javascript.jscomp.DataFlowAnalysis#analyze  (lines 201-229)
+201:   final void analyze(int maxSteps) {
+202:     initialize();
+203:     int step = 0;
+204:     while (!orderedWorkSet.isEmpty()) {
+205:       if (step > maxSteps) {
+206:         throw new MaxIterationsExceededException(
+207:           "Analysis did not terminate after " + maxSteps + " iterations");
+208:       }
+209:       DiGraphNode<N, Branch> curNode = orderedWorkSet.iterator().next();
+210:       orderedWorkSet.remove(curNode);
+211:       joinInputs(curNode);
+212:       if (flow(curNode)) {
+213:         // If there is a change in the current node, we want to grab the list
+214:         // of nodes that this node affects.
+215:         List<DiGraphNode<N, Branch>> nextNodes = isForward() ?
+216:             cfg.getDirectedSuccNodes(curNode) :
+217:             cfg.getDirectedPredNodes(curNode);
+218:         for (DiGraphNode<N, Branch> nextNode : nextNodes) {
+219:           if (nextNode != cfg.getImplicitReturn()) {
+220:             orderedWorkSet.add(nextNode);
+221:           }
+222:         }
+223:       }
+224:       step++;
+225:     }
+226:     if (isForward()) {
+227:       joinInputs(getCfg().getImplicitReturn());
+228:     }
+229:   }
+
+[37] com.google.javascript.jscomp.DataFlowAnalysis#flow  (lines 267-278)
+267:   protected boolean flow(DiGraphNode<N, Branch> node) {
+268:     FlowState<L> state = node.getAnnotation();
+269:     if (isForward()) {
+270:       L outBefore = state.out;
+271:       state.out = flowThrough(node.getValue(), state.in);
+272:       return !outBefore.equals(state.out);
+273:     } else {
+274:       L inBefore = state.in;
+275:       state.in = flowThrough(node.getValue(), state.out);
+276:       return !inBefore.equals(state.in);
+277:     }
+278:   }
+
+[38] com.google.javascript.jscomp.DataFlowAnalysis#DataFlowAnalysis  (lines 120-130)
+120:   DataFlowAnalysis(ControlFlowGraph<N> targetCfg, JoinOp<L> joinOp) {
+121:     this.cfg = targetCfg;
+122:     this.joinOp = joinOp;
+123:     Comparator<DiGraphNode<N, Branch>> nodeComparator =
+124:       cfg.getOptionalNodeComparator(isForward());
+125:     if (nodeComparator != null) {
+126:       this.orderedWorkSet = Sets.newTreeSet(nodeComparator);
+127:     } else {
+128:       this.orderedWorkSet = Sets.newLinkedHashSet();
+129:     }
+130:   }
+
+[39] com.google.javascript.jscomp.DataFlowAnalysis#initialize  (lines 248-260)
+248:   protected void initialize() {
+249:     // TODO(user): Calling clear doesn't deallocate the memory in a
+250:     // LinkedHashSet. Consider creating a new work set if we plan to repeatedly
+251:     // call analyze.
+252:     orderedWorkSet.clear();
+253:     for (DiGraphNode<N, Branch> node : cfg.getDirectedGraphNodes()) {
+254:       node.setAnnotation(new FlowState<L>(createInitialEstimateLattice(),
+255:           createInitialEstimateLattice()));
+256:       if (node != cfg.getImplicitReturn()) {
+257:         orderedWorkSet.add(node);
+258:       }
+259:     }
+260:   }
+
+[40] com.google.javascript.jscomp.SourceFile#SourceFile  (lines 86-94)
+86:   public SourceFile(String fileName) {
+87:     if (fileName == null || fileName.isEmpty()) {
+88:       throw new IllegalArgumentException("a source must have a name");
+89:     }
+90:     this.fileName = fileName;
+91:     // Starting point: offset 0 is at line 1.
+92:     this.lastOffset = 0;
+93:     this.lastLine = 1;
+94:   }
+
+[41] com.google.javascript.jscomp.parsing.IRFactory#processLabeledStatement  (lines 700-723)
+700:     @Override
+701:     Node processLabeledStatement(LabeledStatement statementNode) {
+702:       Node node = newNode(Token.LABEL);
+703:       Node prev = null;
+704:       Node cur = node;
+705:       for (Label label : statementNode.getLabels()) {
+706:         if (prev != null) {
+707:           prev.addChildToBack(cur);
+708:         }
+709:         cur.addChildToBack(transform(label));
+710: 
+711:         cur.setLineno(label.getLineno());
+712:         maybeSetLengthFrom(cur, label);
+713: 
+714:         int clauseAbsolutePosition =
+715:             position2charno(label.getAbsolutePosition());
+716:         cur.setCharno(clauseAbsolutePosition);
+717: 
+718:         prev = cur;
+719:         cur = newNode(Token.LABEL);
+720:       }
+721:       prev.addChildToBack(transform(statementNode.getStatement()));
+722:       return node;
+723:     }
+
+[42] com.google.javascript.jscomp.ControlFlowAnalysis#compare  (lines 1029-1033)
+1029:           @Override
+1030:           public int compare(
+1031:               DiGraphNode<Node, Branch> n1, DiGraphNode<Node, Branch> n2) {
+1032:             return getPosition(n2) - getPosition(n1);
+1033:           }
+
+[43] com.google.javascript.jscomp.DataFlowAnalysis#joinInputs  (lines 286-324)
+286:   protected void joinInputs(DiGraphNode<N, Branch> node) {
+287:     FlowState<L> state = node.getAnnotation();
+288:     if (isForward()) {
+289:       if (cfg.getEntry() == node) {
+290:         state.setIn(createEntryLattice());
+291:       } else {
+292:         List<DiGraphNode<N, Branch>> inNodes = cfg.getDirectedPredNodes(node);
+293:         if (inNodes.size() == 1) {
+294:           FlowState<L> inNodeState = inNodes.get(0).getAnnotation();
+295:           state.setIn(inNodeState.getOut());
+296:         } else if (inNodes.size() > 1) {
+297:           List<L> values = new ArrayList<L>(inNodes.size());
+298:           for (DiGraphNode<N, Branch> currentNode : inNodes) {
+299:             FlowState<L> currentNodeState = currentNode.getAnnotation();
+300:             values.add(currentNodeState.getOut());
+301:           }
+302:           state.setIn(joinOp.apply(values));
+303:         }
+304:       }
+305:     } else {
+306:       List<DiGraphNode<N, Branch>> inNodes = cfg.getDirectedSuccNodes(node);
+307:       if (inNodes.size() == 1) {
+308:         DiGraphNode<N, Branch> inNode = inNodes.get(0);
+309:         if (inNode == cfg.getImplicitReturn()) {
+310:           state.setOut(createEntryLattice());
+311:         } else {
+312:           FlowState<L> inNodeState = inNode.getAnnotation();
+313:           state.setOut(inNodeState.getIn());
+314:         }
+315:       } else if (inNodes.size() > 1) {
+316:         List<L> values = new ArrayList<L>(inNodes.size());
+317:         for (DiGraphNode<N, Branch> currentNode : inNodes) {
+318:           FlowState<L> currentNodeState = currentNode.getAnnotation();
+319:           values.add(currentNodeState.getIn());
+320:         }
+321:         state.setOut(joinOp.apply(values));
+322:       }
+323:     }
+324:   }
+
+[44] com.google.javascript.jscomp.DiagnosticGroup#forType  (lines 71-76)
+71:   static DiagnosticGroup forType(DiagnosticType type) {
+72:     if (!singletons.containsKey(type)) {
+73:       singletons.put(type, new DiagnosticGroup(type));
+74:     }
+75:     return singletons.get(type);
+76:   }
+
+[45] com.google.javascript.jscomp.LiveVariablesAnalysis#addToSetIfLocal  (lines 265-275)
+265:   private void addToSetIfLocal(Node node, BitSet set) {
+266:     Preconditions.checkState(NodeUtil.isName(node));
+267:     String name = node.getString();
+268:     if (!jsScope.isDeclared(name, false)) {
+269:       return;
+270:     }
+271:     Var var = jsScope.getVar(name);
+272:     if (!escaped.contains(var)) {
+273:       set.set(var.index);
+274:     }
+275:   }
+
+[46] com.google.javascript.jscomp.NodeUtil#isForIn  (lines 1612-1615)
+1612:   static boolean isForIn(Node n) {
+1613:     return n.getType() == Token.FOR
+1614:         && n.getChildCount() == 3;
+1615:   }
+
+[47] com.google.javascript.jscomp.DataFlowAnalysis#computeEscaped  (lines 548-578)
+548:   static void computeEscaped(final Scope jsScope, final Set<Var> escaped,
+549:       AbstractCompiler compiler) {
+550:     // TODO(user): Very good place to store this information somewhere.
+551:     AbstractPostOrderCallback finder = new AbstractPostOrderCallback() {
+552:       @Override
+553:       public void visit(NodeTraversal t, Node n, Node parent) {
+554:         if (jsScope == t.getScope() || !NodeUtil.isName(n)
+555:             || NodeUtil.isFunction(parent)) {
+556:           return;
+557:         }
+558:         String name = n.getString();
+559:         Var var = t.getScope().getVar(name);
+560:         if (var != null && var.scope == jsScope) {
+561:           escaped.add(jsScope.getVar(name));
+562:         }
+563:       }
+564:     };
+565: 
+566:     NodeTraversal t = new NodeTraversal(compiler, finder);
+567:     t.traverseAtScope(jsScope);
+568: 
+569:     // 1: Remove the exception name in CATCH which technically isn't local to
+570:     //    begin with.
+571:     for (Iterator<Var> i = jsScope.getVars(); i.hasNext();) {
+572:       Var var = i.next();
+573:       if (var.getParentNode().getType() == Token.CATCH ||
+574:           compiler.getCodingConvention().isExported(var.getName())) {
+575:         escaped.add(var);
+576:       }
+577:     }
+578:   }
+
+[48] com.google.javascript.jscomp.parsing.IRFactory#processElementGet  (lines 545-551)
+545:     @Override
+546:     Node processElementGet(ElementGet getNode) {
+547:       return newNode(
+548:           Token.GETELEM,
+549:           transform(getNode.getTarget()),
+550:           transform(getNode.getElement()));
+551:     }
+
+[49] com.google.javascript.jscomp.NodeUtil#isControlStructure  (lines 1668-1685)
+1668:   static boolean isControlStructure(Node n) {
+1669:     switch (n.getType()) {
+1670:       case Token.FOR:
+1671:       case Token.DO:
+1672:       case Token.WHILE:
+1673:       case Token.WITH:
+1674:       case Token.IF:
+1675:       case Token.LABEL:
+1676:       case Token.TRY:
+1677:       case Token.CATCH:
+1678:       case Token.SWITCH:
+1679:       case Token.CASE:
+1680:       case Token.DEFAULT:
+1681:         return true;
+1682:       default:
+1683:         return false;
+1684:     }
+1685:   }
+
+[50] com.google.javascript.jscomp.ControlFlowAnalysis#handleFor  (lines 395-430)
+395:   private void handleFor(Node forNode) {
+396:     if (forNode.getChildCount() == 4) {
+397:       // We have for (init; cond; iter) { body }
+398:       Node init = forNode.getFirstChild();
+399:       Node cond = init.getNext();
+400:       Node iter = cond.getNext();
+401:       Node body = iter.getNext();
+402:       // After initialization, we transfer to the FOR which is in charge of
+403:       // checking the condition (for the first time).
+404:       createEdge(init, Branch.UNCOND, forNode);
+405:       // The edge that transfer control to the beginning of the loop body.
+406:       createEdge(forNode, Branch.ON_TRUE, computeFallThrough(body));
+407:       // The edge to end of the loop.
+408:       createEdge(forNode, Branch.ON_FALSE,
+409:           computeFollowNode(forNode, this));
+410:       // The end of the body will have a unconditional branch to our iter
+411:       // (handled by calling computeFollowNode of the last instruction of the
+412:       // body. Our iter will jump to the forNode again to another condition
+413:       // check.
+414:       createEdge(iter, Branch.UNCOND, forNode);
+415:       connectToPossibleExceptionHandler(init, init);
+416:       connectToPossibleExceptionHandler(forNode, cond);
+417:       connectToPossibleExceptionHandler(iter, iter);
+418:     } else {
+419:       // We have for (item in collection) { body }
+420:       Node item = forNode.getFirstChild();
+421:       Node collection = item.getNext();
+422:       Node body = collection.getNext();
+423:       // The edge that transfer control to the beginning of the loop body.
+424:       createEdge(forNode, Branch.ON_TRUE, computeFallThrough(body));
+425:       // The edge to end of the loop.
+426:       createEdge(forNode, Branch.ON_FALSE,
+427:           computeFollowNode(forNode, this));
+428:       connectToPossibleExceptionHandler(forNode, collection);
+429:     }
+430:   }

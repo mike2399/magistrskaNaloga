@@ -1,0 +1,455 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math.ode.events.EventStateTest::closeEvents
+org.apache.commons.math.MathRuntimeException$4: function values at endpoints do not have different signs.  Endpoints: [89.999, 153.1], Values: [-0.066, -1,142.11]
+	at org.apache.commons.math.MathRuntimeException.createIllegalArgumentException(MathRuntimeException.java:305)
+	at org.apache.commons.math.analysis.solvers.BrentSolver.solve(BrentSolver.java:178)
+	at org.apache.commons.math.ode.events.EventState.evaluateStep(EventState.java:218)
+	at org.apache.commons.math.ode.events.EventStateTest.closeEvents(EventStateTest.java:66)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math.ode.events.EventState#stepAccepted  (lines 282-297)
+282:     public void stepAccepted(final double t, final double[] y)
+283:         throws EventException {
+284: 
+285:         t0 = t;
+286:         g0 = handler.g(t, y);
+287: 
+288:         if (pendingEvent) {
+289:             // force the sign to its value "just after the event"
+290:             previousEventTime = t;
+291:             g0Positive        = increasing;
+292:             nextAction        = handler.eventOccurred(t, y, !(increasing ^ forward));
+293:         } else {
+294:             g0Positive = g0 >= 0;
+295:             nextAction = EventHandler.CONTINUE;
+296:         }
+297:     }
+
+[2] org.apache.commons.math.ConvergingAlgorithmImpl#setMaximalIterationCount  (lines 92-94)
+92:     public void setMaximalIterationCount(int count) {
+93:         maximalIterationCount = count;
+94:     }
+
+[3] org.apache.commons.math.ode.events.EventState#evaluateStep  (lines 167-263)
+167:     public boolean evaluateStep(final StepInterpolator interpolator)
+168:         throws DerivativeException, EventException, ConvergenceException {
+169: 
+170:         try {
+171: 
+172:             forward = interpolator.isForward();
+173:             final double t1 = interpolator.getCurrentTime();
+174:             final int    n  = Math.max(1, (int) Math.ceil(Math.abs(t1 - t0) / maxCheckInterval));
+175:             final double h  = (t1 - t0) / n;
+176: 
+177:             double ta = t0;
+178:             double ga = g0;
+179:             double tb = t0 + (interpolator.isForward() ? convergence : -convergence);
+180:             for (int i = 0; i < n; ++i) {
+181: 
+182:                 // evaluate handler value at the end of the substep
+183:                 tb += h;
+184:                 interpolator.setInterpolatedTime(tb);
+185:                 final double gb = handler.g(tb, interpolator.getInterpolatedState());
+186: 
+187:                 // check events occurrence
+188:                 if (g0Positive ^ (gb >= 0)) {
+189:                     // there is a sign change: an event is expected during this step
+190: 
+191:                         // this is a corner case:
+192:                         // - there was an event near ta,
+193:                         // - there is another event between ta and tb
+194:                         // - when ta was computed, convergence was reached on the "wrong side" of the interval
+195:                         // this implies that the real sign of ga is the same as gb, so we need to slightly
+196:                         // shift ta to make sure ga and gb get opposite signs and the solver won't complain
+197:                         // about bracketing
+198:                             // this should never happen
+199:                          
+200:                     // variation direction, with respect to the integration direction
+201:                     increasing = gb >= ga;
+202: 
+203:                     final UnivariateRealFunction f = new UnivariateRealFunction() {
+204:                         public double value(final double t) throws FunctionEvaluationException {
+205:                             try {
+206:                                 interpolator.setInterpolatedTime(t);
+207:                                 return handler.g(t, interpolator.getInterpolatedState());
+208:                             } catch (DerivativeException e) {
+209:                                 throw new FunctionEvaluationException(e, t);
+210:                             } catch (EventException e) {
+211:                                 throw new FunctionEvaluationException(e, t);
+212:                             }
+213:                         }
+214:                     };
+215:                     final BrentSolver solver = new BrentSolver();
+216:                     solver.setAbsoluteAccuracy(convergence);
+217:                     solver.setMaximalIterationCount(maxIterationCount);
+218:                     final double root = (ta <= tb) ? solver.solve(f, ta, tb) : solver.solve(f, tb, ta);
+219:                     if ((Math.abs(root - ta) <= convergence) &&
+220:                          (Math.abs(root - previousEventTime) <= convergence)) {
+221:                         // we have either found nothing or found (again ?) a past event, we simply ignore it
+222:                         ta = tb;
+223:                         ga = gb;
+224:                     } else if (Double.isNaN(previousEventTime) ||
+225:                                (Math.abs(previousEventTime - root) > convergence)) {
+226:                         pendingEventTime = root;
+227:                         if (pendingEvent && (Math.abs(t1 - pendingEventTime) <= convergence)) {
+228:                             // we were already waiting for this event which was
+229:                             // found during a previous call for a step that was
+230:                             // rejected, this step must now be accepted since it
+231:                             // properly ends exactly at the event occurrence
+232:                             return false;
+233:                         }
+234:                         // either we were not waiting for the event or it has
+235:                         // moved in such a way the step cannot be accepted
+236:                         pendingEvent = true;
+237:                         return true;
+238:                     }
+239: 
+240:                 } else {
+241:                     // no sign change: there is no event for now
+242:                     ta = tb;
+243:                     ga = gb;
+244:                 }
+245: 
+246:             }
+247: 
+248:             // no event during the whole step
+249:             pendingEvent     = false;
+250:             pendingEventTime = Double.NaN;
+251:             return false;
+252: 
+253:         } catch (FunctionEvaluationException e) {
+254:             final Throwable cause = e.getCause();
+255:             if ((cause != null) && (cause instanceof DerivativeException)) {
+256:                 throw (DerivativeException) cause;
+257:             } else if ((cause != null) && (cause instanceof EventException)) {
+258:                 throw (EventException) cause;
+259:             }
+260:             throw new EventException(e);
+261:         }
+262: 
+263:     }
+
+[4] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#AbstractStepInterpolator  (lines 107-122)
+107:   protected AbstractStepInterpolator(final double[] y, final boolean forward) {
+108: 
+109:     previousTime      = Double.NaN;
+110:     currentTime       = Double.NaN;
+111:     h                 = Double.NaN;
+112:     interpolatedTime  = Double.NaN;
+113: 
+114:     currentState            = y;
+115:     interpolatedState       = new double[y.length];
+116:     interpolatedDerivatives = new double[y.length];
+117: 
+118:     finalized         = false;
+119:     this.forward      = forward;
+120:     this.dirtyState   = true;
+121: 
+122:   }
+
+[5] org.apache.commons.math.analysis.solvers.UnivariateRealSolverImpl#verifyInterval  (lines 207-213)
+207:     protected void verifyInterval(final double lower, final double upper) {
+208:         if (lower >= upper) {
+209:             throw MathRuntimeException.createIllegalArgumentException(
+210:                     "endpoints do not specify an interval: [{0}, {1}]",
+211:                     lower, upper);
+212:         }
+213:     }
+
+[6] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#storeTime  (lines 217-226)
+217:   public void storeTime(final double t) {
+218: 
+219:     currentTime = t;
+220:     h           = currentTime - previousTime;
+221:     setInterpolatedTime(t);
+222: 
+223:     // the step is not finalized anymore
+224:     finalized  = false;
+225: 
+226:   }
+
+[7] org.apache.commons.math.ode.events.EventState#reinitializeBegin  (lines 149-154)
+149:     public void reinitializeBegin(final double tStart, final double[] yStart)
+150:         throws EventException {
+151:         t0 = tStart;
+152:         g0 = handler.g(tStart, yStart);
+153:         g0Positive = g0 >= 0;
+154:     }
+
+[8] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#shift  (lines 210-212)
+210:   public void shift() {
+211:     previousTime = currentTime;
+212:   }
+
+[9] org.apache.commons.math.analysis.solvers.BrentSolver#solve  (lines 153-196)
+153:     public double solve(final UnivariateRealFunction f,
+154:                         final double min, final double max)
+155:         throws MaxIterationsExceededException,
+156:         FunctionEvaluationException {
+157: 
+158:         clearResult();
+159:         verifyInterval(min, max);
+160: 
+161:         double ret = Double.NaN;
+162: 
+163:         double yMin = f.value(min);
+164:         double yMax = f.value(max);
+165: 
+166:         // Verify bracketing
+167:         double sign = yMin * yMax;
+168:         if (sign > 0) {
+169:             // check if either value is close to a zero
+170:             if (Math.abs(yMin) <= functionValueAccuracy) {
+171:                 setResult(min, 0);
+172:                 ret = min;
+173:             } else if (Math.abs(yMax) <= functionValueAccuracy) {
+174:                 setResult(max, 0);
+175:                 ret = max;
+176:             } else {
+177:                 // neither value is close to zero and min and max do not bracket root.
+178:                 throw MathRuntimeException.createIllegalArgumentException(
+179:                         "function values at endpoints do not have different signs.  " +
+180:                         "Endpoints: [{0}, {1}], Values: [{2}, {3}]",
+181:                         min, max, yMin, yMax);
+182:             }
+183:         } else if (sign < 0){
+184:             // solve using only the first endpoint as initial guess
+185:             ret = solve(f, min, yMin, max, yMax, min, yMin);
+186:         } else {
+187:             // either min or max is a root
+188:             if (yMin == 0.0) {
+189:                 ret = min;
+190:             } else {
+191:                 ret = max;
+192:             }
+193:         }
+194: 
+195:         return ret;
+196:     }
+
+[10] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#getInterpolatedState  (lines 269-281)
+269:   public double[] getInterpolatedState() throws DerivativeException {
+270: 
+271:       // lazy evaluation of the state
+272:       if (dirtyState) {
+273:           final double oneMinusThetaH = currentTime - interpolatedTime;
+274:           final double theta = (h == 0) ? 0 : (h - oneMinusThetaH) / h;
+275:           computeInterpolatedStateAndDerivatives(theta, oneMinusThetaH);
+276:           dirtyState = false;
+277:       }
+278: 
+279:       return interpolatedState;
+280: 
+281:   }
+
+[11] org.apache.commons.math.ode.sampling.DummyStepInterpolator#DummyStepInterpolator  (lines 65-67)
+65:   public DummyStepInterpolator(final double[] y, final boolean forward) {
+66:     super(y, forward);
+67:   }
+
+[12] org.apache.commons.math.ConvergingAlgorithmImpl#ConvergingAlgorithmImpl  (lines 60-69)
+60:     protected ConvergingAlgorithmImpl(final int defaultMaximalIterationCount,
+61:                                       final double defaultAbsoluteAccuracy) {
+62:         this.defaultAbsoluteAccuracy = defaultAbsoluteAccuracy;
+63:         this.defaultRelativeAccuracy = 1.0e-14;
+64:         this.absoluteAccuracy = defaultAbsoluteAccuracy;
+65:         this.relativeAccuracy = defaultRelativeAccuracy;
+66:         this.defaultMaximalIterationCount = defaultMaximalIterationCount;
+67:         this.maximalIterationCount = defaultMaximalIterationCount;
+68:         this.iterationCount = 0;
+69:     }
+
+[13] org.apache.commons.math.analysis.solvers.BrentSolver#BrentSolver  (lines 55-57)
+55:     public BrentSolver() {
+56:         super(100, 1E-6);
+57:     }
+
+[14] org.apache.commons.math.analysis.solvers.UnivariateRealSolverImpl#clearResult  (lines 164-167)
+164:     protected final void clearResult() {
+165:         this.iterationCount = 0;
+166:         this.resultComputed = false;
+167:     }
+
+[15] org.apache.commons.math.analysis.solvers.UnivariateRealSolverImpl#setResult  (lines 140-144)
+140:     protected final void setResult(final double newResult, final int iterationCount) {
+141:         this.result         = newResult;
+142:         this.iterationCount = iterationCount;
+143:         this.resultComputed = true;
+144:     }
+
+[16] org.apache.commons.math.ConvergingAlgorithmImpl#setAbsoluteAccuracy  (lines 77-79)
+77:     public void setAbsoluteAccuracy(double accuracy) {
+78:         absoluteAccuracy = accuracy;
+79:     }
+
+[17] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#isForward  (lines 250-252)
+250:   public boolean isForward() {
+251:     return forward;
+252:   }
+
+[18] org.apache.commons.math.ode.sampling.DummyStepInterpolator#computeInterpolatedStateAndDerivatives  (lines 96-100)
+96:   @Override
+97:   protected void computeInterpolatedStateAndDerivatives(final double theta, final double oneMinusThetaH)
+98:     throws DerivativeException {
+99:       System.arraycopy(currentState, 0, interpolatedState, 0, currentState.length);
+100:   }
+
+[19] org.apache.commons.math.ode.events.EventState#EventState  (lines 94-111)
+94:     public EventState(final EventHandler handler, final double maxCheckInterval,
+95:                       final double convergence, final int maxIterationCount) {
+96:         this.handler           = handler;
+97:         this.maxCheckInterval  = maxCheckInterval;
+98:         this.convergence       = Math.abs(convergence);
+99:         this.maxIterationCount = maxIterationCount;
+100: 
+101:         // some dummy values ...
+102:         t0                = Double.NaN;
+103:         g0                = Double.NaN;
+104:         g0Positive        = true;
+105:         pendingEvent      = false;
+106:         pendingEventTime  = Double.NaN;
+107:         previousEventTime = Double.NaN;
+108:         increasing        = true;
+109:         nextAction        = EventHandler.CONTINUE;
+110: 
+111:     }
+
+[20] org.apache.commons.math.ode.events.EventState#getEventTime  (lines 270-272)
+270:     public double getEventTime() {
+271:         return pendingEventTime;
+272:     }
+
+[21] org.apache.commons.math.analysis.solvers.UnivariateRealSolverImpl#UnivariateRealSolverImpl  (lines 91-96)
+91:     protected UnivariateRealSolverImpl(final int defaultMaximalIterationCount,
+92:                                        final double defaultAbsoluteAccuracy) {
+93:         super(defaultMaximalIterationCount, defaultAbsoluteAccuracy);
+94:         this.defaultFunctionValueAccuracy = 1.0e-15;
+95:         this.functionValueAccuracy = defaultFunctionValueAccuracy;
+96:     }
+
+[22] org.apache.commons.math.ode.events.EventState#value  (lines 204-213)
+204:                         public double value(final double t) throws FunctionEvaluationException {
+205:                             try {
+206:                                 interpolator.setInterpolatedTime(t);
+207:                                 return handler.g(t, interpolator.getInterpolatedState());
+208:                             } catch (DerivativeException e) {
+209:                                 throw new FunctionEvaluationException(e, t);
+210:                             } catch (EventException e) {
+211:                                 throw new FunctionEvaluationException(e, t);
+212:                             }
+213:                         }
+
+[23] org.apache.commons.math.analysis.solvers.BrentSolver#solve  (lines 215-310)
+215:     private double solve(final UnivariateRealFunction f,
+216:                          double x0, double y0,
+217:                          double x1, double y1,
+218:                          double x2, double y2)
+219:     throws MaxIterationsExceededException, FunctionEvaluationException {
+220: 
+221:         double delta = x1 - x0;
+222:         double oldDelta = delta;
+223: 
+224:         int i = 0;
+225:         while (i < maximalIterationCount) {
+226:             if (Math.abs(y2) < Math.abs(y1)) {
+227:                 // use the bracket point if is better than last approximation
+228:                 x0 = x1;
+229:                 x1 = x2;
+230:                 x2 = x0;
+231:                 y0 = y1;
+232:                 y1 = y2;
+233:                 y2 = y0;
+234:             }
+235:             if (Math.abs(y1) <= functionValueAccuracy) {
+236:                 // Avoid division by very small values. Assume
+237:                 // the iteration has converged (the problem may
+238:                 // still be ill conditioned)
+239:                 setResult(x1, i);
+240:                 return result;
+241:             }
+242:             double dx = x2 - x1;
+243:             double tolerance =
+244:                 Math.max(relativeAccuracy * Math.abs(x1), absoluteAccuracy);
+245:             if (Math.abs(dx) <= tolerance) {
+246:                 setResult(x1, i);
+247:                 return result;
+248:             }
+249:             if ((Math.abs(oldDelta) < tolerance) ||
+250:                     (Math.abs(y0) <= Math.abs(y1))) {
+251:                 // Force bisection.
+252:                 delta = 0.5 * dx;
+253:                 oldDelta = delta;
+254:             } else {
+255:                 double r3 = y1 / y0;
+256:                 double p;
+257:                 double p1;
+258:                 // the equality test (x0 == x2) is intentional,
+259:                 // it is part of the original Brent's method,
+260:                 // it should NOT be replaced by proximity test
+261:                 if (x0 == x2) {
+262:                     // Linear interpolation.
+263:                     p = dx * r3;
+264:                     p1 = 1.0 - r3;
+265:                 } else {
+266:                     // Inverse quadratic interpolation.
+267:                     double r1 = y0 / y2;
+268:                     double r2 = y1 / y2;
+269:                     p = r3 * (dx * r1 * (r1 - r2) - (x1 - x0) * (r2 - 1.0));
+270:                     p1 = (r1 - 1.0) * (r2 - 1.0) * (r3 - 1.0);
+271:                 }
+272:                 if (p > 0.0) {
+273:                     p1 = -p1;
+274:                 } else {
+275:                     p = -p;
+276:                 }
+277:                 if (2.0 * p >= 1.5 * dx * p1 - Math.abs(tolerance * p1) ||
+278:                         p >= Math.abs(0.5 * oldDelta * p1)) {
+279:                     // Inverse quadratic interpolation gives a value
+280:                     // in the wrong direction, or progress is slow.
+281:                     // Fall back to bisection.
+282:                     delta = 0.5 * dx;
+283:                     oldDelta = delta;
+284:                 } else {
+285:                     oldDelta = delta;
+286:                     delta = p / p1;
+287:                 }
+288:             }
+289:             // Save old X1, Y1
+290:             x0 = x1;
+291:             y0 = y1;
+292:             // Compute new X1, Y1
+293:             if (Math.abs(delta) > tolerance) {
+294:                 x1 = x1 + delta;
+295:             } else if (dx > 0.0) {
+296:                 x1 = x1 + 0.5 * tolerance;
+297:             } else if (dx <= 0.0) {
+298:                 x1 = x1 - 0.5 * tolerance;
+299:             }
+300:             y1 = f.value(x1);
+301:             if ((y1 > 0) == (y2 > 0)) {
+302:                 x2 = x0;
+303:                 y2 = y0;
+304:                 delta = x1 - x0;
+305:                 oldDelta = delta;
+306:             }
+307:             i++;
+308:         }
+309:         throw new MaxIterationsExceededException(maximalIterationCount);
+310:     }
+
+[24] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#setInterpolatedTime  (lines 244-247)
+244:   public void setInterpolatedTime(final double time) {
+245:       interpolatedTime = time;
+246:       dirtyState       = true;
+247:   }
+
+[25] org.apache.commons.math.ode.sampling.AbstractStepInterpolator#getCurrentTime  (lines 234-236)
+234:   public double getCurrentTime() {
+235:     return currentTime;
+236:   }

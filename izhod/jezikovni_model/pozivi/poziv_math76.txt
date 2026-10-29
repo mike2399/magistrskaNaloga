@@ -1,0 +1,1033 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math.linear.SingularValueSolverTest::testMath320A
+junit.framework.AssertionFailedError: expected:<0.0> but was:<0.09336767546650937>
+	at org.apache.commons.math.linear.SingularValueSolverTest.testMath320A(SingularValueSolverTest.java:188)
+--- org.apache.commons.math.linear.SingularValueSolverTest::testMath320B
+junit.framework.AssertionFailedError: expected:<0.0> but was:<3.2>
+	at org.apache.commons.math.linear.SingularValueSolverTest.testMath320B(SingularValueSolverTest.java:219)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math.linear.ArrayRealVector#getEntry  (lines 945-947)
+945:     public double getEntry(int index) throws MatrixIndexException {
+946:         return data[index];
+947:     }
+
+[2] org.apache.commons.math.linear.Array2DRowRealMatrix#subtract  (lines 231-239)
+231:     @Override
+232:     public RealMatrix subtract(final RealMatrix m)
+233:         throws IllegalArgumentException {
+234:         try {
+235:             return subtract((Array2DRowRealMatrix) m);
+236:         } catch (ClassCastException cce) {
+237:             return super.subtract(m);
+238:         }
+239:     }
+
+[3] org.apache.commons.math.linear.BiDiagonalTransformer#getMainDiagonalRef  (lines 228-230)
+228:     double[] getMainDiagonalRef() {
+229:         return main;
+230:     }
+
+[4] org.apache.commons.math.linear.AbstractRealMatrix#visit  (lines 609-612)
+609:             @Override
+610:             public void visit(final int row, final int column, final double value) {
+611:                 out.setEntry(column, row, value);
+612:             }
+
+[5] org.apache.commons.math.linear.BiDiagonalTransformer#transformToUpperBiDiagonal  (lines 255-312)
+255:     private void transformToUpperBiDiagonal() {
+256: 
+257:         final int m = householderVectors.length;
+258:         final int n = householderVectors[0].length;
+259:         for (int k = 0; k < n; k++) {
+260: 
+261:             //zero-out a column
+262:             double xNormSqr = 0;
+263:             for (int i = k; i < m; ++i) {
+264:                 final double c = householderVectors[i][k];
+265:                 xNormSqr += c * c;
+266:             }
+267:             final double[] hK = householderVectors[k];
+268:             final double a = (hK[k] > 0) ? -Math.sqrt(xNormSqr) : Math.sqrt(xNormSqr);
+269:             main[k] = a;
+270:             if (a != 0.0) {
+271:                 hK[k] -= a;
+272:                 for (int j = k + 1; j < n; ++j) {
+273:                     double alpha = 0;
+274:                     for (int i = k; i < m; ++i) {
+275:                         final double[] hI = householderVectors[i];
+276:                         alpha -= hI[j] * hI[k];
+277:                     }
+278:                     alpha /= a * householderVectors[k][k];
+279:                     for (int i = k; i < m; ++i) {
+280:                         final double[] hI = householderVectors[i];
+281:                         hI[j] -= alpha * hI[k];
+282:                     }
+283:                 }
+284:             }
+285: 
+286:             if (k < n - 1) {
+287:                 //zero-out a row
+288:                 xNormSqr = 0;
+289:                 for (int j = k + 1; j < n; ++j) {
+290:                     final double c = hK[j];
+291:                     xNormSqr += c * c;
+292:                 }
+293:                 final double b = (hK[k + 1] > 0) ? -Math.sqrt(xNormSqr) : Math.sqrt(xNormSqr);
+294:                 secondary[k] = b;
+295:                 if (b != 0.0) {
+296:                     hK[k + 1] -= b;
+297:                     for (int i = k + 1; i < m; ++i) {
+298:                         final double[] hI = householderVectors[i];
+299:                         double beta = 0;
+300:                         for (int j = k + 1; j < n; ++j) {
+301:                             beta -= hI[j] * hK[j];
+302:                         }
+303:                         beta /= b * hK[k + 1];
+304:                         for (int j = k + 1; j < n; ++j) {
+305:                             hI[j] -= beta * hK[j];
+306:                         }
+307:                     }
+308:                 }
+309:             }
+310: 
+311:         }
+312:     }
+
+[6] org.apache.commons.math.linear.EigenDecompositionImpl#findEigenVectors  (lines 1730-1755)
+1730:     private void findEigenVectors() {
+1731: 
+1732:         final int m = main.length;
+1733:         eigenvectors = new ArrayRealVector[m];
+1734: 
+1735:         // perform an initial non-shifted LDLt decomposition
+1736:         final double[] d = new double[m];
+1737:         final double[] l = new double[m - 1];
+1738:         // avoid zero divide on indefinite matrix
+1739:         final double mu = realEigenvalues[m-1] <= 0 && realEigenvalues[0] > 0 ? 0.5-realEigenvalues[m-1] : 0;
+1740:         double di = main[0]+mu;
+1741:         d[0] = di;
+1742:         for (int i = 1; i < m; ++i) {
+1743:             final double eiM1  = secondary[i - 1];
+1744:             final double ratio = eiM1 / di;
+1745:             di       = main[i] - eiM1 * ratio + mu;
+1746:             l[i - 1] = ratio;
+1747:             d[i]     = di;
+1748:         }
+1749: 
+1750:         // compute eigenvectors
+1751:         for (int i = 0; i < m; ++i) {
+1752:             eigenvectors[i] = findEigenvector(realEigenvalues[i]+mu, d, l);
+1753:         }
+1754: 
+1755:     }
+
+[7] org.apache.commons.math.linear.EigenDecompositionImpl#findEigenvector  (lines 1766-1817)
+1766:     private ArrayRealVector findEigenvector(final double eigenvalue,
+1767:                                            final double[] d, final double[] l) {
+1768: 
+1769:         // compute the LDLt and UDUt decompositions of the
+1770:         // perfectly shifted tridiagonal matrix
+1771:         final int m = main.length;
+1772:         stationaryQuotientDifferenceWithShift(d, l, eigenvalue);
+1773:         progressiveQuotientDifferenceWithShift(d, l, eigenvalue);
+1774: 
+1775:         // select the twist index leading to
+1776:         // the least diagonal element in the twisted factorization
+1777:         int r = m - 1;
+1778:         double minG = Math.abs(work[6 * r] + work[6 * r + 3] + eigenvalue);
+1779:         int sixI = 0;
+1780:         for (int i = 0; i < m - 1; ++i) {
+1781:             final double absG = Math.abs(work[sixI] + d[i] * work[sixI + 9] / work[sixI + 10]);
+1782:             if (absG < minG) {
+1783:                 r = i;
+1784:                 minG = absG;
+1785:             }
+1786:             sixI += 6;
+1787:         }
+1788: 
+1789:         // solve the singular system by ignoring the equation
+1790:         // at twist index and propagating upwards and downwards
+1791:         double[] eigenvector = new double[m];
+1792:         double n2 = 1;
+1793:         eigenvector[r] = 1;
+1794:         double z = 1;
+1795:         for (int i = r - 1; i >= 0; --i) {
+1796:             z *= -work[6 * i + 2];
+1797:             eigenvector[i] = z;
+1798:             n2 += z * z;
+1799:         }
+1800:         z = 1;
+1801:         for (int i = r + 1; i < m; ++i) {
+1802:             z *= -work[6 * i - 1];
+1803:             eigenvector[i] = z;
+1804:             n2 += z * z;
+1805:         }
+1806: 
+1807:         // normalize vector
+1808:         final double inv = 1.0 / Math.sqrt(n2);
+1809:         for (int i = 0; i < m; ++i) {
+1810:             eigenvector[i] *= inv;
+1811:         }
+1812: 
+1813:         return (transformer == null) ?
+1814:                new ArrayRealVector(eigenvector, false) :
+1815:                new ArrayRealVector(transformer.getQ().operate(eigenvector), false);
+1816: 
+1817:     }
+
+[8] org.apache.commons.math.linear.AbstractRealMatrix#setColumnVector  (lines 504-518)
+504:     public void setColumnVector(final int column, final RealVector vector)
+505:         throws MatrixIndexException, InvalidMatrixException {
+506: 
+507:         MatrixUtils.checkColumnIndex(this, column);
+508:         final int nRows = getRowDimension();
+509:         if (vector.getDimension() != nRows) {
+510:             throw new InvalidMatrixException(
+511:                     "dimensions mismatch: got {0}x{1} but expected {2}x{3}",
+512:                     vector.getDimension(), 1, nRows, 1);
+513:         }
+514:         for (int i = 0; i < nRows; ++i) {
+515:             setEntry(i, column, vector.getEntry(i));
+516:         }
+517: 
+518:     }
+
+[9] org.apache.commons.math.linear.EigenDecompositionImpl#getV  (lines 254-274)
+254:     public RealMatrix getV()
+255:         throws InvalidMatrixException {
+256: 
+257:         if (cachedV == null) {
+258: 
+259:             if (eigenvectors == null) {
+260:                 findEigenVectors();
+261:             }
+262: 
+263:             final int m = eigenvectors.length;
+264:             cachedV = MatrixUtils.createRealMatrix(m, m);
+265:             for (int k = 0; k < m; ++k) {
+266:                 cachedV.setColumnVector(k, eigenvectors[k]);
+267:             }
+268: 
+269:         }
+270: 
+271:         // return the cached matrix
+272:         return cachedV;
+273: 
+274:     }
+
+[10] org.apache.commons.math.linear.Array2DRowRealMatrix#addToEntry  (lines 394-403)
+394:     @Override
+395:     public void addToEntry(final int row, final int column, final double increment)
+396:         throws MatrixIndexException {
+397:         try {
+398:             data[row][column] += increment;
+399:         } catch (ArrayIndexOutOfBoundsException e) {
+400:             throw new MatrixIndexException(
+401:                       NO_ENTRY_MESSAGE, row, column, getRowDimension(), getColumnDimension());
+402:         }
+403:     }
+
+[11] org.apache.commons.math.linear.AbstractRealMatrix#getSubMatrix  (lines 260-276)
+260:     public RealMatrix getSubMatrix(final int startRow, final int endRow,
+261:                                    final int startColumn, final int endColumn)
+262:         throws MatrixIndexException {
+263: 
+264:         MatrixUtils.checkSubMatrixIndex(this, startRow, endRow, startColumn, endColumn);
+265: 
+266:         final RealMatrix subMatrix =
+267:             createMatrix(endRow - startRow + 1, endColumn - startColumn + 1);
+268:         for (int i = startRow; i <= endRow; ++i) {
+269:             for (int j = startColumn; j <= endColumn; ++j) {
+270:                 subMatrix.setEntry(i - startRow, j - startColumn, getEntry(i, j));
+271:             }
+272:         }
+273: 
+274:         return subMatrix;
+275: 
+276:     }
+
+[12] org.apache.commons.math.linear.Array2DRowRealMatrix#getData  (lines 315-318)
+315:     @Override
+316:     public double[][] getData() {
+317:         return copyOut();
+318:     }
+
+[13] org.apache.commons.math.linear.EigenDecompositionImpl#EigenDecompositionImpl  (lines 189-207)
+189:     public EigenDecompositionImpl(final double[] main, double[] secondary,
+190:             final double splitTolerance)
+191:         throws InvalidMatrixException {
+192: 
+193:         this.main      = main.clone();
+194:         this.secondary = secondary.clone();
+195:         transformer    = null;
+196: 
+197:         // pre-compute some elements
+198:         squaredSecondary = new double[secondary.length];
+199:         for (int i = 0; i < squaredSecondary.length; ++i) {
+200:             final double s = secondary[i];
+201:             squaredSecondary[i] = s * s;
+202:         }
+203: 
+204:         this.splitTolerance = splitTolerance;
+205:         decompose();
+206: 
+207:     }
+
+[14] org.apache.commons.math.linear.BiDiagonalTransformer#getSecondaryDiagonalRef  (lines 238-240)
+238:     double[] getSecondaryDiagonalRef() {
+239:         return secondary;
+240:     }
+
+[15] org.apache.commons.math.linear.Array2DRowRealMatrix#getColumnDimension  (lines 424-427)
+424:     @Override
+425:     public int getColumnDimension() {
+426:         return ((data == null) || (data[0] == null)) ? 0 : data[0].length;
+427:     }
+
+[16] org.apache.commons.math.linear.AbstractRealMatrix#walkInOptimizedOrder  (lines 917-920)
+917:     public double walkInOptimizedOrder(final RealMatrixPreservingVisitor visitor)
+918:         throws MatrixVisitorException {
+919:         return walkInRowOrder(visitor);
+920:     }
+
+[17] org.apache.commons.math.linear.EigenDecompositionImpl#decompose  (lines 235-251)
+235:     private void decompose() {
+236: 
+237:         cachedV  = null;
+238:         cachedD  = null;
+239:         cachedVt = null;
+240:         work     = new double[6 * main.length];
+241: 
+242:         // compute the Gershgorin circles
+243:         computeGershgorinCircles();
+244: 
+245:         // find all the realEigenvalues
+246:         findEigenvalues();
+247: 
+248:         // we will search for eigenvectors only if required
+249:         eigenvectors = null;
+250: 
+251:     }
+
+[18] org.apache.commons.math.linear.BiDiagonalTransformer#getU  (lines 86-129)
+86:     public RealMatrix getU() {
+87: 
+88:         if (cachedU == null) {
+89: 
+90:             final int m = householderVectors.length;
+91:             final int n = householderVectors[0].length;
+92:             final int p = main.length;
+93:             final int diagOffset    = (m >= n) ? 0 : 1;
+94:             final double[] diagonal = (m >= n) ? main : secondary;
+95:             cachedU = MatrixUtils.createRealMatrix(m, m);
+96: 
+97:             // fill up the part of the matrix not affected by Householder transforms
+98:             for (int k = m - 1; k >= p; --k) {
+99:                 cachedU.setEntry(k, k, 1);
+100:             }
+101: 
+102:             // build up first part of the matrix by applying Householder transforms
+103:             for (int k = p - 1; k >= diagOffset; --k) {
+104:                 final double[] hK = householderVectors[k];
+105:                 cachedU.setEntry(k, k, 1);
+106:                 if (hK[k - diagOffset] != 0.0) {
+107:                     for (int j = k; j < m; ++j) {
+108:                         double alpha = 0;
+109:                         for (int i = k; i < m; ++i) {
+110:                             alpha -= cachedU.getEntry(i, j) * householderVectors[i][k - diagOffset];
+111:                         }
+112:                         alpha /= diagonal[k - diagOffset] * hK[k - diagOffset];
+113: 
+114:                         for (int i = k; i < m; ++i) {
+115:                             cachedU.addToEntry(i, j, -alpha * householderVectors[i][k - diagOffset]);
+116:                         }
+117:                     }
+118:                 }
+119:             }
+120:             if (diagOffset > 0) {
+121:                 cachedU.setEntry(0, 0, 1);
+122:             }
+123: 
+124:         }
+125: 
+126:         // return the cached matrix
+127:         return cachedU;
+128: 
+129:     }
+
+[19] org.apache.commons.math.linear.Array2DRowRealMatrix#Array2DRowRealMatrix  (lines 94-98)
+94:     public Array2DRowRealMatrix(final int rowDimension, final int columnDimension)
+95:         throws IllegalArgumentException {
+96:         super(rowDimension, columnDimension);
+97:         data = new double[rowDimension][columnDimension];
+98:     }
+
+[20] org.apache.commons.math.linear.Array2DRowRealMatrix#copyOut  (lines 615-623)
+615:     private double[][] copyOut() {
+616:         final int nRows = this.getRowDimension();
+617:         final double[][] out = new double[nRows][this.getColumnDimension()];
+618:         // can't copy 2-d array in one shot, otherwise get row references
+619:         for (int i = 0; i < nRows; i++) {
+620:             System.arraycopy(data[i], 0, out[i], 0, data[i].length);
+621:         }
+622:         return out;
+623:     }
+
+[21] org.apache.commons.math.linear.EigenDecompositionImpl#computeSplits  (lines 691-711)
+691:     private List<Integer> computeSplits() {
+692: 
+693:         final List<Integer> list = new ArrayList<Integer>();
+694: 
+695:         // splitting preserving relative accuracy
+696:         double absDCurrent = Math.abs(main[0]);
+697:         for (int i = 0; i < secondary.length; ++i) {
+698:             final double absDPrevious = absDCurrent;
+699:             absDCurrent = Math.abs(main[i + 1]);
+700:             final double max = splitTolerance * Math.sqrt(absDPrevious * absDCurrent);
+701:             if (Math.abs(secondary[i]) <= max) {
+702:                 list.add(i + 1);
+703:                 secondary[i] = 0;
+704:                 squaredSecondary[i] = 0;
+705:             }
+706:         }
+707: 
+708:         list.add(secondary.length + 1);
+709:         return list;
+710: 
+711:     }
+
+[22] org.apache.commons.math.linear.Array2DRowRealMatrix#setSubMatrix  (lines 332-367)
+332:     @Override
+333:     public void setSubMatrix(final double[][] subMatrix, final int row, final int column)
+334:     throws MatrixIndexException {
+335:         if (data == null) {
+336:             if (row > 0) {
+337:                 throw MathRuntimeException.createIllegalStateException(
+338:                       "first {0} rows are not initialized yet", row);
+339:             }
+340:             if (column > 0) {
+341:                 throw MathRuntimeException.createIllegalStateException(
+342:                       "first {0} columns are not initialized yet", column);
+343:             }
+344:             final int nRows = subMatrix.length;
+345:             if (nRows == 0) {
+346:                 throw MathRuntimeException.createIllegalArgumentException(
+347:                       AT_LEAST_ONE_ROW_MESSAGE);
+348:             }
+349: 
+350:             final int nCols = subMatrix[0].length;
+351:             if (nCols == 0) {
+352:                 throw MathRuntimeException.createIllegalArgumentException(
+353:                       AT_LEAST_ONE_COLUMN_MESSAGE);
+354:             }
+355:             data = new double[subMatrix.length][nCols];
+356:             for (int i = 0; i < data.length; ++i) {
+357:                 if (subMatrix[i].length != nCols) {
+358:                     throw MathRuntimeException.createIllegalArgumentException(
+359:                           DIFFERENT_ROWS_LENGTHS_MESSAGE, nCols, subMatrix[i].length);
+360:                 }
+361:                 System.arraycopy(subMatrix[i], 0, data[i + row], column, nCols);
+362:             }
+363:         } else {
+364:             super.setSubMatrix(subMatrix, row, column);
+365:         }
+366: 
+367:     }
+
+[23] org.apache.commons.math.linear.AbstractRealMatrix#transpose  (lines 601-618)
+601:     public RealMatrix transpose() {
+602: 
+603:         final int nRows = getRowDimension();
+604:         final int nCols = getColumnDimension();
+605:         final RealMatrix out = createMatrix(nCols, nRows);
+606:         walkInOptimizedOrder(new DefaultRealMatrixPreservingVisitor() {
+607: 
+608:             /** {@inheritDoc} */
+609:             @Override
+610:             public void visit(final int row, final int column, final double value) {
+611:                 out.setEntry(column, row, value);
+612:             }
+613: 
+614:         });
+615: 
+616:         return out;
+617: 
+618:     }
+
+[24] org.apache.commons.math.linear.MatrixUtils#createRealDiagonalMatrix  (lines 201-207)
+201:     public static RealMatrix createRealDiagonalMatrix(final double[] diagonal) {
+202:         final RealMatrix m = createRealMatrix(diagonal.length, diagonal.length);
+203:         for (int i = 0; i < diagonal.length; ++i) {
+204:             m.setEntry(i, i, diagonal[i]);
+205:         }
+206:         return m;
+207:     }
+
+[25] org.apache.commons.math.linear.EigenDecompositionImpl#getRealEigenvalues  (lines 310-313)
+310:     public double[] getRealEigenvalues()
+311:         throws InvalidMatrixException {
+312:         return realEigenvalues.clone();
+313:     }
+
+[26] org.apache.commons.math.linear.MatrixUtils#createRealMatrix  (lines 105-108)
+105:     public static RealMatrix createRealMatrix(double[][] data) {
+106:         return (data.length * data[0].length <= 4096) ?
+107:                 new Array2DRowRealMatrix(data) : new BlockRealMatrix(data);
+108:     }
+
+[27] org.apache.commons.math.linear.Array2DRowRealMatrix#Array2DRowRealMatrix  (lines 113-116)
+113:     public Array2DRowRealMatrix(final double[][] d)
+114:         throws IllegalArgumentException, NullPointerException {
+115:         copyIn(d);
+116:     }
+
+[28] org.apache.commons.math.linear.SingularValueDecompositionImpl#getV  (lines 233-277)
+233:     public RealMatrix getV()
+234:         throws InvalidMatrixException {
+235: 
+236:         if (cachedV == null) {
+237: 
+238:             final int p = singularValues.length;
+239:             if (m >= n) {
+240:                 // the tridiagonal matrix is Bt.B, where B is upper bidiagonal
+241:                 final RealMatrix e =
+242:                     eigenDecomposition.getV().getSubMatrix(0, n - 1, 0, p - 1);
+243:                 cachedV = transformer.getV().multiply(e);
+244:             } else {
+245:                 // the tridiagonal matrix is B.Bt, where B is lower bidiagonal
+246:                 // compute W = Bt.E.S^(-1) where E is the eigenvectors matrix
+247:                 final RealMatrix e =
+248:                     eigenDecomposition.getV().getSubMatrix(0, p - 1, 0, p - 1);
+249:                 final double[][] eData = e.getData();
+250:                 final double[][] wData = new double[n][p];
+251:                 double[] ei1 = eData[0];
+252:                 for (int i = 0; i < p - 1; ++i) {
+253:                     final double mi = mainBidiagonal[i];
+254:                     final double[] ei0 = ei1;
+255:                     final double[] wi  = wData[i];
+256:                         ei1 = eData[i + 1];
+257:                         final double si = secondaryBidiagonal[i];
+258:                         for (int j = 0; j < p; ++j) {
+259:                             wi[j] = (mi * ei0[j] + si * ei1[j]) / singularValues[j];
+260:                         }
+261:                 }
+262:                         for (int j = 0; j < p; ++j) {
+263:                             wData[p - 1][j] = ei1[j] * mainBidiagonal[p - 1] / singularValues[j];
+264:                         }
+265:                 for (int i = p; i < n; ++i) {
+266:                     wData[i] = new double[p];
+267:                 }
+268:                 cachedV =
+269:                     transformer.getV().multiply(MatrixUtils.createRealMatrix(wData));
+270:             }
+271: 
+272:         }
+273: 
+274:         // return the cached matrix
+275:         return cachedV;
+276: 
+277:     }
+
+[29] org.apache.commons.math.linear.AbstractRealMatrix#end  (lines 225-227)
+225:             public double end() {
+226:                 return maxColSum;
+227:             }
+
+[30] org.apache.commons.math.linear.BiDiagonalTransformer#BiDiagonalTransformer  (lines 60-79)
+60:     public BiDiagonalTransformer(RealMatrix matrix) {
+61: 
+62:         final int m = matrix.getRowDimension();
+63:         final int n = matrix.getColumnDimension();
+64:         final int p = Math.min(m, n);
+65:         householderVectors = matrix.getData();
+66:         main      = new double[p];
+67:         secondary = new double[p - 1];
+68:         cachedU   = null;
+69:         cachedB   = null;
+70:         cachedV   = null;
+71: 
+72:         // transform matrix
+73:         if (m >= n) {
+74:             transformToUpperBiDiagonal();
+75:         } else {
+76:             transformToLowerBiDiagonal();
+77:         }
+78: 
+79:     }
+
+[31] org.apache.commons.math.linear.Array2DRowRealMatrix#multiply  (lines 288-312)
+288:     public Array2DRowRealMatrix multiply(final Array2DRowRealMatrix m)
+289:         throws IllegalArgumentException {
+290: 
+291:         // safety check
+292:         MatrixUtils.checkMultiplicationCompatible(this, m);
+293: 
+294:         final int nRows = this.getRowDimension();
+295:         final int nCols = m.getColumnDimension();
+296:         final int nSum = this.getColumnDimension();
+297:         final double[][] outData = new double[nRows][nCols];
+298:         for (int row = 0; row < nRows; row++) {
+299:             final double[] dataRow    = data[row];
+300:             final double[] outDataRow = outData[row];
+301:             for (int col = 0; col < nCols; col++) {
+302:                 double sum = 0;
+303:                 for (int i = 0; i < nSum; i++) {
+304:                     sum += dataRow[i] * m.data[i][col];
+305:                 }
+306:                 outDataRow[col] = sum;
+307:             }
+308:         }
+309: 
+310:         return new Array2DRowRealMatrix(outData, false);
+311: 
+312:     }
+
+[32] org.apache.commons.math.linear.EigenDecompositionImpl#findEigenvalues  (lines 612-685)
+612:     private void findEigenvalues()
+613:         throws InvalidMatrixException {
+614: 
+615:         // compute splitting points
+616:         List<Integer> splitIndices = computeSplits();
+617: 
+618:         // find realEigenvalues in each block
+619:         realEigenvalues = new double[main.length];
+620:         imagEigenvalues = new double[main.length];
+621:         int begin = 0;
+622:         for (final int end : splitIndices) {
+623:             final int n = end - begin;
+624:             switch (n) {
+625: 
+626:             case 1:
+627:                 // apply dedicated method for dimension 1
+628:                 process1RowBlock(begin);
+629:                 break;
+630: 
+631:             case 2:
+632:                 // apply dedicated method for dimension 2
+633:                 process2RowsBlock(begin);
+634:                 break;
+635: 
+636:             case 3:
+637:                 // apply dedicated method for dimension 3
+638:                 process3RowsBlock(begin);
+639:                 break;
+640: 
+641:             default:
+642: 
+643:                 // choose an initial shift for LDL<sup>T</sup> decomposition
+644:                 final double[] range       = eigenvaluesRange(begin, n);
+645:                 final double oneFourth     = 0.25 * (3 * range[0] + range[1]);
+646:                 final int oneFourthCount   = countEigenValues(oneFourth, begin, n);
+647:                 final double threeFourth   = 0.25 * (range[0] + 3 * range[1]);
+648:                 final int threeFourthCount = countEigenValues(threeFourth, begin, n);
+649:                 final boolean chooseLeft   = (oneFourthCount - 1) >= (n - threeFourthCount);
+650:                 final double lambda        = chooseLeft ? range[0] : range[1];
+651: 
+652:                 tau = (range[1] - range[0]) * MathUtils.EPSILON * n + 2 * minPivot;
+653: 
+654:                 // decompose T-&lambda;I as LDL<sup>T</sup>
+655:                 ldlTDecomposition(lambda, begin, n);
+656: 
+657:                 // apply general dqd/dqds method
+658:                 processGeneralBlock(n);
+659: 
+660:                 // extract realEigenvalues
+661:                 if (chooseLeft) {
+662:                     for (int i = 0; i < n; ++i) {
+663:                         realEigenvalues[begin + i] = lambda + work[4 * i];
+664:                     }
+665:                 } else {
+666:                     for (int i = 0; i < n; ++i) {
+667:                         realEigenvalues[begin + i] = lambda - work[4 * i];
+668:                     }
+669:                 }
+670: 
+671:             }
+672:             begin = end;
+673:         }
+674: 
+675:         // sort the realEigenvalues in decreasing order
+676:         Arrays.sort(realEigenvalues);
+677:         int j = realEigenvalues.length - 1;
+678:         for (int i = 0; i < j; ++i) {
+679:             final double tmp = realEigenvalues[i];
+680:             realEigenvalues[i] = realEigenvalues[j];
+681:             realEigenvalues[j] = tmp;
+682:             --j;
+683:         }
+684: 
+685:     }
+
+[33] org.apache.commons.math.linear.Array2DRowRealMatrix#multiply  (lines 271-279)
+271:     @Override
+272:     public RealMatrix multiply(final RealMatrix m)
+273:         throws IllegalArgumentException {
+274:         try {
+275:             return multiply((Array2DRowRealMatrix) m);
+276:         } catch (ClassCastException cce) {
+277:             return super.multiply(m);
+278:         }
+279:     }
+
+[34] org.apache.commons.math.linear.SingularValueDecompositionImpl#getU  (lines 153-198)
+153:     public RealMatrix getU()
+154:         throws InvalidMatrixException {
+155: 
+156:         if (cachedU == null) {
+157: 
+158:             final int p = singularValues.length;
+159:             if (m >= n) {
+160:                 // the tridiagonal matrix is Bt.B, where B is upper bidiagonal
+161:                 final RealMatrix e =
+162:                     eigenDecomposition.getV().getSubMatrix(0, p - 1, 0, p - 1);
+163:                 final double[][] eData = e.getData();
+164:                 final double[][] wData = new double[m][p];
+165:                 double[] ei1 = eData[0];
+166:                 for (int i = 0; i < p - 1; ++i) {
+167:                     // compute W = B.E.S^(-1) where E is the eigenvectors matrix
+168:                     final double mi = mainBidiagonal[i];
+169:                     final double[] ei0 = ei1;
+170:                     final double[] wi  = wData[i];
+171:                         ei1 = eData[i + 1];
+172:                         final double si = secondaryBidiagonal[i];
+173:                         for (int j = 0; j < p; ++j) {
+174:                             wi[j] = (mi * ei0[j] + si * ei1[j]) / singularValues[j];
+175:                         }
+176:                 }
+177:                         for (int j = 0; j < p; ++j) {
+178:                             wData[p - 1][j] = ei1[j] * mainBidiagonal[p - 1] / singularValues[j];
+179:                         }
+180: 
+181:                 for (int i = p; i < m; ++i) {
+182:                     wData[i] = new double[p];
+183:                 }
+184:                 cachedU =
+185:                     transformer.getU().multiply(MatrixUtils.createRealMatrix(wData));
+186:             } else {
+187:                 // the tridiagonal matrix is B.Bt, where B is lower bidiagonal
+188:                 final RealMatrix e =
+189:                     eigenDecomposition.getV().getSubMatrix(0, m - 1, 0, p - 1);
+190:                 cachedU = transformer.getU().multiply(e);
+191:             }
+192: 
+193:         }
+194: 
+195:         // return the cached matrix
+196:         return cachedU;
+197: 
+198:     }
+
+[35] org.apache.commons.math.linear.SingularValueDecompositionImpl#getVT  (lines 280-290)
+280:     public RealMatrix getVT()
+281:         throws InvalidMatrixException {
+282: 
+283:         if (cachedVt == null) {
+284:             cachedVt = getV().transpose();
+285:         }
+286: 
+287:         // return the cached matrix
+288:         return cachedVt;
+289: 
+290:     }
+
+[36] org.apache.commons.math.linear.SingularValueDecompositionImpl#SingularValueDecompositionImpl  (lines 108-150)
+108:     public SingularValueDecompositionImpl(final RealMatrix matrix, final int max)
+109:         throws InvalidMatrixException {
+110: 
+111:         m = matrix.getRowDimension();
+112:         n = matrix.getColumnDimension();
+113: 
+114:         cachedU  = null;
+115:         cachedS  = null;
+116:         cachedV  = null;
+117:         cachedVt = null;
+118: 
+119:         // transform the matrix to bidiagonal
+120:         transformer         = new BiDiagonalTransformer(matrix);
+121:         mainBidiagonal      = transformer.getMainDiagonalRef();
+122:         secondaryBidiagonal = transformer.getSecondaryDiagonalRef();
+123: 
+124:         // compute Bt.B (if upper diagonal) or B.Bt (if lower diagonal)
+125:         mainTridiagonal      = new double[mainBidiagonal.length];
+126:         secondaryTridiagonal = new double[mainBidiagonal.length - 1];
+127:         double a = mainBidiagonal[0];
+128:         mainTridiagonal[0] = a * a;
+129:         for (int i = 1; i < mainBidiagonal.length; ++i) {
+130:             final double b  = secondaryBidiagonal[i - 1];
+131:             secondaryTridiagonal[i - 1] = a * b;
+132:             a = mainBidiagonal[i];
+133:             mainTridiagonal[i] = a * a + b * b;
+134:         }
+135: 
+136:         // compute singular values
+137:         eigenDecomposition =
+138:             new EigenDecompositionImpl(mainTridiagonal, secondaryTridiagonal,
+139:                                        MathUtils.SAFE_MIN);
+140:         final double[] eigenValues = eigenDecomposition.getRealEigenvalues();
+141:         int p = Math.min(max, eigenValues.length);
+142:         while ((p > 0) && (eigenValues[p - 1] <= 0)) {
+143:             --p;
+144:         }
+145:         singularValues = new double[p];
+146:         for (int i = 0; i < p; ++i) {
+147:             singularValues[i] = Math.sqrt(eigenValues[i]);
+148:         }
+149: 
+150:     }
+
+[37] org.apache.commons.math.linear.Array2DRowRealMatrix#copyIn  (lines 635-637)
+635:     private void copyIn(final double[][] in) {
+636:         setSubMatrix(in, 0, 0);
+637:     }
+
+[38] org.apache.commons.math.linear.Array2DRowRealMatrix#subtract  (lines 248-268)
+248:     public Array2DRowRealMatrix subtract(final Array2DRowRealMatrix m)
+249:         throws IllegalArgumentException {
+250: 
+251:         // safety check
+252:         MatrixUtils.checkSubtractionCompatible(this, m);
+253: 
+254:         final int rowCount    = getRowDimension();
+255:         final int columnCount = getColumnDimension();
+256:         final double[][] outData = new double[rowCount][columnCount];
+257:         for (int row = 0; row < rowCount; row++) {
+258:             final double[] dataRow    = data[row];
+259:             final double[] mRow       = m.data[row];
+260:             final double[] outDataRow = outData[row];
+261:             for (int col = 0; col < columnCount; col++) {
+262:                 outDataRow[col] = dataRow[col] - mRow[col];
+263:             }
+264:         }
+265: 
+266:         return new Array2DRowRealMatrix(outData, false);
+267: 
+268:     }
+
+[39] org.apache.commons.math.linear.Array2DRowRealMatrix#createMatrix  (lines 178-182)
+178:     @Override
+179:     public RealMatrix createMatrix(final int rowDimension, final int columnDimension)
+180:         throws IllegalArgumentException {
+181:         return new Array2DRowRealMatrix(rowDimension, columnDimension);
+182:     }
+
+[40] org.apache.commons.math.linear.Array2DRowRealMatrix#walkInColumnOrder  (lines 561-573)
+561:     @Override
+562:     public double walkInColumnOrder(final RealMatrixPreservingVisitor visitor)
+563:         throws MatrixVisitorException {
+564:         final int rows    = getRowDimension();
+565:         final int columns = getColumnDimension();
+566:         visitor.start(rows, columns, 0, rows - 1, 0, columns - 1);
+567:         for (int j = 0; j < columns; ++j) {
+568:             for (int i = 0; i < rows; ++i) {
+569:                 visitor.visit(i, j, data[i][j]);
+570:             }
+571:         }
+572:         return visitor.end();
+573:     }
+
+[41] org.apache.commons.math.linear.Array2DRowRealMatrix#setEntry  (lines 382-391)
+382:     @Override
+383:     public void setEntry(final int row, final int column, final double value)
+384:         throws MatrixIndexException {
+385:         try {
+386:             data[row][column] = value;
+387:         } catch (ArrayIndexOutOfBoundsException e) {
+388:             throw new MatrixIndexException(
+389:                       NO_ENTRY_MESSAGE, row, column, getRowDimension(), getColumnDimension());
+390:         }
+391:     }
+
+[42] org.apache.commons.math.linear.Array2DRowRealMatrix#walkInRowOrder  (lines 493-506)
+493:     @Override
+494:     public double walkInRowOrder(final RealMatrixPreservingVisitor visitor)
+495:         throws MatrixVisitorException {
+496:         final int rows    = getRowDimension();
+497:         final int columns = getColumnDimension();
+498:         visitor.start(rows, columns, 0, rows - 1, 0, columns - 1);
+499:         for (int i = 0; i < rows; ++i) {
+500:             final double[] rowI = data[i];
+501:             for (int j = 0; j < columns; ++j) {
+502:                 visitor.visit(i, j, rowI[j]);
+503:             }
+504:         }
+505:         return visitor.end();
+506:     }
+
+[43] org.apache.commons.math.linear.ArrayRealVector#ArrayRealVector  (lines 100-109)
+100:     public ArrayRealVector(double[] d, boolean copyArray)
+101:         throws NullPointerException, IllegalArgumentException {
+102:         if (d == null) {
+103:             throw new NullPointerException();
+104:         }
+105:         if (d.length == 0) {
+106:             throw MathRuntimeException.createIllegalArgumentException("vector must have at least one element");
+107:         }
+108:         data = copyArray ? d.clone() :  d;
+109:     }
+
+[44] org.apache.commons.math.linear.Array2DRowRealMatrix#Array2DRowRealMatrix  (lines 133-159)
+133:     public Array2DRowRealMatrix(final double[][] d, final boolean copyArray)
+134:         throws IllegalArgumentException, NullPointerException {
+135:         if (copyArray) {
+136:             copyIn(d);
+137:         } else {
+138:             if (d == null) {
+139:                 throw new NullPointerException();
+140:             }
+141:             final int nRows = d.length;
+142:             if (nRows == 0) {
+143:                 throw MathRuntimeException.createIllegalArgumentException(
+144:                       AT_LEAST_ONE_ROW_MESSAGE);
+145:             }
+146:             final int nCols = d[0].length;
+147:             if (nCols == 0) {
+148:                 throw MathRuntimeException.createIllegalArgumentException(
+149:                       AT_LEAST_ONE_COLUMN_MESSAGE);
+150:             }
+151:             for (int r = 1; r < nRows; r++) {
+152:                 if (d[r].length != nCols) {
+153:                     throw MathRuntimeException.createIllegalArgumentException(
+154:                           DIFFERENT_ROWS_LENGTHS_MESSAGE, nCols, d[r].length);
+155:                 }
+156:             }
+157:             data = d;
+158:         }
+159:     }
+
+[45] org.apache.commons.math.linear.Array2DRowRealMatrix#getEntry  (lines 370-379)
+370:     @Override
+371:     public double getEntry(final int row, final int column)
+372:         throws MatrixIndexException {
+373:         try {
+374:             return data[row][column];
+375:         } catch (ArrayIndexOutOfBoundsException e) {
+376:             throw new MatrixIndexException(
+377:                       NO_ENTRY_MESSAGE, row, column, getRowDimension(), getColumnDimension());
+378:         }
+379:     }
+
+[46] org.apache.commons.math.linear.BiDiagonalTransformer#getV  (lines 167-210)
+167:     public RealMatrix getV() {
+168: 
+169:         if (cachedV == null) {
+170: 
+171:             final int m = householderVectors.length;
+172:             final int n = householderVectors[0].length;
+173:             final int p = main.length;
+174:             final int diagOffset    = (m >= n) ? 1 : 0;
+175:             final double[] diagonal = (m >= n) ? secondary : main;
+176:             cachedV = MatrixUtils.createRealMatrix(n, n);
+177: 
+178:             // fill up the part of the matrix not affected by Householder transforms
+179:             for (int k = n - 1; k >= p; --k) {
+180:                 cachedV.setEntry(k, k, 1);
+181:             }
+182: 
+183:             // build up first part of the matrix by applying Householder transforms
+184:             for (int k = p - 1; k >= diagOffset; --k) {
+185:                 final double[] hK = householderVectors[k - diagOffset];
+186:                 cachedV.setEntry(k, k, 1);
+187:                 if (hK[k] != 0.0) {
+188:                     for (int j = k; j < n; ++j) {
+189:                         double beta = 0;
+190:                         for (int i = k; i < n; ++i) {
+191:                             beta -= cachedV.getEntry(i, j) * hK[i];
+192:                         }
+193:                         beta /= diagonal[k - diagOffset] * hK[k];
+194: 
+195:                         for (int i = k; i < n; ++i) {
+196:                             cachedV.addToEntry(i, j, -beta * hK[i]);
+197:                         }
+198:                     }
+199:                 }
+200:             }
+201:             if (diagOffset > 0) {
+202:                 cachedV.setEntry(0, 0, 1);
+203:             }
+204: 
+205:         }
+206: 
+207:         // return the cached matrix
+208:         return cachedV;
+209: 
+210:     }
+
+[47] org.apache.commons.math.linear.SingularValueDecompositionImpl#getS  (lines 214-224)
+214:     public RealMatrix getS()
+215:         throws InvalidMatrixException {
+216: 
+217:         if (cachedS == null) {
+218: 
+219:             // cache the matrix for subsequent calls
+220:             cachedS = MatrixUtils.createRealDiagonalMatrix(singularValues);
+221: 
+222:         }
+223:         return cachedS;
+224:     }
+
+[48] org.apache.commons.math.linear.AbstractRealMatrix#start  (lines 207-213)
+207:             public void start(final int rows, final int columns,
+208:                               final int startRow, final int endRow,
+209:                               final int startColumn, final int endColumn) {
+210:                 this.endRow = endRow;
+211:                 columnSum   = 0;
+212:                 maxColSum   = 0;
+213:             }
+
+[49] org.apache.commons.math.linear.AbstractRealMatrix#visit  (lines 216-222)
+216:             public void visit(final int row, final int column, final double value) {
+217:                 columnSum += Math.abs(value);
+218:                 if (row == endRow) {
+219:                     maxColSum = Math.max(maxColSum, columnSum);
+220:                     columnSum = 0;
+221:                 }
+222:             }
+
+[50] org.apache.commons.math.linear.EigenDecompositionImpl#stationaryQuotientDifferenceWithShift  (lines 1827-1866)
+1827:     private void stationaryQuotientDifferenceWithShift(final double[] d, final double[] l,
+1828:                                                        final double lambda) {
+1829:         final int nM1 = d.length - 1;
+1830:         double si = -lambda;
+1831:         int sixI = 0;
+1832:         for (int i = 0; i < nM1; ++i) {
+1833:             final double di   = d[i];
+1834:             final double li   = l[i];
+1835:             final double ldi  = li * di;
+1836:             final double diP1 = di + si;
+1837:             final double liP1 = ldi / diP1;
+1838:             work[sixI]        = si;
+1839:             work[sixI + 1]    = diP1;
+1840:             work[sixI + 2]    = liP1;
+1841:             si = li * liP1 * si - lambda;
+1842:             sixI += 6;
+1843:         }
+1844:         if (Double.isNaN(si)) {
+1845:             // one of the pivot was null, use a slower but safer version of dstqds
+1846:             si = -lambda;
+1847:             sixI = 0;
+1848:             for (int i = 0; i < nM1; ++i) {
+1849:                 final double di   = d[i];
+1850:                 final double li   = l[i];
+1851:                 final double ldi  = li * di;
+1852:                 double diP1 = di + si;
+1853:                 if (Math.abs(diP1) < minPivot) {
+1854:                     diP1 = -minPivot;
+1855:                 }
+1856:                 final double liP1 = ldi / diP1;
+1857:                 work[sixI]        = si;
+1858:                 work[sixI + 1]    = diP1;
+1859:                 work[sixI + 2]    = liP1;
+1860:                 si = li * ((liP1 == 0) ? li * di : liP1 * si) - lambda;
+1861:                 sixI += 6;
+1862:             }
+1863:         }
+1864:         work[6 * nM1 + 1] = d[nM1] + si;
+1865:         work[6 * nM1]     = si;
+1866:     }

@@ -1,0 +1,292 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.lang.time.DurationFormatUtilsTest::testJiraLang281
+junit.framework.ComparisonFailure: expected:<[09]> but was:<[-2]>
+	at org.apache.commons.lang.time.DurationFormatUtilsTest.testJiraLang281(DurationFormatUtilsTest.java:436)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.lang.time.DurationFormatUtils#Token  (lines 545-548)
+545:         Token(Object value) {
+546:             this.value = value;
+547:             this.count = 1;
+548:         }
+
+[2] org.apache.commons.lang.time.DurationFormatUtils#lexx  (lines 459-513)
+459:     static Token[] lexx(String format) {
+460:         char[] array = format.toCharArray();
+461:         java.util.ArrayList list = new java.util.ArrayList(array.length);
+462: 
+463:         boolean inLiteral = false;
+464:         StringBuffer buffer = null;
+465:         Token previous = null;
+466:         int sz = array.length;
+467:         for(int i=0; i<sz; i++) {
+468:             char ch = array[i];
+469:             if(inLiteral && ch != '\'') {
+470:                 buffer.append(ch);
+471:                 continue;
+472:             }
+473:             Object value = null;
+474:             switch(ch) {
+475:                 // TODO: Need to handle escaping of '
+476:                 case '\'' : 
+477:                   if(inLiteral) {
+478:                       buffer = null;
+479:                       inLiteral = false;
+480:                   } else {
+481:                       buffer = new StringBuffer();
+482:                       list.add(new Token(buffer));
+483:                       inLiteral = true;
+484:                   }
+485:                   break;
+486:                 case 'y'  : value = y; break;
+487:                 case 'M'  : value = M; break;
+488:                 case 'd'  : value = d; break;
+489:                 case 'H'  : value = H; break;
+490:                 case 'm'  : value = m; break;
+491:                 case 's'  : value = s; break;
+492:                 case 'S'  : value = S; break;
+493:                 default   : 
+494:                   if(buffer == null) {
+495:                       buffer = new StringBuffer();
+496:                       list.add(new Token(buffer));
+497:                   }
+498:                   buffer.append(ch);
+499:             }
+500: 
+501:             if(value != null) {
+502:                 if(previous != null && previous.getValue() == value) {
+503:                     previous.increment();
+504:                 } else {
+505:                     Token token = new Token(value);
+506:                     list.add(token); 
+507:                     previous = token;
+508:                 }
+509:                 buffer = null; 
+510:             }
+511:         }
+512:         return (Token[]) list.toArray( new Token[0] );
+513:     }
+
+[3] org.apache.commons.lang.time.DurationFormatUtils#getValue  (lines 583-585)
+583:         Object getValue() {
+584:             return value;
+585:         }
+
+[4] org.apache.commons.lang.time.DurationFormatUtils#containsTokenWithValue  (lines 527-535)
+527:         static boolean containsTokenWithValue(Token[] tokens, Object value) {
+528:             int sz = tokens.length;
+529:             for (int i = 0; i < sz; i++) {
+530:                 if (tokens[i].getValue() == value) {
+531:                     return true;
+532:                 }
+533:             }
+534:             return false;
+535:         }
+
+[5] org.apache.commons.lang.time.DurationFormatUtils#reduceAndCorrect  (lines 432-443)
+432:     static int reduceAndCorrect(Calendar start, Calendar end, int field, int difference) {
+433:         end.add( field, -1 * difference );
+434:         int endValue = end.get(field);
+435:         int startValue = start.get(field);
+436:         if (endValue < startValue) {
+437:             int newdiff = startValue - endValue;
+438:             end.add( field, newdiff );
+439:             return newdiff;
+440:         } else {
+441:             return 0;
+442:         }
+443:     }
+
+[6] org.apache.commons.lang.time.DurationFormatUtils#formatPeriod  (lines 262-361)
+262:     public static String formatPeriod(long startMillis, long endMillis, String format, boolean padWithZeros, 
+263:             TimeZone timezone) {
+264: 
+265:         long millis = endMillis - startMillis;
+266:         if (millis < 28 * DateUtils.MILLIS_PER_DAY) {
+267:             return formatDuration(millis, format, padWithZeros);
+268:         }
+269: 
+270:         Token[] tokens = lexx(format);
+271: 
+272:         // timezones get funky around 0, so normalizing everything to GMT 
+273:         // stops the hours being off
+274:         Calendar start = Calendar.getInstance(timezone);
+275:         start.setTime(new Date(startMillis));
+276:         Calendar end = Calendar.getInstance(timezone);
+277:         end.setTime(new Date(endMillis));
+278: 
+279:         // initial estimates
+280:         int milliseconds = end.get(Calendar.MILLISECOND) - start.get(Calendar.MILLISECOND);
+281:         int seconds = end.get(Calendar.SECOND) - start.get(Calendar.SECOND);
+282:         int minutes = end.get(Calendar.MINUTE) - start.get(Calendar.MINUTE);
+283:         int hours = end.get(Calendar.HOUR_OF_DAY) - start.get(Calendar.HOUR_OF_DAY);
+284:         int days = end.get(Calendar.DAY_OF_MONTH) - start.get(Calendar.DAY_OF_MONTH);
+285:         int months = end.get(Calendar.MONTH) - start.get(Calendar.MONTH);
+286:         int years = end.get(Calendar.YEAR) - start.get(Calendar.YEAR);
+287: 
+288:         // each initial estimate is adjusted in case it is under 0
+289:         while (milliseconds < 0) {
+290:             milliseconds += 1000;
+291:             seconds -= 1;
+292:         }
+293:         while (seconds < 0) {
+294:             seconds += 60;
+295:             minutes -= 1;
+296:         }
+297:         while (minutes < 0) {
+298:             minutes += 60;
+299:             hours -= 1;
+300:         }
+301:         while (hours < 0) {
+302:             hours += 24;
+303:             days -= 1;
+304:         }
+305:         while (days < 0) {
+306:             days += 31;
+307: //days += 31; // TODO: Need tests to show this is bad and the new code is good.
+308: // HEN: It's a tricky subject. Jan 15th to March 10th. If I count days-first it is 
+309: // 1 month and 26 days, but if I count month-first then it is 1 month and 23 days.
+310: // Also it's contextual - if asked for no M in the format then I should probably 
+311: // be doing no calculating here.
+312:             months -= 1;
+313:         }
+314:         while (months < 0) {
+315:             months += 12;
+316:             years -= 1;
+317:         }
+318:         milliseconds -= reduceAndCorrect(start, end, Calendar.MILLISECOND, milliseconds);
+319:         seconds -= reduceAndCorrect(start, end, Calendar.SECOND, seconds);
+320:         minutes -= reduceAndCorrect(start, end, Calendar.MINUTE, minutes);
+321:         hours -= reduceAndCorrect(start, end, Calendar.HOUR_OF_DAY, hours);
+322:         days -= reduceAndCorrect(start, end, Calendar.DAY_OF_MONTH, days);
+323:         months -= reduceAndCorrect(start, end, Calendar.MONTH, months);
+324:         years -= reduceAndCorrect(start, end, Calendar.YEAR, years);
+325: 
+326:         // This next block of code adds in values that 
+327:         // aren't requested. This allows the user to ask for the 
+328:         // number of months and get the real count and not just 0->11.
+329:         if (!Token.containsTokenWithValue(tokens, y)) {
+330:             if (Token.containsTokenWithValue(tokens, M)) {
+331:                 months += 12 * years;
+332:                 years = 0;
+333:             } else {
+334:                 // TODO: this is a bit weak, needs work to know about leap years
+335:                 days += 365 * years;
+336:                 years = 0;
+337:             }
+338:         }
+339:         if (!Token.containsTokenWithValue(tokens, M)) {
+340:             days += end.get(Calendar.DAY_OF_YEAR) - start.get(Calendar.DAY_OF_YEAR);
+341:             months = 0;
+342:         }
+343:         if (!Token.containsTokenWithValue(tokens, d)) {
+344:             hours += 24 * days;
+345:             days = 0;
+346:         }
+347:         if (!Token.containsTokenWithValue(tokens, H)) {
+348:             minutes += 60 * hours;
+349:             hours = 0;
+350:         }
+351:         if (!Token.containsTokenWithValue(tokens, m)) {
+352:             seconds += 60 * minutes;
+353:             minutes = 0;
+354:         }
+355:         if (!Token.containsTokenWithValue(tokens, s)) {
+356:             milliseconds += 1000 * seconds;
+357:             seconds = 0;
+358:         }
+359: 
+360:         return format(tokens, years, months, days, hours, minutes, seconds, milliseconds, padWithZeros);
+361:     }
+
+[7] org.apache.commons.lang.StringUtils#leftPad  (lines 3864-3876)
+3864:     public static String leftPad(String str, int size, char padChar) {
+3865:         if (str == null) {
+3866:             return null;
+3867:         }
+3868:         int pads = size - str.length();
+3869:         if (pads <= 0) {
+3870:             return str; // returns original String when possible
+3871:         }
+3872:         if (pads > PAD_LIMIT) {
+3873:             return leftPad(str, size, String.valueOf(padChar));
+3874:         }
+3875:         return padding(pads, padChar).concat(str);
+3876:     }
+
+[8] org.apache.commons.lang.time.DurationFormatUtils#getCount  (lines 574-576)
+574:         int getCount() {
+575:             return count;
+576:         }
+
+[9] org.apache.commons.lang.time.DurationFormatUtils#increment  (lines 565-567)
+565:         void increment() { 
+566:             count++;
+567:         }
+
+[10] org.apache.commons.lang.time.DurationFormatUtils#format  (lines 378-431)
+378:     static String format(Token[] tokens, int years, int months, int days, int hours, int minutes, int seconds,
+379:             int milliseconds, boolean padWithZeros) {
+380:         StringBuffer buffer = new StringBuffer();
+381:         boolean lastOutputSeconds = false;
+382:         int sz = tokens.length;
+383:         for (int i = 0; i < sz; i++) {
+384:             Token token = tokens[i];
+385:             Object value = token.getValue();
+386:             int count = token.getCount();
+387:             if (value instanceof StringBuffer) {
+388:                 buffer.append(value.toString());
+389:             } else {
+390:                 if (value == y) {
+391:                     buffer.append(padWithZeros ? StringUtils.leftPad(Integer.toString(years), count, '0') : Integer
+392:                             .toString(years));
+393:                     lastOutputSeconds = false;
+394:                 } else if (value == M) {
+395:                     buffer.append(padWithZeros ? StringUtils.leftPad(Integer.toString(months), count, '0') : Integer
+396:                             .toString(months));
+397:                     lastOutputSeconds = false;
+398:                 } else if (value == d) {
+399:                     buffer.append(padWithZeros ? StringUtils.leftPad(Integer.toString(days), count, '0') : Integer
+400:                             .toString(days));
+401:                     lastOutputSeconds = false;
+402:                 } else if (value == H) {
+403:                     buffer.append(padWithZeros ? StringUtils.leftPad(Integer.toString(hours), count, '0') : Integer
+404:                             .toString(hours));
+405:                     lastOutputSeconds = false;
+406:                 } else if (value == m) {
+407:                     buffer.append(padWithZeros ? StringUtils.leftPad(Integer.toString(minutes), count, '0') : Integer
+408:                             .toString(minutes));
+409:                     lastOutputSeconds = false;
+410:                 } else if (value == s) {
+411:                     buffer.append(padWithZeros ? StringUtils.leftPad(Integer.toString(seconds), count, '0') : Integer
+412:                             .toString(seconds));
+413:                     lastOutputSeconds = true;
+414:                 } else if (value == S) {
+415:                     if (lastOutputSeconds) {
+416:                         milliseconds += 1000;
+417:                         String str = padWithZeros
+418:                                 ? StringUtils.leftPad(Integer.toString(milliseconds), count, '0')
+419:                                 : Integer.toString(milliseconds);
+420:                         buffer.append(str.substring(1));
+421:                     } else {
+422:                         buffer.append(padWithZeros
+423:                                 ? StringUtils.leftPad(Integer.toString(milliseconds), count, '0')
+424:                                 : Integer.toString(milliseconds));
+425:                     }
+426:                     lastOutputSeconds = false;
+427:                 }
+428:             }
+429:         }
+430:         return buffer.toString();
+431:     }
+
+[11] org.apache.commons.lang.time.DurationFormatUtils#formatPeriod  (lines 246-248)
+246:     public static String formatPeriod(long startMillis, long endMillis, String format) {
+247:         return formatPeriod(startMillis, endMillis, format, true, TimeZone.getDefault());
+248:     }

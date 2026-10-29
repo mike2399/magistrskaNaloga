@@ -1,0 +1,1735 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.IntegrationTest::testSingletonGetter1
+junit.framework.AssertionFailedError: 
+Expected: 
+Result: function b(a){a.b=function(){return a.a||(a.a=new a)}}b(function(){});b(function(){})
+Node tree inequality:
+Tree1:
+BLOCK [synthetic: 1]
+	at com.google.javascript.jscomp.IntegrationTest.test(IntegrationTest.java:2006)
+	at com.google.javascript.jscomp.IntegrationTest.test(IntegrationTest.java:1988)
+	at com.google.javascript.jscomp.IntegrationTest.testSingletonGetter1(IntegrationTest.java:1942)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.InlineFunctions#getName  (lines 1056-1059)
+1056:     @Override
+1057:     public String getName() {
+1058:       return var.getFirstChild().getString();
+1059:     }
+
+[2] com.google.javascript.jscomp.OptimizeParameters#isMovableValue  (lines 345-380)
+345:   private boolean isMovableValue(Node n, Scope s) {
+346:     // Things that can change value or are inaccessible can't be moved, these
+347:     // are "this", "arguments", local names, and functions that capture local
+348:     // values.
+349:     switch (n.getType()) {
+350:       case Token.THIS:
+351:         return false;
+352:       case Token.FUNCTION:
+353:         // Don't move function closures.
+354:         // TODO(johnlenz): Closure that only contain global reference can be
+355:         // moved.
+356:         return false;
+357:       case Token.NAME:
+358:         if (n.getString().equals("arguments")) {
+359:           return false;
+360:         } else {
+361:           Var v = s.getVar(n.getString());
+362:           // Make sure that the variable is global. A caught exception, while
+363:           // it is in the global scope object in the compiler, it is not a
+364:           // global variable.
+365:           if (v != null &&
+366:               (v.isLocal() ||
+367:                v.nameNode.getParent().isCatch())) {
+368:             return false;
+369:           }
+370:         }
+371:         break;
+372:     }
+373: 
+374:     for (Node c = n.getFirstChild(); c != null; c = c.getNext()) {
+375:       if (!isMovableValue(c, s)) {
+376:         return false;
+377:       }
+378:     }
+379:     return true;
+380:   }
+
+[3] com.google.javascript.jscomp.AnalyzePrototypeProperties#visit  (lines 249-331)
+249:     @Override
+250:     public void visit(NodeTraversal t, Node n, Node parent) {
+251:       if (n.isGetProp()) {
+252:         String propName = n.getFirstChild().getNext().getString();
+253: 
+254:         if (n.isQualifiedName()) {
+255:           if (propName.equals("prototype")) {
+256:             if (processPrototypeRef(t, n)) {
+257:               return;
+258:             }
+259:           } else if (compiler.getCodingConvention().isExported(propName)) {
+260:             addGlobalUseOfSymbol(propName, t.getModule(), PROPERTY);
+261:             return;
+262:           } else {
+263:             // Do not mark prototype prop assigns as a 'use' in the global scope.
+264:             if (n.getParent().isAssign() && n.getNext() != null) {
+265:               String rValueName = getPrototypePropertyNameFromRValue(n);
+266:               if (rValueName != null) {
+267:                 return;
+268:               }
+269:             }
+270:           }
+271:         }
+272: 
+273:         addSymbolUse(propName, t.getModule(), PROPERTY);
+274:       } else if (n.isObjectLit()) {
+275:         // Make sure that we're not handling object literals being
+276:         // assigned to a prototype, as in:
+277:         // Foo.prototype = {bar: 3, baz: 5};
+278:         String lValueName = NodeUtil.getBestLValueName(
+279:             NodeUtil.getBestLValue(n));
+280:         if (lValueName != null && lValueName.endsWith(".prototype")) {
+281:           return;
+282:         }
+283: 
+284:         // var x = {a: 1, b: 2}
+285:         // should count as a use of property a and b.
+286:         for (Node propNameNode = n.getFirstChild(); propNameNode != null;
+287:              propNameNode = propNameNode.getNext()) {
+288:           // May be STRING, GET, or SET, but NUMBER isn't interesting.
+289:           if (!propNameNode.isQuotedString()) {
+290:             addSymbolUse(propNameNode.getString(), t.getModule(), PROPERTY);
+291:           }
+292:         }
+293:       } else if (n.isName()) {
+294:         String name = n.getString();
+295: 
+296:         Var var = t.getScope().getVar(name);
+297:         if (var != null) {
+298:           // Only process global functions.
+299:           if (var.isGlobal()) {
+300:             if (var.getInitialValue() != null &&
+301:                 var.getInitialValue().isFunction()) {
+302:               if (t.inGlobalScope()) {
+303:                 if (!processGlobalFunctionDeclaration(t, n, var)) {
+304:                   addGlobalUseOfSymbol(name, t.getModule(), VAR);
+305:                 }
+306:               } else {
+307:                 addSymbolUse(name, t.getModule(), VAR);
+308:               }
+309:             }
+310: 
+311:           // If it is not a global, it might be accessing a local of the outer
+312:           // scope. If that's the case the functions between the variable's
+313:           // declaring scope and the variable reference scope cannot be moved.
+314:           } else if (var.getScope() != t.getScope()){
+315:             for (int i = symbolStack.size() - 1; i >= 0; i--) {
+316:               NameContext context = symbolStack.get(i);
+317:               if (context.scope == var.getScope()) {
+318:                 break;
+319:               }
+320: 
+321:               context.name.readClosureVariables = true;
+322:             }
+323:           }
+324:         }
+325:       }
+326: 
+327:       // Process prototype assignments to non-functions.
+328:       if (processNonFunctionPrototypeAssign(n, parent) != null) {
+329:         symbolStack.pop();
+330:       }
+331:     }
+
+[4] com.google.javascript.rhino.Node#toStringTree  (lines 997-999)
+997:   public String toStringTree() {
+998:     return toStringTreeImpl();
+999:   }
+
+[5] com.google.javascript.jscomp.RemoveUnusedVars#getArgumentForCallOrNewOrDotCall  (lines 571-579)
+571:     private static Node getArgumentForCallOrNewOrDotCall(UseSite site,
+572:         final int argIndex) {
+573:       int adjustedArgIndex = argIndex;
+574:       Node parent = site.node.getParent();
+575:       if (NodeUtil.isFunctionObjectCall(parent)) {
+576:         adjustedArgIndex++;
+577:       }
+578:       return NodeUtil.getArgumentForCallOrNew(parent, adjustedArgIndex);
+579:     }
+
+[6] com.google.javascript.jscomp.ShadowVariables#visit  (lines 129-169)
+129:     @Override
+130:     public void visit(NodeTraversal t, Node n, Node parent) {
+131:       // Skipping over non-name nodes and empty function names.
+132:       if (!NodeUtil.isReferenceName(n)) {
+133:         return;
+134:       }
+135: 
+136:       // We focus on shadowing local variables as their name occurs much more
+137:       // than global names.
+138:       // TODO(user): Alternatively, we could experiment with using a local
+139:       // name to shadow a global variable.
+140:       if (t.inGlobalScope()) {
+141:         return;
+142:       }
+143: 
+144:       Var var = t.getScope().getVar(n.getString());
+145:       if (var == null) {
+146:         // extern name or undefined name.
+147:         return;
+148:       }
+149: 
+150:       if (var.getScope().isGlobal()) {
+151:         // We will not shadow a global variable name.
+152:         return;
+153:       }
+154: 
+155:       // Using the definition of upward referencing, fill in the map.
+156:       if (var.getScope() != t.getScope()) {
+157:         for (Scope s = t.getScope();
+158:             s != var.getScope() && s.isLocal(); s = s.getParent()) {
+159:           scopeUpRefMap.put(s.getRootNode(), var.name);
+160:         }
+161:       }
+162: 
+163:       if (var.getScope() == t.getScope()) {
+164:         scopeUpRefMap.put(t.getScopeRoot(), var.name);
+165:       }
+166: 
+167:       // Find in the usage map that tracks a var and all of its usage.
+168:       varToNameUsage.put(var, n);
+169:     }
+
+[7] com.google.javascript.jscomp.OptimizeArgumentsArray#enterScope  (lines 93-110)
+93:   @Override
+94:   public void enterScope(NodeTraversal traversal) {
+95:     Preconditions.checkNotNull(traversal);
+96: 
+97:     // This optimization is valid only within a function so we are going to
+98:     // skip over the initial entry to the global scope.
+99:     Node function = traversal.getScopeRoot();
+100:     if (!function.isFunction()) {
+101:       return;
+102:     }
+103: 
+104:     // Introduces a new access list and stores the access list of the outer
+105:     // scope in the stack if necessary.
+106:     if (currentArgumentsAccess != null) {
+107:       argumentsAccessStack.push(currentArgumentsAccess);
+108:     }
+109:     currentArgumentsAccess = Lists.newLinkedList();
+110:   }
+
+[8] com.google.javascript.rhino.Node#toStringTreeHelper  (lines 1015-1027)
+1015:   private static void toStringTreeHelper(Node n, int level, Appendable sb)
+1016:       throws IOException {
+1017:     for (int i = 0; i != level; ++i) {
+1018:       sb.append("    ");
+1019:     }
+1020:     sb.append(n.toString());
+1021:     sb.append('\n');
+1022:     for (Node cursor = n.getFirstChild();
+1023:          cursor != null;
+1024:          cursor = cursor.getNext()) {
+1025:       toStringTreeHelper(cursor, level + 1, sb);
+1026:     }
+1027:   }
+
+[9] com.google.javascript.jscomp.RemoveUnusedVars#maybeCreateAssign  (lines 919-945)
+919:     static Assign maybeCreateAssign(Node assignNode) {
+920:       Preconditions.checkState(NodeUtil.isAssignmentOp(assignNode));
+921: 
+922:       // Skip one level of GETPROPs or GETELEMs.
+923:       //
+924:       // Don't skip more than one level, because then we get into
+925:       // situations where assigns to properties of properties will always
+926:       // trigger side-effects, and the variable they're on cannot be removed.
+927:       boolean isPropAssign = false;
+928:       Node current = assignNode.getFirstChild();
+929:       if (NodeUtil.isGet(current)) {
+930:         current = current.getFirstChild();
+931:         isPropAssign = true;
+932: 
+933:         if (current.isGetProp() &&
+934:             current.getLastChild().getString().equals("prototype")) {
+935:           // Prototype properties sets should be considered like normal
+936:           // property sets.
+937:           current = current.getFirstChild();
+938:         }
+939:       }
+940: 
+941:       if (current.isName()) {
+942:         return new Assign(assignNode, current, isPropAssign);
+943:       }
+944:       return null;
+945:     }
+
+[10] com.google.javascript.jscomp.SourceFile#toString  (lines 303-306)
+303:   @Override
+304:   public String toString() {
+305:     return fileName;
+306:   }
+
+[11] com.google.javascript.jscomp.PureFunctionIdentifier#visitAssignmentOrUnaryOperator  (lines 526-577)
+526:     private void visitAssignmentOrUnaryOperator(
+527:         FunctionInformation sideEffectInfo,
+528:         Scope scope, Node op, Node lhs, Node rhs) {
+529:       if (lhs.isName()) {
+530:         Var var = scope.getVar(lhs.getString());
+531:         if (var == null || var.scope != scope) {
+532:           sideEffectInfo.setTaintsGlobalState();
+533:         } else {
+534:           // Assignment to local, if the value isn't a safe local value,
+535:           // a literal or new object creation, add it to the local blacklist.
+536:           // parameter values depend on the caller.
+537: 
+538:           // Note: other ops result in the name or prop being assigned a local
+539:           // value (x++ results in a number, for instance)
+540:           Preconditions.checkState(
+541:               NodeUtil.isAssignmentOp(op)
+542:               || isIncDec(op) || op.isDelProp());
+543:           if (rhs != null
+544:               && op.isAssign()
+545:               && !NodeUtil.evaluatesToLocalValue(rhs)) {
+546:             sideEffectInfo.blacklistLocal(var);
+547:           }
+548:         }
+549:       } else if (NodeUtil.isGet(lhs)) {
+550:         if (lhs.getFirstChild().isThis()) {
+551:           sideEffectInfo.setTaintsThis();
+552:         } else {
+553:           Var var = null;
+554:           Node objectNode = lhs.getFirstChild();
+555:           if (objectNode.isName()) {
+556:             var = scope.getVar(objectNode.getString());
+557:           }
+558:           if (var == null || var.scope != scope) {
+559:             sideEffectInfo.setTaintsUnknown();
+560:           } else {
+561:             // Maybe a local object modification.  We won't know for sure until
+562:             // we exit the scope and can validate the value of the local.
+563:             //
+564:             sideEffectInfo.addTaintedLocalObject(var);
+565:           }
+566:         }
+567:       } else {
+568:         // TODO(johnlenz): track down what is inserting NULL on the lhs
+569:         // of an assign.
+570: 
+571:         // The only valid lhs expressions are NAME, GETELEM, or GETPROP.
+572:         // throw new IllegalStateException(
+573:         //     "Unexpected lhs expression:" + lhs.toStringTree()
+574:         //    + ", parent: " + op.toStringTree() );
+575:         sideEffectInfo.setTaintsUnknown();
+576:       }
+577:     }
+
+[12] com.google.javascript.rhino.Node#toStringTreeImpl  (lines 1001-1009)
+1001:   private String toStringTreeImpl() {
+1002:     try {
+1003:       StringBuilder s = new StringBuilder();
+1004:       appendStringTree(s);
+1005:       return s.toString();
+1006:     } catch (IOException e) {
+1007:       throw new RuntimeException("Should not happen\n" + e);
+1008:     }
+1009:   }
+
+[13] com.google.javascript.jscomp.InlineFunctions#FunctionVar  (lines 1052-1054)
+1052:     public FunctionVar(Node var) {
+1053:       this.var = var;
+1054:     }
+
+[14] com.google.javascript.rhino.Node#getSortedPropTypes  (lines 865-879)
+865:   private int[] getSortedPropTypes() {
+866:     int count = 0;
+867:     for (PropListItem x = propListHead; x != null; x = x.getNext()) {
+868:       count++;
+869:     }
+870: 
+871:     int[] keys = new int[count];
+872:     for (PropListItem x = propListHead; x != null; x = x.getNext()) {
+873:       count--;
+874:       keys[count] = x.getType();
+875:     }
+876: 
+877:     Arrays.sort(keys);
+878:     return keys;
+879:   }
+
+[15] com.google.javascript.rhino.Node#toString  (lines 935-994)
+935:   private void toString(
+936:       StringBuilder sb,
+937:       boolean printSource,
+938:       boolean printAnnotations,
+939:       boolean printType) {
+940:     sb.append(Token.name(type));
+941:     if (this instanceof StringNode) {
+942:       sb.append(' ');
+943:       sb.append(getString());
+944:     } else if (type == Token.FUNCTION) {
+945:       sb.append(' ');
+946:       // In the case of JsDoc trees, the first child is often not a string
+947:       // which causes exceptions to be thrown when calling toString or
+948:       // toStringTree.
+949:       if (first == null || first.getType() != Token.NAME) {
+950:         sb.append("<invalid>");
+951:       } else {
+952:         sb.append(first.getString());
+953:       }
+954:     } else if (type == Token.NUMBER) {
+955:       sb.append(' ');
+956:       sb.append(getDouble());
+957:     }
+958:     if (printSource) {
+959:       int lineno = getLineno();
+960:       if (lineno != -1) {
+961:         sb.append(' ');
+962:         sb.append(lineno);
+963:       }
+964:     }
+965: 
+966:     if (printAnnotations) {
+967:       int[] keys = getSortedPropTypes();
+968:       for (int i = 0; i < keys.length; i++) {
+969:         int type = keys[i];
+970:         PropListItem x = lookupProperty(type);
+971:         sb.append(" [");
+972:         sb.append(propToString(type));
+973:         sb.append(": ");
+974:         String value;
+975:         switch (type) {
+976:           default:
+977:             value = x.toString();
+978:             break;
+979:         }
+980:         sb.append(value);
+981:         sb.append(']');
+982:       }
+983:     }
+984: 
+985:     if (printType) {
+986:       if (jsType != null) {
+987:         String jsTypeString = jsType.toString();
+988:         if (jsTypeString != null) {
+989:           sb.append(" : ");
+990:           sb.append(jsTypeString);
+991:         }
+992:       }
+993:     }
+994:   }
+
+[16] com.google.javascript.jscomp.PureFunctionIdentifier#exitScope  (lines 474-513)
+474:     @Override
+475:     public void exitScope(NodeTraversal t) {
+476:       if (t.inGlobalScope()) {
+477:         return;
+478:       }
+479: 
+480:       // Handle deferred local variable modifications:
+481:       //
+482:       FunctionInformation sideEffectInfo =
+483:         functionSideEffectMap.get(t.getScopeRoot());
+484:       if (sideEffectInfo.mutatesGlobalState()){
+485:         sideEffectInfo.resetLocalVars();
+486:         return;
+487:       }
+488: 
+489:       for (Iterator<Var> i = t.getScope().getVars(); i.hasNext();) {
+490:         Var v = i.next();
+491:         boolean localVar = false;
+492:         // Parameters and catch values come can from other scopes.
+493:         if (v.getParentNode().isVar()) {
+494:           // TODO(johnlenz): create a useful parameter list
+495:           sideEffectInfo.knownLocals.add(v.getName());
+496:           localVar = true;
+497:         }
+498: 
+499:         // Take care of locals that might have been tainted.
+500:         if (!localVar || sideEffectInfo.blacklisted.contains(v)) {
+501:           if (sideEffectInfo.taintedLocals.contains(v)) {
+502:             // If the function has global side-effects
+503:             // don't bother with the local side-effects.
+504:             sideEffectInfo.setTaintsUnknown();
+505:             sideEffectInfo.resetLocalVars();
+506:             break;
+507:           }
+508:         }
+509:       }
+510: 
+511:       sideEffectInfo.taintedLocals = null;
+512:       sideEffectInfo.blacklisted = null;
+513:     }
+
+[17] com.google.javascript.rhino.Node#NodeMismatch  (lines 2130-2133)
+2130:     NodeMismatch(Node nodeA, Node nodeB) {
+2131:       this.nodeA = nodeA;
+2132:       this.nodeB = nodeB;
+2133:     }
+
+[18] com.google.javascript.rhino.Node#toString  (lines 349-352)
+349:     @Override
+350:     public String toString() {
+351:       return String.valueOf(intValue);
+352:     }
+
+[19] com.google.javascript.jscomp.PureFunctionIdentifier#markPureFunctionCalls  (lines 307-365)
+307:   private void markPureFunctionCalls() {
+308:     for (Node callNode : allFunctionCalls) {
+309:       Node name = callNode.getFirstChild();
+310:       Collection<Definition> defs =
+311:           getCallableDefinitions(definitionProvider, name);
+312:       // Default to side effects, non-local results
+313:       Node.SideEffectFlags flags = new Node.SideEffectFlags();
+314:       if (defs == null) {
+315:         flags.setMutatesGlobalState();
+316:         flags.setThrows();
+317:         flags.setReturnsTainted();
+318:       } else {
+319:         flags.clearAllFlags();
+320:         for (Definition def : defs) {
+321:           FunctionInformation functionInfo =
+322:               functionSideEffectMap.get(def.getRValue());
+323:           Preconditions.checkNotNull(functionInfo);
+324:           // TODO(johnlenz): set the arguments separately from the
+325:           // global state flag.
+326:           if (functionInfo.mutatesGlobalState()) {
+327:             flags.setMutatesGlobalState();
+328:           }
+329: 
+330:           if (functionInfo.functionThrows) {
+331:             flags.setThrows();
+332:           }
+333: 
+334:           if (!callNode.isNew()) {
+335:             if (functionInfo.taintsThis) {
+336:               flags.setMutatesThis();
+337:             }
+338:           }
+339: 
+340:           if (functionInfo.taintsReturn) {
+341:             flags.setReturnsTainted();
+342:           }
+343: 
+344:           if (flags.areAllFlagsSet()) {
+345:             break;
+346:           }
+347:         }
+348:       }
+349: 
+350:       // Handle special cases (Math, RegEx)
+351:       if (callNode.isCall()) {
+352:         Preconditions.checkState(compiler != null);
+353:         if (!NodeUtil.functionCallHasSideEffects(callNode, compiler)) {
+354:           flags.clearSideEffectFlags();
+355:         }
+356:       } else if (callNode.isNew()) {
+357:         // Handle known cases now (Object, Date, RegExp, etc)
+358:         if (!NodeUtil.constructorCallHasSideEffects(callNode)) {
+359:           flags.clearSideEffectFlags();
+360:         }
+361:       }
+362: 
+363:       callNode.setSideEffectFlags(flags.valueOf());
+364:     }
+365:   }
+
+[20] com.google.javascript.jscomp.GatherSideEffectSubexpressionsCallback#processShortCircuitExpression  (lines 267-282)
+267:   boolean processShortCircuitExpression(Node node) {
+268:     Preconditions.checkArgument(
+269:         (node.isAnd()) || (node.isOr()),
+270:         "Expected: AND or OR, Got: %s", Token.name(node.getType()));
+271: 
+272:     // keep whole expression if rhs of the branching expression
+273:     // contains a call.
+274:     Node left = node.getFirstChild();
+275:     Node right = left.getNext();
+276:     if (NodeUtil.mayHaveSideEffects(right)) {
+277:       accumulator.keepSimplifiedShortCircuitExpression(node);
+278:       return false;
+279:     } else {
+280:       return true;
+281:     }
+282:   }
+
+[21] com.google.javascript.rhino.Node#toString  (lines 921-924)
+921:   @Override
+922:   public String toString() {
+923:     return toString(true, true, true);
+924:   }
+
+[22] com.google.javascript.jscomp.InlineFunctions#trimCanidatesNotMeetingMinimumRequirements  (lines 652-660)
+652:   private void trimCanidatesNotMeetingMinimumRequirements() {
+653:    Iterator<Entry<String, FunctionState>> i;
+654:    for (i = fns.entrySet().iterator(); i.hasNext();) {
+655:      FunctionState fs = i.next().getValue();
+656:      if (!fs.hasExistingFunctionDefinition() || !fs.canInline()) {
+657:        i.remove();
+658:      }
+659:    }
+660:   }
+
+[23] com.google.javascript.jscomp.GatherSideEffectSubexpressionsCallback#shouldTraverse  (lines 221-260)
+221:   @Override
+222:   public boolean shouldTraverse(
+223:       NodeTraversal traversal, Node node, Node parent) {
+224:     if (FORBIDDEN_TYPES.contains(node.getType()) ||
+225:         NodeUtil.isControlStructure(node)) {
+226:       throw new IllegalArgumentException(
+227:           Token.name(node.getType()) + " nodes are not supported.");
+228:     }
+229: 
+230:     // Do not recurse into nested functions.
+231:     if (node.isFunction()) {
+232:       return false;
+233:     }
+234: 
+235:     // simplify and maybe keep hook expression.
+236:     if (node.isHook()) {
+237:       return processHook(node);
+238:     }
+239: 
+240:     // simplify and maybe keep AND/OR expression.
+241:     if ((node.isAnd()) || (node.isOr())) {
+242:       return processShortCircuitExpression(node);
+243:     }
+244: 
+245:     if (!NodeUtil.nodeTypeMayHaveSideEffects(node)) {
+246:       return true;
+247:     } else {
+248: 
+249:       // Node type suggests that the expression has side effects.
+250: 
+251:       if (node.isCall()) {
+252:         return processFunctionCall(node);
+253:       } else if (node.isNew()) {
+254:         return processConstructorCall(node);
+255:       } else {
+256:         accumulator.keepSubTree(node);
+257:         return false;
+258:       }
+259:     }
+260:   }
+
+[24] com.google.javascript.jscomp.OptimizeArgumentsArray#exitScope  (lines 112-139)
+112:   @Override
+113:   public void exitScope(NodeTraversal traversal) {
+114:     Preconditions.checkNotNull(traversal);
+115: 
+116:     // This is the case when we are exiting the global scope where we had never
+117:     // collected argument access list. Since we do not perform this optimization
+118:     // for the global scope, we will skip this exit point.
+119:     if (currentArgumentsAccess == null) {
+120:       return;
+121:     }
+122: 
+123:     // Attempt to replace the argument access and if the AST has been change,
+124:     // report back to the compiler.
+125:     if (tryReplaceArguments(traversal.getScope())) {
+126:       traversal.getCompiler().reportCodeChange();
+127:     }
+128: 
+129:     // After the attempt to replace the arguments. The currentArgumentsAccess
+130:     // is stale and as we exit the Scope, no longer holds all the access to the
+131:     // current scope anymore. We'll pop the access list from the outer scope
+132:     // and set it as currentArgumentsAcess if the outer scope is not the global
+133:     // scope.
+134:     if (!argumentsAccessStack.isEmpty()) {
+135:       currentArgumentsAccess = argumentsAccessStack.pop();
+136:     } else {
+137:       currentArgumentsAccess = null;
+138:     }
+139:   }
+
+[25] com.google.javascript.jscomp.DeadAssignmentsElimination#enterScope  (lines 70-105)
+70:   @Override
+71:   public void enterScope(NodeTraversal t) {
+72:     Scope scope = t.getScope();
+73:     // Global scope _SHOULD_ work, however, liveness won't finish without
+74:     // -Xmx1024 in closure. We might have to look at coding conventions for
+75:     // exported variables as well.
+76:     if (scope.isGlobal()) {
+77:       return;
+78:     }
+79: 
+80:     if (LiveVariablesAnalysis.MAX_VARIABLES_TO_ANALYZE <
+81:         t.getScope().getVarCount()) {
+82:       return;
+83:     }
+84: 
+85:     // We are not going to do any dead assignment elimination in when there is
+86:     // at least one inner function because in most browsers, when there is a
+87:     // closure, ALL the variables are saved (escaped).
+88:     Node fnBlock = t.getScopeRoot().getLastChild();
+89:     if (NodeUtil.containsFunction(fnBlock)) {
+90:       return;
+91:     }
+92: 
+93:     // We don't do any dead assignment elimination if there are no assigns
+94:     // to eliminate. :)
+95:     if (!NodeUtil.has(fnBlock, matchRemovableAssigns,
+96:             Predicates.<Node>alwaysTrue())) {
+97:       return;
+98:     }
+99: 
+100:     // Computes liveness information first.
+101:     ControlFlowGraph<Node> cfg = t.getControlFlowGraph();
+102:     liveness = new LiveVariablesAnalysis(cfg, scope, compiler);
+103:     liveness.analyze();
+104:     tryRemoveDeadAssignments(t, cfg);
+105:   }
+
+[26] com.google.javascript.jscomp.SimpleDefinitionFinder#getNameNodeFromFunctionNode  (lines 415-430)
+415:   static Node getNameNodeFromFunctionNode(Node function) {
+416:     Preconditions.checkState(function.isFunction());
+417:     if (NodeUtil.isFunctionDeclaration(function)) {
+418:       return function.getFirstChild();
+419:     } else {
+420:       Node parent = function.getParent();
+421:       if (NodeUtil.isVarDeclaration(parent)) {
+422:         return parent;
+423:       } else if (parent.isAssign()) {
+424:         return parent.getFirstChild();
+425:       } else if (NodeUtil.isObjectLitKey(parent, parent.getParent())) {
+426:         return parent;
+427:       }
+428:     }
+429:     return null;
+430:   }
+
+[27] com.google.javascript.rhino.Node#checkTreeEqualsImpl  (lines 1431-1450)
+1431:   NodeMismatch checkTreeEqualsImpl(Node node2) {
+1432:     if (!isEquivalentTo(node2, false, false)) {
+1433:       return new NodeMismatch(this, node2);
+1434:     }
+1435: 
+1436:     NodeMismatch res = null;
+1437:     Node n, n2;
+1438:     for (n = first, n2 = node2.first;
+1439:          res == null && n != null;
+1440:          n = n.next, n2 = n2.next) {
+1441:       if (node2 == null) {
+1442:         throw new IllegalStateException();
+1443:       }
+1444:       res = n.checkTreeEqualsImpl(n2);
+1445:       if (res != null) {
+1446:         return res;
+1447:       }
+1448:     }
+1449:     return res;
+1450:   }
+
+[28] com.google.javascript.jscomp.InlineFunctions#maybeAddReference  (lines 490-515)
+490:     void maybeAddReference(NodeTraversal t, FunctionState fs,
+491:         Node callNode, JSModule module) {
+492:       if (!fs.canInline()) {
+493:         return;
+494:       }
+495: 
+496:       boolean referenceAdded = false;
+497:       InliningMode mode = fs.canInlineDirectly()
+498:            ? InliningMode.DIRECT : InliningMode.BLOCK;
+499:       referenceAdded = maybeAddReferenceUsingMode(
+500:           t, fs, callNode, module, mode);
+501:       if (!referenceAdded &&
+502:           mode == InliningMode.DIRECT && blockFunctionInliningEnabled) {
+503:         // This reference can not be directly inlined, see if
+504:         // block replacement inlining is possible.
+505:         mode = InliningMode.BLOCK;
+506:         referenceAdded = maybeAddReferenceUsingMode(
+507:             t, fs, callNode, module, mode);
+508:       }
+509: 
+510:       if (!referenceAdded) {
+511:         // Don't try to remove a function if we can't inline all
+512:         // the references.
+513:         fs.setRemove(false);
+514:       }
+515:     }
+
+[29] com.google.javascript.jscomp.RemoveUnusedPrototypeProperties#removeUnusedSymbols  (lines 81-114)
+81:   private void removeUnusedSymbols(Collection<NameInfo> allNameInfo) {
+82:     boolean changed = false;
+83:     for (NameInfo nameInfo : allNameInfo) {
+84:       if (!nameInfo.isReferenced()) {
+85:         for (Symbol declaration : nameInfo.getDeclarations()) {
+86:           boolean canRemove = false;
+87: 
+88:           if (specializationState == null) {
+89:             canRemove = true;
+90:           } else {
+91:             Node specializableFunction =
+92:               getSpecializableFunctionFromSymbol(declaration);
+93: 
+94:             if (specializableFunction != null) {
+95:               specializationState.reportRemovedFunction(
+96:                   specializableFunction, null);
+97:               canRemove = true;
+98:             }
+99:           }
+100: 
+101:           if (canRemove) {
+102:             declaration.remove();
+103:             changed = true;
+104:           }
+105:         }
+106: 
+107:         logger.fine("Removed unused prototype property: " + nameInfo.name);
+108:       }
+109:     }
+110: 
+111:     if (changed) {
+112:       compiler.reportCodeChange();
+113:     }
+114:   }
+
+[30] com.google.javascript.jscomp.PureFunctionIdentifier#getCallableDefinitions  (lines 189-244)
+189:   private static Collection<Definition> getCallableDefinitions(
+190:       DefinitionProvider definitionProvider, Node name) {
+191:     if (name.isGetProp() || name.isName()) {
+192:       List<Definition> result = Lists.newArrayList();
+193: 
+194:       Collection<Definition> decls =
+195:           definitionProvider.getDefinitionsReferencedAt(name);
+196:       if (decls == null) {
+197:         return null;
+198:       }
+199: 
+200:       for (Definition current : decls) {
+201:         Node rValue = current.getRValue();
+202:         if ((rValue != null) && rValue.isFunction()) {
+203:           result.add(current);
+204:         } else {
+205:           return null;
+206:         }
+207:       }
+208: 
+209:       return result;
+210:     } else if (name.isOr() || name.isHook()) {
+211:       Node firstVal;
+212:       if (name.isHook()) {
+213:         firstVal = name.getFirstChild().getNext();
+214:       } else {
+215:         firstVal = name.getFirstChild();
+216:       }
+217: 
+218:       Collection<Definition> defs1 = getCallableDefinitions(definitionProvider,
+219:                                                             firstVal);
+220:       Collection<Definition> defs2 = getCallableDefinitions(definitionProvider,
+221:                                                             firstVal.getNext());
+222:       if (defs1 != null && defs2 != null) {
+223:         defs1.addAll(defs2);
+224:         return defs1;
+225:       } else {
+226:         return null;
+227:       }
+228:     } else if (NodeUtil.isFunctionExpression(name)) {
+229:       // The anonymous function reference is also the definition.
+230:       // TODO(user) Change SimpleDefinitionFinder so it is possible to query for
+231:       // function expressions by function node.
+232: 
+233:       // isExtern is false in the call to the constructor for the
+234:       // FunctionExpressionDefinition below because we know that
+235:       // getCallableDefinitions() will only be called on the first
+236:       // child of a call and thus the function expression
+237:       // definition will never be an extern.
+238:       return Lists.newArrayList(
+239:           (Definition)
+240:               new DefinitionsRemover.FunctionExpressionDefinition(name, false));
+241:     } else {
+242:       return null;
+243:     }
+244:   }
+
+[31] com.google.javascript.rhino.Node#appendStringTree  (lines 1011-1013)
+1011:   public void appendStringTree(Appendable appendable) throws IOException {
+1012:     toStringTreeHelper(this, 0, appendable);
+1013:   }
+
+[32] com.google.javascript.jscomp.InlineFunctions#hasLocalNames  (lines 314-321)
+314:   private boolean hasLocalNames(Node fnNode) {
+315:     Node block = NodeUtil.getFunctionBody(fnNode);
+316:     return NodeUtil.getFunctionParameters(fnNode).hasChildren()
+317:         || NodeUtil.has(
+318:              block,
+319:              new NodeUtil.MatchDeclaration(),
+320:              new NodeUtil.MatchShallowStatement());
+321:   }
+
+[33] com.google.javascript.rhino.Node#checkTreeEquals  (lines 1414-1424)
+1414:   public String checkTreeEquals(Node node2) {
+1415:       NodeMismatch diff = checkTreeEqualsImpl(node2);
+1416:       if (diff != null) {
+1417:         return "Node tree inequality:" +
+1418:             "\nTree1:\n" + toStringTree() +
+1419:             "\n\nTree2:\n" + node2.toStringTree() +
+1420:             "\n\nSubtree1: " + diff.nodeA.toStringTree() +
+1421:             "\n\nSubtree2: " + diff.nodeB.toStringTree();
+1422:       }
+1423:       return null;
+1424:   }
+
+[34] com.google.javascript.jscomp.CompilationLevel#applyFullCompilationOptions  (lines 131-187)
+131:   private static void applyFullCompilationOptions(CompilerOptions options) {
+132:     // Do not call applySafeCompilationOptions(options) because the call can
+133:     // create possible conflicts between multiple diagnostic groups.
+134: 
+135:     // All the safe optimizations.
+136:     options.closurePass = true;
+137:     options.foldConstants = true;
+138:     options.coalesceVariableNames = true;
+139:     options.deadAssignmentElimination = true;
+140:     options.extractPrototypeMemberDeclarations = true;
+141:     options.collapseVariableDeclarations = true;
+142:     options.convertToDottedProperties = true;
+143:     options.rewriteFunctionExpressions = true;
+144:     options.labelRenaming = true;
+145:     options.removeDeadCode = true;
+146:     options.optimizeArgumentsArray = true;
+147:     options.collapseObjectLiterals = true;
+148:     options.protectHiddenSideEffects = true;
+149: 
+150:     // All the advance optimizations.
+151:     options.removeClosureAsserts = true;
+152:     options.aliasKeywords = true;
+153:     options.reserveRawExports = true;
+154:     options.setRenamingPolicy(
+155:         VariableRenamingPolicy.ALL, PropertyRenamingPolicy.ALL_UNQUOTED);
+156:     options.shadowVariables = true;
+157:     options.removeUnusedPrototypeProperties = true;
+158:     options.removeUnusedPrototypePropertiesInExterns = true;
+159:     options.collapseAnonymousFunctions = true;
+160:     options.collapseProperties = true;
+161:     options.checkGlobalThisLevel = CheckLevel.WARNING;
+162:     options.rewriteFunctionExpressions = true;
+163:     options.smartNameRemoval = true;
+164:     options.inlineConstantVars = true;
+165:     options.setInlineFunctions(Reach.ALL);
+166:     options.inlineGetters = true;
+167:     options.setInlineVariables(Reach.ALL);
+168:     options.flowSensitiveInlineVariables = true;
+169:     options.computeFunctionSideEffects = true;
+170: 
+171:     // Remove unused vars also removes unused functions.
+172:     options.setRemoveUnusedVariables(Reach.ALL);
+173: 
+174:     // Move code around based on the defined modules.
+175:     options.crossModuleCodeMotion = true;
+176:     options.crossModuleMethodMotion = true;
+177: 
+178:     // Call optimizations
+179:     options.devirtualizePrototypeMethods = true;
+180:     options.optimizeParameters = true;
+181:     options.optimizeReturns = true;
+182:     options.optimizeCalls = true;
+183: 
+184:     // Kindly tell the user that they have JsDocs that we don't understand.
+185:     options.setWarningLevel(DiagnosticGroups.NON_STANDARD_JSDOC,
+186:         CheckLevel.WARNING);
+187:   }
+
+[35] com.google.javascript.jscomp.RemoveUnusedVars#interpretAssigns  (lines 704-753)
+704:   private void interpretAssigns() {
+705:     boolean changes = false;
+706:     do {
+707:       changes = false;
+708: 
+709:       // We can't use traditional iterators and iterables for this list,
+710:       // because our lazily-evaluated continuations will modify it while
+711:       // we traverse it.
+712:       for (int current = 0; current < maybeUnreferenced.size(); current++) {
+713:         Var var = maybeUnreferenced.get(current);
+714:         if (referenced.contains(var)) {
+715:           maybeUnreferenced.remove(current);
+716:           current--;
+717:         } else {
+718:           boolean assignedToUnknownValue = false;
+719:           boolean hasPropertyAssign = false;
+720: 
+721:           if (var.getParentNode().isVar() &&
+722:               !NodeUtil.isForIn(var.getParentNode().getParent())) {
+723:             Node value = var.getInitialValue();
+724:             assignedToUnknownValue = value != null &&
+725:                 !NodeUtil.isLiteralValue(value, true);
+726:           } else {
+727:             // This was initialized to a function arg or a catch param
+728:             // or a for...in variable.
+729:             assignedToUnknownValue = true;
+730:           }
+731: 
+732:           boolean maybeEscaped = false;
+733:           for (Assign assign : assignsByVar.get(var)) {
+734:             if (assign.isPropertyAssign) {
+735:               hasPropertyAssign = true;
+736:             } else if (!NodeUtil.isLiteralValue(
+737:                 assign.assignNode.getLastChild(), true)) {
+738:               assignedToUnknownValue = true;
+739:             }
+740:             if (assign.maybeAliased) {
+741:               maybeEscaped = true;
+742:             }
+743:           }
+744: 
+745:           if ((assignedToUnknownValue || maybeEscaped) && hasPropertyAssign) {
+746:             changes = markReferencedVar(var) || changes;
+747:             maybeUnreferenced.remove(current);
+748:             current--;
+749:           }
+750:         }
+751:       }
+752:     } while (changes);
+753:   }
+
+[36] com.google.javascript.jscomp.AnalyzePrototypeProperties#shouldTraverse  (lines 237-247)
+237:     @Override
+238:     public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
+239:       // Process prototype assignments to non-functions.
+240:       String propName = processNonFunctionPrototypeAssign(n, parent);
+241:       if (propName != null) {
+242:         symbolStack.push(
+243:             new NameContext(
+244:                 getNameInfoForName(propName, PROPERTY), null));
+245:       }
+246:       return true;
+247:     }
+
+[37] com.google.javascript.jscomp.ClosureCodingConvention#getSingletonGetterClassName  (lines 256-269)
+256:   @Override
+257:   public String getSingletonGetterClassName(Node callNode) {
+258:     Node callArg = callNode.getFirstChild();
+259:     String callName = callArg.getQualifiedName();
+260: 
+261:     // Use both the original name and the post-CollapseProperties name.
+262:     if (!("goog.addSingletonGetter".equals(callName) ||
+263:           "goog$addSingletonGetter".equals(callName)) ||
+264:         callNode.getChildCount() != 2) {
+265:       return null;
+266:     }
+267: 
+268:     return callArg.getNext().getQualifiedName();
+269:   }
+
+[38] com.google.javascript.jscomp.OptimizeParameters#eliminateParamsAfter  (lines 476-486)
+476:   private boolean eliminateParamsAfter(Node function, int argIndex) {
+477:     boolean paramRemoved = false;
+478: 
+479:     Node formalArgPtr = function.getFirstChild().getNext().getFirstChild();
+480:     while (argIndex != 0 && formalArgPtr != null) {
+481:       formalArgPtr = formalArgPtr.getNext();
+482:       argIndex--;
+483:     }
+484: 
+485:     return eliminateParamsAfter(function, formalArgPtr);
+486:   }
+
+[39] com.google.javascript.jscomp.OptimizeReturns#callResultsMaybeUsed  (lines 76-120)
+76:   private boolean callResultsMaybeUsed(
+77:       SimpleDefinitionFinder defFinder, DefinitionSite definitionSite) {
+78: 
+79:     Definition definition = definitionSite.definition;
+80: 
+81:     // Assume non-function definitions results are used.
+82:     Node rValue = definition.getRValue();
+83:     if (rValue == null || !rValue.isFunction()) {
+84:       return true;
+85:     }
+86: 
+87:     // Be conservative, don't try to optimize any declaration that isn't as
+88:     // simple function declaration or assignment.
+89:     if (!SimpleDefinitionFinder.isSimpleFunctionDeclaration(rValue)) {
+90:       return true;
+91:     }
+92: 
+93:     if (!defFinder.canModifyDefinition(definition)) {
+94:       return true;
+95:     }
+96: 
+97:     Collection<UseSite> useSites = defFinder.getUseSites(definition);
+98:     for (UseSite site : useSites) {
+99:       // Assume indirect definitions references use the result
+100:       Node useNodeParent = site.node.getParent();
+101:       if (isCall(site)) {
+102:         Node callNode = useNodeParent;
+103:         Preconditions.checkState(callNode.isCall());
+104:         if (NodeUtil.isExpressionResultUsed(callNode)) {
+105:           return true;
+106:         }
+107:       } else {
+108:         // Allow a standalone name reference.
+109:         //     var a;
+110:         if (!useNodeParent.isVar()) {
+111:           return true;
+112:         }
+113:       }
+114: 
+115:       // TODO(johnlenz): Add specialization support.
+116:     }
+117: 
+118:     // No possible use of the definition result
+119:     return false;
+120:   }
+
+[40] com.google.javascript.jscomp.InlineFunctions#findNamedFunctions  (lines 175-204)
+175:     public void findNamedFunctions(NodeTraversal t, Node n, Node parent) {
+176:       if (!NodeUtil.isStatement(n)) {
+177:         // There aren't any interesting functions here.
+178:         return;
+179:       }
+180: 
+181:       switch (n.getType()) {
+182:         // Functions expressions in the form of:
+183:         //   var fooFn = function(x) { return ... }
+184:         case Token.VAR:
+185:           Preconditions.checkState(n.hasOneChild());
+186:           Node nameNode = n.getFirstChild();
+187:           if (nameNode.isName() && nameNode.hasChildren()
+188:               && nameNode.getFirstChild().isFunction()) {
+189:             maybeAddFunction(new FunctionVar(n), t.getModule());
+190:           }
+191:           break;
+192: 
+193:         // Named functions
+194:         // function Foo(x) { return ... }
+195:         case Token.FUNCTION:
+196:           Preconditions.checkState(NodeUtil.isStatementBlock(parent)
+197:               || parent.isLabel());
+198:           if (!NodeUtil.isFunctionExpression(n)) {
+199:             Function fn = new NamedFunction(n);
+200:             maybeAddFunction(fn, t.getModule());
+201:           }
+202:           break;
+203:       }
+204:     }
+
+[41] com.google.javascript.rhino.Node#toString  (lines 926-933)
+926:   public String toString(
+927:       boolean printSource,
+928:       boolean printAnnotations,
+929:       boolean printType) {
+930:     StringBuilder sb = new StringBuilder();
+931:     toString(sb, printSource, printAnnotations, printType);
+932:     return sb.toString();
+933:   }
+
+[42] com.google.javascript.jscomp.DefaultPassConfig#getOptimizations  (lines 340-673)
+340:   @Override
+341:   protected List<PassFactory> getOptimizations() {
+342:     List<PassFactory> passes = Lists.newArrayList();
+343:     passes.add(garbageCollectChecks);
+344: 
+345:     // TODO(nicksantos): The order of these passes makes no sense, and needs
+346:     // to be re-arranged.
+347: 
+348:     if (options.runtimeTypeCheck) {
+349:       passes.add(runtimeTypeCheck);
+350:     }
+351: 
+352:     passes.add(createEmptyPass("beforeStandardOptimizations"));
+353: 
+354:     if (options.replaceIdGenerators) {
+355:       passes.add(replaceIdGenerators);
+356:     }
+357: 
+358:     // Optimizes references to the arguments variable.
+359:     if (options.optimizeArgumentsArray) {
+360:       passes.add(optimizeArgumentsArray);
+361:     }
+362: 
+363:     // Abstract method removal works best on minimally modified code, and also
+364:     // only needs to run once.
+365:     if (options.closurePass &&
+366:         (options.removeAbstractMethods || options.removeClosureAsserts)) {
+367:       passes.add(closureCodeRemoval);
+368:     }
+369: 
+370:     // Collapsing properties can undo constant inlining, so we do this before
+371:     // the main optimization loop.
+372:     if (options.collapseProperties) {
+373:       passes.add(collapseProperties);
+374:     }
+375: 
+376:     // ReplaceStrings runs after CollapseProperties in order to simplify
+377:     // pulling in values of constants defined in enums structures.
+378:     if (!options.replaceStringsFunctionDescriptions.isEmpty()) {
+379:       passes.add(replaceStrings);
+380:     }
+381: 
+382:     // Tighten types based on actual usage.
+383:     if (options.tightenTypes) {
+384:       passes.add(tightenTypesBuilder);
+385:     }
+386: 
+387:     // Property disambiguation should only run once and needs to be done
+388:     // soon after type checking, both so that it can make use of type
+389:     // information and so that other passes can take advantage of the renamed
+390:     // properties.
+391:     if (options.disambiguateProperties) {
+392:       passes.add(disambiguateProperties);
+393:     }
+394: 
+395:     if (options.computeFunctionSideEffects) {
+396:       passes.add(markPureFunctions);
+397:     } else if (options.markNoSideEffectCalls) {
+398:       // TODO(user) The properties that this pass adds to CALL and NEW
+399:       // AST nodes increase the AST's in-memory size.  Given that we are
+400:       // already running close to our memory limits, we could run into
+401:       // trouble if we end up using the @nosideeffects annotation a lot
+402:       // or compute @nosideeffects annotations by looking at function
+403:       // bodies.  It should be easy to propagate @nosideeffects
+404:       // annotations as part of passes that depend on this property and
+405:       // store the result outside the AST (which would allow garbage
+406:       // collection once the pass is done).
+407:       passes.add(markNoSideEffectCalls);
+408:     }
+409: 
+410:     if (options.chainCalls) {
+411:       passes.add(chainCalls);
+412:     }
+413: 
+414:     // Constant checking must be done after property collapsing because
+415:     // property collapsing can introduce new constants (e.g. enum values).
+416:     if (options.inlineConstantVars) {
+417:       passes.add(checkConsts);
+418:     }
+419: 
+420:     // The Caja library adds properties to Object.prototype, which breaks
+421:     // most for-in loops.  This adds a check to each loop that skips
+422:     // any property matching /___$/.
+423:     if (options.ignoreCajaProperties) {
+424:       passes.add(ignoreCajaProperties);
+425:     }
+426: 
+427:     assertAllOneTimePasses(passes);
+428: 
+429:     if (options.smartNameRemoval || options.reportPath != null) {
+430:       passes.addAll(getCodeRemovingPasses());
+431:       passes.add(smartNamePass);
+432:     }
+433: 
+434:     // This needs to come after the inline constants pass, which is run within
+435:     // the code removing passes.
+436:     if (options.closurePass) {
+437:       passes.add(closureOptimizePrimitives);
+438:     }
+439: 
+440:     // TODO(user): This forces a first crack at crossModuleCodeMotion
+441:     // before devirtualization. Once certain functions are devirtualized,
+442:     // it confuses crossModuleCodeMotion ability to recognized that
+443:     // it is recursive.
+444: 
+445:     // TODO(user): This is meant for a temporary quick win.
+446:     // In the future, we might want to improve our analysis in
+447:     // CrossModuleCodeMotion so we don't need to do this.
+448:     if (options.crossModuleCodeMotion) {
+449:       passes.add(crossModuleCodeMotion);
+450:     }
+451: 
+452:     // Method devirtualization benefits from property disambiguiation so
+453:     // it should run after that pass but before passes that do
+454:     // optimizations based on global names (like cross module code motion
+455:     // and inline functions).  Smart Name Removal does better if run before
+456:     // this pass.
+457:     if (options.devirtualizePrototypeMethods) {
+458:       passes.add(devirtualizePrototypeMethods);
+459:     }
+460: 
+461:     if (options.customPasses != null) {
+462:       passes.add(getCustomPasses(
+463:           CustomPassExecutionTime.BEFORE_OPTIMIZATION_LOOP));
+464:     }
+465: 
+466:     passes.add(createEmptyPass("beforeMainOptimizations"));
+467: 
+468:     if (options.specializeInitialModule) {
+469:       // When specializing the initial module, we want our fixups to be
+470:       // as lean as possible, so we run the entire optimization loop to a
+471:       // fixed point before specializing, then specialize, and then run the
+472:       // main optimization loop again.
+473: 
+474:       passes.addAll(getMainOptimizationLoop());
+475: 
+476:       if (options.crossModuleCodeMotion) {
+477:         passes.add(crossModuleCodeMotion);
+478:       }
+479: 
+480:       if (options.crossModuleMethodMotion) {
+481:         passes.add(crossModuleMethodMotion);
+482:       }
+483: 
+484:       passes.add(specializeInitialModule.makeOneTimePass());
+485:     }
+486: 
+487:     passes.addAll(getMainOptimizationLoop());
+488: 
+489:     passes.add(createEmptyPass("beforeModuleMotion"));
+490: 
+491:     if (options.crossModuleCodeMotion) {
+492:       passes.add(crossModuleCodeMotion);
+493:     }
+494: 
+495:     if (options.crossModuleMethodMotion) {
+496:       passes.add(crossModuleMethodMotion);
+497:     }
+498: 
+499:     passes.add(createEmptyPass("afterModuleMotion"));
+500: 
+501:     // Some optimizations belong outside the loop because running them more
+502:     // than once would either have no benefit or be incorrect.
+503:     if (options.customPasses != null) {
+504:       passes.add(getCustomPasses(
+505:           CustomPassExecutionTime.AFTER_OPTIMIZATION_LOOP));
+506:     }
+507: 
+508:     if (options.flowSensitiveInlineVariables) {
+509:       passes.add(flowSensitiveInlineVariables);
+510: 
+511:       // After inlining some of the variable uses, some variables are unused.
+512:       // Re-run remove unused vars to clean it up.
+513:       if (options.removeUnusedVars || options.removeUnusedLocalVars) {
+514:         passes.add(removeUnusedVars);
+515:       }
+516:     }
+517: 
+518:     // Running this pass again is required to have goog.events compile down to
+519:     // nothing when compiled on its own.
+520:     if (options.smartNameRemoval) {
+521:       passes.add(smartNamePass2);
+522:     }
+523: 
+524:     if (options.collapseAnonymousFunctions) {
+525:       passes.add(collapseAnonymousFunctions);
+526:     }
+527: 
+528:     // Move functions before extracting prototype member declarations.
+529:     if (options.moveFunctionDeclarations ||
+530:         // renamePrefixNamescape relies on moveFunctionDeclarations
+531:         // to preserve semantics.
+532:         options.renamePrefixNamespace != null) {
+533:       passes.add(moveFunctionDeclarations);
+534:     }
+535: 
+536:     if (options.anonymousFunctionNaming ==
+537:         AnonymousFunctionNamingPolicy.MAPPED) {
+538:       passes.add(nameMappedAnonymousFunctions);
+539:     }
+540: 
+541:     // The mapped name anonymous function pass makes use of information that
+542:     // the extract prototype member declarations pass removes so the former
+543:     // happens before the latter.
+544:     //
+545:     // Extracting prototype properties screws up the heuristic renaming
+546:     // policies, so never run it when those policies are requested.
+547:     if (options.extractPrototypeMemberDeclarations &&
+548:         (options.propertyRenaming != PropertyRenamingPolicy.HEURISTIC &&
+549:          options.propertyRenaming !=
+550:             PropertyRenamingPolicy.AGGRESSIVE_HEURISTIC)) {
+551:       passes.add(extractPrototypeMemberDeclarations);
+552:     }
+553: 
+554:     if (options.ambiguateProperties &&
+555:         (options.propertyRenaming == PropertyRenamingPolicy.ALL_UNQUOTED)) {
+556:       passes.add(ambiguateProperties);
+557:     }
+558: 
+559:     if (options.propertyRenaming != PropertyRenamingPolicy.OFF) {
+560:       passes.add(renameProperties);
+561:     }
+562: 
+563:     // Reserve global names added to the "windows" object.
+564:     if (options.reserveRawExports) {
+565:       passes.add(gatherRawExports);
+566:     }
+567: 
+568:     // This comes after property renaming because quoted property names must
+569:     // not be renamed.
+570:     if (options.convertToDottedProperties) {
+571:       passes.add(convertToDottedProperties);
+572:     }
+573: 
+574:     // Property renaming must happen before this pass runs since this
+575:     // pass may convert dotted properties into quoted properties.  It
+576:     // is beneficial to run before alias strings, alias keywords and
+577:     // variable renaming.
+578:     if (options.rewriteFunctionExpressions) {
+579:       passes.add(rewriteFunctionExpressions);
+580:     }
+581: 
+582:     // This comes after converting quoted property accesses to dotted property
+583:     // accesses in order to avoid aliasing property names.
+584:     if (!options.aliasableStrings.isEmpty() || options.aliasAllStrings) {
+585:       passes.add(aliasStrings);
+586:     }
+587: 
+588:     if (options.aliasExternals) {
+589:       passes.add(aliasExternals);
+590:     }
+591: 
+592:     if (options.aliasKeywords) {
+593:       passes.add(aliasKeywords);
+594:     }
+595: 
+596:     // Passes after this point can no longer depend on normalized AST
+597:     // assumptions.
+598:     passes.add(markUnnormalized);
+599: 
+600:     if (options.coalesceVariableNames) {
+601:       passes.add(coalesceVariableNames);
+602: 
+603:       // coalesceVariables creates identity assignments and more redundant code
+604:       // that can be removed, rerun the peephole optimizations to clean them
+605:       // up.
+606:       if (options.foldConstants) {
+607:         passes.add(peepholeOptimizations);
+608:       }
+609:     }
+610: 
+611:     if (options.collapseVariableDeclarations) {
+612:       passes.add(exploitAssign);
+613:       passes.add(collapseVariableDeclarations);
+614:     }
+615: 
+616:     // This pass works best after collapseVariableDeclarations.
+617:     passes.add(denormalize);
+618: 
+619:     if (options.instrumentationTemplate != null) {
+620:       passes.add(instrumentFunctions);
+621:     }
+622: 
+623:     if (options.variableRenaming != VariableRenamingPolicy.ALL) {
+624:       // If we're leaving some (or all) variables with their old names,
+625:       // then we need to undo any of the markers we added for distinguishing
+626:       // local variables ("$$1").
+627:       passes.add(invertContextualRenaming);
+628:     }
+629: 
+630:     if (options.variableRenaming != VariableRenamingPolicy.OFF) {
+631:       passes.add(renameVars);
+632:     }
+633: 
+634:     if (options.groupVariableDeclarations) {
+635:       passes.add(groupVariableDeclarations);
+636:     }
+637: 
+638:     // This pass should run after names stop changing.
+639:     if (options.processObjectPropertyString) {
+640:       passes.add(objectPropertyStringPostprocess);
+641:     }
+642: 
+643:     if (options.labelRenaming) {
+644:       passes.add(renameLabels);
+645:     }
+646: 
+647:     if (options.foldConstants) {
+648:       passes.add(latePeepholeOptimizations);
+649:     }
+650: 
+651:     if (options.anonymousFunctionNaming ==
+652:         AnonymousFunctionNamingPolicy.UNMAPPED) {
+653:       passes.add(nameUnmappedAnonymousFunctions);
+654:     }
+655: 
+656:     if (options.renamePrefixNamespace != null) {
+657:       if (!GLOBAL_SYMBOL_NAMESPACE_PATTERN.matcher(
+658:           options.renamePrefixNamespace).matches()) {
+659:         throw new IllegalArgumentException(
+660:             "Illegal character in renamePrefixNamespace name: "
+661:             + options.renamePrefixNamespace);
+662:       }
+663:       passes.add(rescopeGlobalSymbols);
+664:     }
+665: 
+666:     passes.add(stripSideEffectProtection);
+667: 
+668:     // Safety checks
+669:     passes.add(sanityCheckAst);
+670:     passes.add(sanityCheckVars);
+671: 
+672:     return passes;
+673:   }
+
+[43] com.google.javascript.jscomp.NodeUtil#getBestLValue  (lines 3032-3051)
+3032:   static Node getBestLValue(Node n) {
+3033:     Node parent = n.getParent();
+3034:     boolean isFunctionDeclaration = isFunctionDeclaration(n);
+3035:     if (isFunctionDeclaration) {
+3036:       return n.getFirstChild();
+3037:     } else if (parent.isName()) {
+3038:       return parent;
+3039:     } else if (parent.isAssign()) {
+3040:       return parent.getFirstChild();
+3041:     } else if (isObjectLitKey(parent, parent.getParent())) {
+3042:       return parent;
+3043:     } else if (
+3044:         (parent.isHook() && parent.getFirstChild() != n) ||
+3045:         parent.isOr() ||
+3046:         parent.isAnd() ||
+3047:         (parent.isComma() && parent.getFirstChild() != n)) {
+3048:       return getBestLValue(parent);
+3049:     }
+3050:     return null;
+3051:   }
+
+[44] com.google.javascript.jscomp.PureFunctionIdentifier#addTaintedLocalObject  (lines 902-904)
+902:     void addTaintedLocalObject(Var var) {
+903:       taintedLocals.add(var);
+904:     }
+
+[45] com.google.javascript.jscomp.PureFunctionIdentifier#visit  (lines 396-467)
+396:     @Override
+397:     public void visit(NodeTraversal traversal, Node node, Node parent) {
+398: 
+399:       if (inExterns) {
+400:         return;
+401:       }
+402: 
+403:       if (!NodeUtil.nodeTypeMayHaveSideEffects(node)
+404:           && !node.isReturn()) {
+405:         return;
+406:       }
+407: 
+408:       if (node.isCall() || node.isNew()) {
+409:         allFunctionCalls.add(node);
+410:       }
+411: 
+412:       Node enclosingFunction = traversal.getEnclosingFunction();
+413:       if (enclosingFunction != null) {
+414:         FunctionInformation sideEffectInfo =
+415:             functionSideEffectMap.get(enclosingFunction);
+416:         Preconditions.checkNotNull(sideEffectInfo);
+417: 
+418:         if (NodeUtil.isAssignmentOp(node)) {
+419:           visitAssignmentOrUnaryOperator(
+420:               sideEffectInfo, traversal.getScope(),
+421:               node, node.getFirstChild(), node.getLastChild());
+422:         } else {
+423:           switch(node.getType()) {
+424:             case Token.CALL:
+425:             case Token.NEW:
+426:               visitCall(sideEffectInfo, node);
+427:               break;
+428:             case Token.DELPROP:
+429:             case Token.DEC:
+430:             case Token.INC:
+431:               visitAssignmentOrUnaryOperator(
+432:                   sideEffectInfo, traversal.getScope(),
+433:                   node, node.getFirstChild(), null);
+434:               break;
+435:             case Token.NAME:
+436:               // Variable definition are not side effects.
+437:               // Just check that the name appears in the context of a
+438:               // variable declaration.
+439:               Preconditions.checkArgument(
+440:                   NodeUtil.isVarDeclaration(node));
+441:               Node value = node.getFirstChild();
+442:               // Assignment to local, if the value isn't a safe local value,
+443:               // new object creation or literal or known primitive result
+444:               // value, add it to the local blacklist.
+445:               if (value != null && !NodeUtil.evaluatesToLocalValue(value)) {
+446:                 Scope scope = traversal.getScope();
+447:                 Var var = scope.getVar(node.getString());
+448:                 sideEffectInfo.blacklistLocal(var);
+449:               }
+450:               break;
+451:             case Token.THROW:
+452:               visitThrow(sideEffectInfo);
+453:               break;
+454:             case Token.RETURN:
+455:               if (node.hasChildren()
+456:                   && !NodeUtil.evaluatesToLocalValue(node.getFirstChild())) {
+457:                 sideEffectInfo.setTaintsReturn();
+458:               }
+459:               break;
+460:             default:
+461:               throw new IllegalArgumentException(
+462:                   "Unhandled side effect node type " +
+463:                   Token.name(node.getType()));
+464:           }
+465:         }
+466:       }
+467:     }
+
+[46] com.google.javascript.jscomp.AnalyzePrototypeProperties#getPrototypePropertyNameFromRValue  (lines 390-416)
+390:     private String getPrototypePropertyNameFromRValue(Node rValue) {
+391:       Node lValue = NodeUtil.getBestLValue(rValue);
+392:       if (lValue == null ||
+393:           lValue.getParent() == null ||
+394:           lValue.getParent().getParent() == null ||
+395:           !(NodeUtil.isObjectLitKey(lValue, lValue.getParent()) ||
+396:             NodeUtil.isExprAssign(lValue.getParent().getParent()))) {
+397:         return null;
+398:       }
+399: 
+400:       String lValueName =
+401:           NodeUtil.getBestLValueName(NodeUtil.getBestLValue(rValue));
+402:       if (lValueName == null) {
+403:         return null;
+404:       }
+405:       int lastDot = lValueName.lastIndexOf('.');
+406:       if (lastDot == -1) {
+407:         return null;
+408:       }
+409: 
+410:       String firstPart = lValueName.substring(0, lastDot);
+411:       if (!firstPart.endsWith(".prototype")) {
+412:         return null;
+413:       }
+414: 
+415:       return lValueName.substring(lastDot + 1);
+416:     }
+
+[47] com.google.javascript.jscomp.InlineFunctions#maybeAddFunction  (lines 242-308)
+242:   private void maybeAddFunction(Function fn, JSModule module) {
+243:     String name = fn.getName();
+244:     FunctionState fs = getOrCreateFunctionState(name);
+245: 
+246:     // TODO(johnlenz): Maybe "smarten" FunctionState by adding this logic
+247:     // to it?
+248: 
+249:     // If the function has multiple definitions, don't inline it.
+250:     if (fs.hasExistingFunctionDefinition()) {
+251:       fs.setInline(false);
+252:     } else {
+253:       // verify the function hasn't already been marked as "don't inline"
+254:       if (fs.canInline()) {
+255:         // store it for use when inlining.
+256:         fs.setFn(fn);
+257:         if (injector.isDirectCallNodeReplacementPossible(
+258:             fn.getFunctionNode())) {
+259:           fs.inlineDirectly(true);
+260:         }
+261: 
+262:         // verify the function meets all the requirements.
+263:         // TODO(johnlenz): Minimum requirement checks are about 5% of the
+264:         // runtime cost of this pass.
+265:         if (!isCandidateFunction(fn)) {
+266:           // It doesn't meet the requirements.
+267:           fs.setInline(false);
+268:         }
+269: 
+270:         // Set the module and gather names that need temporaries.
+271:         if (fs.canInline()) {
+272:           fs.setModule(module);
+273: 
+274:           Node fnNode = fn.getFunctionNode();
+275:           Set<String> namesToAlias =
+276:               FunctionArgumentInjector.findModifiedParameters(fnNode);
+277:           if (!namesToAlias.isEmpty()) {
+278:             fs.inlineDirectly(false);
+279:             fs.setNamesToAlias(namesToAlias);
+280:           }
+281: 
+282:           Node block = NodeUtil.getFunctionBody(fnNode);
+283:           if (NodeUtil.referencesThis(block)) {
+284:             fs.setReferencesThis(true);
+285:           }
+286: 
+287:           if (NodeUtil.containsFunction(block)) {
+288:             fs.setHasInnerFunctions(true);
+289:             // If there are inner functions, we can inline into global scope
+290:             // if there are no local vars or named functions.
+291:             // TODO(johnlenz): this can be improved by looking at the possible
+292:             // values for locals.  If there are simple values, or constants
+293:             // we could still inline.
+294:             if (!assumeMinimumCapture && hasLocalNames(fnNode)) {
+295:               fs.setInline(false);
+296:             }
+297:           }
+298:         }
+299: 
+300:         // Check if block inlining is allowed.
+301:         if (fs.canInline() && !fs.canInlineDirectly()) {
+302:           if (!blockFunctionInliningEnabled) {
+303:             fs.setInline(false);
+304:           }
+305:         }
+306:       }
+307:     }
+308:   }
+
+[48] com.google.javascript.jscomp.InlineFunctions#getFunctionNode  (lines 1061-1064)
+1061:     @Override
+1062:     public Node getFunctionNode() {
+1063:       return var.getFirstChild().getFirstChild();
+1064:     }
+
+[49] com.google.javascript.jscomp.NodeUtil#evaluatesToLocalValue  (lines 2893-2957)
+2893:   static boolean evaluatesToLocalValue(Node value, Predicate<Node> locals) {
+2894:     switch (value.getType()) {
+2895:       case Token.ASSIGN:
+2896:         // A result that is aliased by a non-local name, is the effectively the
+2897:         // same as returning a non-local name, but this doesn't matter if the
+2898:         // value is immutable.
+2899:         return NodeUtil.isImmutableValue(value.getLastChild())
+2900:             || (locals.apply(value)
+2901:                 && evaluatesToLocalValue(value.getLastChild(), locals));
+2902:       case Token.COMMA:
+2903:         return evaluatesToLocalValue(value.getLastChild(), locals);
+2904:       case Token.AND:
+2905:       case Token.OR:
+2906:         return evaluatesToLocalValue(value.getFirstChild(), locals)
+2907:            && evaluatesToLocalValue(value.getLastChild(), locals);
+2908:       case Token.HOOK:
+2909:         return evaluatesToLocalValue(value.getFirstChild().getNext(), locals)
+2910:            && evaluatesToLocalValue(value.getLastChild(), locals);
+2911:       case Token.INC:
+2912:       case Token.DEC:
+2913:         if (value.getBooleanProp(Node.INCRDECR_PROP)) {
+2914:           return evaluatesToLocalValue(value.getFirstChild(), locals);
+2915:         } else {
+2916:           return true;
+2917:         }
+2918:       case Token.THIS:
+2919:         return locals.apply(value);
+2920:       case Token.NAME:
+2921:         return isImmutableValue(value) || locals.apply(value);
+2922:       case Token.GETELEM:
+2923:       case Token.GETPROP:
+2924:         // There is no information about the locality of object properties.
+2925:         return locals.apply(value);
+2926:       case Token.CALL:
+2927:         return callHasLocalResult(value)
+2928:             || isToStringMethodCall(value)
+2929:             || locals.apply(value);
+2930:       case Token.NEW:
+2931:         return newHasLocalResult(value)
+2932:                || locals.apply(value);
+2933:       case Token.FUNCTION:
+2934:       case Token.REGEXP:
+2935:       case Token.ARRAYLIT:
+2936:       case Token.OBJECTLIT:
+2937:         // Literals objects with non-literal children are allowed.
+2938:         return true;
+2939:       case Token.DELPROP:
+2940:       case Token.IN:
+2941:         // TODO(johnlenz): should IN operator be included in #isSimpleOperator?
+2942:         return true;
+2943:       default:
+2944:         // Other op force a local value:
+2945:         //  x = '' + g (x is now an local string)
+2946:         //  x -= g (x is now an local number)
+2947:         if (isAssignmentOp(value)
+2948:             || isSimpleOperator(value)
+2949:             || isImmutableValue(value)) {
+2950:           return true;
+2951:         }
+2952: 
+2953:         throw new IllegalStateException(
+2954:             "Unexpected expression node" + value +
+2955:             "\n parent:" + value.getParent());
+2956:     }
+2957:   }
+
+[50] com.google.javascript.jscomp.NodeUtil#getNthSibling  (lines 2964-2971)
+2964:   private static Node getNthSibling(Node first, int index) {
+2965:     Node sibling = first;
+2966:     while (index != 0 && sibling != null) {
+2967:       sibling = sibling.getNext();
+2968:       index--;
+2969:     }
+2970:     return sibling;
+2971:   }

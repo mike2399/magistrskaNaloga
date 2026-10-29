@@ -1,0 +1,761 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math.optimization.general.MinpackTest::testMinpackJennrichSampson
+junit.framework.AssertionFailedError: expected:<0.2578199266368004> but was:<0.2578330049004441>
+	at org.apache.commons.math.optimization.general.MinpackTest$MinpackFunction.checkTheoreticalMinParams(MinpackTest.java:576)
+	at org.apache.commons.math.optimization.general.MinpackTest.minpackTest(MinpackTest.java:504)
+	at org.apache.commons.math.optimization.general.MinpackTest.testMinpackJennrichSampson(MinpackTest.java:325)
+--- org.apache.commons.math.optimization.general.MinpackTest::testMinpackFreudensteinRoth
+junit.framework.AssertionFailedError: expected:<11.41300466147456> but was:<11.4121122022341>
+	at org.apache.commons.math.optimization.general.MinpackTest$MinpackFunction.checkTheoreticalMinParams(MinpackTest.java:576)
+	at org.apache.commons.math.optimization.general.MinpackTest.minpackTest(MinpackTest.java:504)
+	at org.apache.commons.math.optimization.general.MinpackTest.testMinpackFreudensteinRoth(MinpackTest.java:152)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math.optimization.general.LevenbergMarquardtOptimizer#setParRelativeTolerance  (lines 211-213)
+211:     public void setParRelativeTolerance(double parRelativeTolerance) {
+212:         this.parRelativeTolerance = parRelativeTolerance;
+213:     }
+
+[2] org.apache.commons.math.optimization.general.AbstractLeastSquaresOptimizer#optimize  (lines 317-349)
+317:     public VectorialPointValuePair optimize(final DifferentiableMultivariateVectorialFunction f,
+318:                                             final double[] target, final double[] weights,
+319:                                             final double[] startPoint)
+320:         throws FunctionEvaluationException, OptimizationException, IllegalArgumentException {
+321: 
+322:         if (target.length != weights.length) {
+323:             throw new OptimizationException(LocalizedFormats.DIMENSIONS_MISMATCH_SIMPLE,
+324:                                             target.length, weights.length);
+325:         }
+326: 
+327:         // reset counters
+328:         iterations           = 0;
+329:         objectiveEvaluations = 0;
+330:         jacobianEvaluations  = 0;
+331: 
+332:         // store least squares problem characteristics
+333:         function         = f;
+334:         jF               = f.jacobian();
+335:         targetValues     = target.clone();
+336:         residualsWeights = weights.clone();
+337:         this.point       = startPoint.clone();
+338:         this.residuals   = new double[target.length];
+339: 
+340:         // arrays shared with the other private methods
+341:         rows      = target.length;
+342:         cols      = point.length;
+343:         jacobian  = new double[rows][cols];
+344: 
+345:         cost = Double.POSITIVE_INFINITY;
+346: 
+347:         return doOptimize();
+348: 
+349:     }
+
+[3] org.apache.commons.math.optimization.general.LevenbergMarquardtOptimizer#LevenbergMarquardtOptimizer  (lines 166-179)
+166:     public LevenbergMarquardtOptimizer() {
+167: 
+168:         // set up the superclass with a default  max cost evaluations setting
+169:         setMaxIterations(1000);
+170: 
+171:         // default values for the tuning parameters
+172:         setConvergenceChecker(null);
+173:         setInitialStepBoundFactor(100.0);
+174:         setCostRelativeTolerance(1.0e-10);
+175:         setParRelativeTolerance(1.0e-10);
+176:         setOrthoTolerance(1.0e-10);
+177:         setQRRankingThreshold(MathUtils.SAFE_MIN);
+178: 
+179:     }
+
+[4] org.apache.commons.math.optimization.general.AbstractLeastSquaresOptimizer#getRMS  (lines 239-241)
+239:     public double getRMS() {
+240:         return Math.sqrt(getChiSquare() / rows);
+241:     }
+
+[5] org.apache.commons.math.optimization.general.AbstractLeastSquaresOptimizer#setConvergenceChecker  (lines 158-160)
+158:     public void setConvergenceChecker(VectorialConvergenceChecker convergenceChecker) {
+159:         this.checker = convergenceChecker;
+160:     }
+
+[6] org.apache.commons.math.optimization.general.LevenbergMarquardtOptimizer#doOptimize  (lines 240-464)
+240:     @Override
+241:     protected VectorialPointValuePair doOptimize()
+242:         throws FunctionEvaluationException, OptimizationException, IllegalArgumentException {
+243: 
+244:         // arrays shared with the other private methods
+245:         solvedCols  = Math.min(rows, cols);
+246:         diagR       = new double[cols];
+247:         jacNorm     = new double[cols];
+248:         beta        = new double[cols];
+249:         permutation = new int[cols];
+250:         lmDir       = new double[cols];
+251: 
+252:         // local point
+253:         double   delta   = 0;
+254:         double   xNorm   = 0;
+255:         double[] diag    = new double[cols];
+256:         double[] oldX    = new double[cols];
+257:         double[] oldRes  = new double[rows];
+258:         double[] work1   = new double[cols];
+259:         double[] work2   = new double[cols];
+260:         double[] work3   = new double[cols];
+261: 
+262:         // evaluate the function at the starting point and calculate its norm
+263:         updateResidualsAndCost();
+264: 
+265:         // outer loop
+266:         lmPar = 0;
+267:         boolean firstIteration = true;
+268:         VectorialPointValuePair current = new VectorialPointValuePair(point, objective);
+269:         while (true) {
+270:             incrementIterationsCounter();
+271: 
+272:             // compute the Q.R. decomposition of the jacobian matrix
+273:             VectorialPointValuePair previous = current;
+274:             updateJacobian();
+275:             qrDecomposition();
+276: 
+277:             // compute Qt.res
+278:             qTy(residuals);
+279:             // now we don't need Q anymore,
+280:             // so let jacobian contain the R matrix with its diagonal elements
+281:             for (int k = 0; k < solvedCols; ++k) {
+282:                 int pk = permutation[k];
+283:                 jacobian[k][pk] = diagR[pk];
+284:             }
+285: 
+286:             if (firstIteration) {
+287: 
+288:                 // scale the point according to the norms of the columns
+289:                 // of the initial jacobian
+290:                 xNorm = 0;
+291:                 for (int k = 0; k < cols; ++k) {
+292:                     double dk = jacNorm[k];
+293:                     if (dk == 0) {
+294:                         dk = 1.0;
+295:                     }
+296:                     double xk = dk * point[k];
+297:                     xNorm  += xk * xk;
+298:                     diag[k] = dk;
+299:                 }
+300:                 xNorm = Math.sqrt(xNorm);
+301: 
+302:                 // initialize the step bound delta
+303:                 delta = (xNorm == 0) ? initialStepBoundFactor : (initialStepBoundFactor * xNorm);
+304: 
+305:             }
+306: 
+307:             // check orthogonality between function vector and jacobian columns
+308:             double maxCosine = 0;
+309:             if (cost != 0) {
+310:                 for (int j = 0; j < solvedCols; ++j) {
+311:                     int    pj = permutation[j];
+312:                     double s  = jacNorm[pj];
+313:                     if (s != 0) {
+314:                         double sum = 0;
+315:                         for (int i = 0; i <= j; ++i) {
+316:                             sum += jacobian[i][pj] * residuals[i];
+317:                         }
+318:                         maxCosine = Math.max(maxCosine, Math.abs(sum) / (s * cost));
+319:                     }
+320:                 }
+321:             }
+322:             if (maxCosine <= orthoTolerance) {
+323:                 // convergence has been reached
+324:                 return current;
+325:             }
+326: 
+327:             // rescale if necessary
+328:             for (int j = 0; j < cols; ++j) {
+329:                 diag[j] = Math.max(diag[j], jacNorm[j]);
+330:             }
+331: 
+332:             // inner loop
+333:             for (double ratio = 0; ratio < 1.0e-4;) {
+334: 
+335:                 // save the state
+336:                 for (int j = 0; j < solvedCols; ++j) {
+337:                     int pj = permutation[j];
+338:                     oldX[pj] = point[pj];
+339:                 }
+340:                 double previousCost = cost;
+341:                 double[] tmpVec = residuals;
+342:                 residuals = oldRes;
+343:                 oldRes    = tmpVec;
+344: 
+345:                 // determine the Levenberg-Marquardt parameter
+346:                 determineLMParameter(oldRes, delta, diag, work1, work2, work3);
+347: 
+348:                 // compute the new point and the norm of the evolution direction
+349:                 double lmNorm = 0;
+350:                 for (int j = 0; j < solvedCols; ++j) {
+351:                     int pj = permutation[j];
+352:                     lmDir[pj] = -lmDir[pj];
+353:                     point[pj] = oldX[pj] + lmDir[pj];
+354:                     double s = diag[pj] * lmDir[pj];
+355:                     lmNorm  += s * s;
+356:                 }
+357:                 lmNorm = Math.sqrt(lmNorm);
+358:                 // on the first iteration, adjust the initial step bound.
+359:                 if (firstIteration) {
+360:                     delta = Math.min(delta, lmNorm);
+361:                 }
+362: 
+363:                 // evaluate the function at x + p and calculate its norm
+364:                 updateResidualsAndCost();
+365:                 current = new VectorialPointValuePair(point, objective);
+366: 
+367:                 // compute the scaled actual reduction
+368:                 double actRed = -1.0;
+369:                 if (0.1 * cost < previousCost) {
+370:                     double r = cost / previousCost;
+371:                     actRed = 1.0 - r * r;
+372:                 }
+373: 
+374:                 // compute the scaled predicted reduction
+375:                 // and the scaled directional derivative
+376:                 for (int j = 0; j < solvedCols; ++j) {
+377:                     int pj = permutation[j];
+378:                     double dirJ = lmDir[pj];
+379:                     work1[j] = 0;
+380:                     for (int i = 0; i <= j; ++i) {
+381:                         work1[i] += jacobian[i][pj] * dirJ;
+382:                     }
+383:                 }
+384:                 double coeff1 = 0;
+385:                 for (int j = 0; j < solvedCols; ++j) {
+386:                     coeff1 += work1[j] * work1[j];
+387:                 }
+388:                 double pc2 = previousCost * previousCost;
+389:                 coeff1 = coeff1 / pc2;
+390:                 double coeff2 = lmPar * lmNorm * lmNorm / pc2;
+391:                 double preRed = coeff1 + 2 * coeff2;
+392:                 double dirDer = -(coeff1 + coeff2);
+393: 
+394:                 // ratio of the actual to the predicted reduction
+395:                 ratio = (preRed == 0) ? 0 : (actRed / preRed);
+396: 
+397:                 // update the step bound
+398:                 if (ratio <= 0.25) {
+399:                     double tmp =
+400:                         (actRed < 0) ? (0.5 * dirDer / (dirDer + 0.5 * actRed)) : 0.5;
+401:                         if ((0.1 * cost >= previousCost) || (tmp < 0.1)) {
+402:                             tmp = 0.1;
+403:                         }
+404:                         delta = tmp * Math.min(delta, 10.0 * lmNorm);
+405:                         lmPar /= tmp;
+406:                 } else if ((lmPar == 0) || (ratio >= 0.75)) {
+407:                     delta = 2 * lmNorm;
+408:                     lmPar *= 0.5;
+409:                 }
+410: 
+411:                 // test for successful iteration.
+412:                 if (ratio >= 1.0e-4) {
+413:                     // successful iteration, update the norm
+414:                     firstIteration = false;
+415:                     xNorm = 0;
+416:                     for (int k = 0; k < cols; ++k) {
+417:                         double xK = diag[k] * point[k];
+418:                         xNorm    += xK * xK;
+419:                     }
+420:                     xNorm = Math.sqrt(xNorm);
+421: 
+422:                     // tests for convergence.
+423:                     // we use the vectorial convergence checker
+424:                 } else {
+425:                     // failed iteration, reset the previous values
+426:                     cost = previousCost;
+427:                     for (int j = 0; j < solvedCols; ++j) {
+428:                         int pj = permutation[j];
+429:                         point[pj] = oldX[pj];
+430:                     }
+431:                     tmpVec    = residuals;
+432:                     residuals = oldRes;
+433:                     oldRes    = tmpVec;
+434:                 }
+435:                 if (checker==null) {
+436:                 	if (((Math.abs(actRed) <= costRelativeTolerance) &&
+437:                         (preRed <= costRelativeTolerance) &&
+438:                         (ratio <= 2.0)) ||
+439:                        (delta <= parRelativeTolerance * xNorm)) {
+440:                        return current;
+441:                    }
+442:                 } else {
+443:                     if (checker.converged(getIterations(), previous, current)) {
+444:                         return current;
+445:                     }
+446:                 }
+447:                 // tests for termination and stringent tolerances
+448:                 // (2.2204e-16 is the machine epsilon for IEEE754)
+449:                 if ((Math.abs(actRed) <= 2.2204e-16) && (preRed <= 2.2204e-16) && (ratio <= 2.0)) {
+450:                     throw new OptimizationException(LocalizedFormats.TOO_SMALL_COST_RELATIVE_TOLERANCE,
+451:                             costRelativeTolerance);
+452:                 } else if (delta <= 2.2204e-16 * xNorm) {
+453:                     throw new OptimizationException(LocalizedFormats.TOO_SMALL_PARAMETERS_RELATIVE_TOLERANCE,
+454:                             parRelativeTolerance);
+455:                 } else if (maxCosine <= 2.2204e-16)  {
+456:                     throw new OptimizationException(LocalizedFormats.TOO_SMALL_ORTHOGONALITY_TOLERANCE,
+457:                             orthoTolerance);
+458:                 }
+459: 
+460:             }
+461: 
+462:         }
+463: 
+464:     }
+
+[7] org.apache.commons.math.optimization.SimpleVectorialValueChecker#SimpleVectorialValueChecker  (lines 50-53)
+50:     public SimpleVectorialValueChecker() {
+51:         this.relativeThreshold = DEFAULT_RELATIVE_THRESHOLD;
+52:         this.absoluteThreshold = DEFAULT_ABSOLUTE_THRESHOLD;
+53:     }
+
+[8] org.apache.commons.math.optimization.general.AbstractLeastSquaresOptimizer#getChiSquare  (lines 249-251)
+249:     public double getChiSquare() {
+250:         return cost*cost;
+251:     }
+
+[9] org.apache.commons.math.optimization.general.LevenbergMarquardtOptimizer#qTy  (lines 858-870)
+858:     private void qTy(double[] y) {
+859:         for (int k = 0; k < cols; ++k) {
+860:             int pk = permutation[k];
+861:             double gamma = 0;
+862:             for (int i = k; i < rows; ++i) {
+863:                 gamma += jacobian[i][pk] * y[i];
+864:             }
+865:             gamma *= beta[pk];
+866:             for (int i = k; i < rows; ++i) {
+867:                 y[i] -= gamma * jacobian[i][pk];
+868:             }
+869:         }
+870:     }
+
+[10] org.apache.commons.math.optimization.general.LevenbergMarquardtOptimizer#setInitialStepBoundFactor  (lines 190-192)
+190:     public void setInitialStepBoundFactor(double initialStepBoundFactor) {
+191:         this.initialStepBoundFactor = initialStepBoundFactor;
+192:     }
+
+[11] org.apache.commons.math.optimization.general.LevenbergMarquardtOptimizer#setOrthoTolerance  (lines 222-224)
+222:     public void setOrthoTolerance(double orthoTolerance) {
+223:         this.orthoTolerance = orthoTolerance;
+224:     }
+
+[12] org.apache.commons.math.optimization.VectorialPointValuePair#VectorialPointValuePair  (lines 46-49)
+46:     public VectorialPointValuePair(final double[] point, final double[] value) {
+47:         this.point = (point == null) ? null : point.clone();
+48:         this.value = (value == null) ? null : value.clone();
+49:     }
+
+[13] org.apache.commons.math.optimization.general.AbstractLeastSquaresOptimizer#AbstractLeastSquaresOptimizer  (lines 116-120)
+116:     protected AbstractLeastSquaresOptimizer() {
+117:         setConvergenceChecker(new SimpleVectorialValueChecker());
+118:         setMaxIterations(DEFAULT_MAX_ITERATIONS);
+119:         setMaxEvaluations(Integer.MAX_VALUE);
+120:     }
+
+[14] org.apache.commons.math.optimization.general.LevenbergMarquardtOptimizer#determineLMDirection  (lines 657-759)
+657:     private void determineLMDirection(double[] qy, double[] diag,
+658:             double[] lmDiag, double[] work) {
+659: 
+660:         // copy R and Qty to preserve input and initialize s
+661:         //  in particular, save the diagonal elements of R in lmDir
+662:         for (int j = 0; j < solvedCols; ++j) {
+663:             int pj = permutation[j];
+664:             for (int i = j + 1; i < solvedCols; ++i) {
+665:                 jacobian[i][pj] = jacobian[j][permutation[i]];
+666:             }
+667:             lmDir[j] = diagR[pj];
+668:             work[j]  = qy[j];
+669:         }
+670: 
+671:         // eliminate the diagonal matrix d using a Givens rotation
+672:         for (int j = 0; j < solvedCols; ++j) {
+673: 
+674:             // prepare the row of d to be eliminated, locating the
+675:             // diagonal element using p from the Q.R. factorization
+676:             int pj = permutation[j];
+677:             double dpj = diag[pj];
+678:             if (dpj != 0) {
+679:                 Arrays.fill(lmDiag, j + 1, lmDiag.length, 0);
+680:             }
+681:             lmDiag[j] = dpj;
+682: 
+683:             //  the transformations to eliminate the row of d
+684:             // modify only a single element of Qty
+685:             // beyond the first n, which is initially zero.
+686:             double qtbpj = 0;
+687:             for (int k = j; k < solvedCols; ++k) {
+688:                 int pk = permutation[k];
+689: 
+690:                 // determine a Givens rotation which eliminates the
+691:                 // appropriate element in the current row of d
+692:                 if (lmDiag[k] != 0) {
+693: 
+694:                     final double sin;
+695:                     final double cos;
+696:                     double rkk = jacobian[k][pk];
+697:                     if (Math.abs(rkk) < Math.abs(lmDiag[k])) {
+698:                         final double cotan = rkk / lmDiag[k];
+699:                         sin   = 1.0 / Math.sqrt(1.0 + cotan * cotan);
+700:                         cos   = sin * cotan;
+701:                     } else {
+702:                         final double tan = lmDiag[k] / rkk;
+703:                         cos = 1.0 / Math.sqrt(1.0 + tan * tan);
+704:                         sin = cos * tan;
+705:                     }
+706: 
+707:                     // compute the modified diagonal element of R and
+708:                     // the modified element of (Qty,0)
+709:                     jacobian[k][pk] = cos * rkk + sin * lmDiag[k];
+710:                     final double temp = cos * work[k] + sin * qtbpj;
+711:                     qtbpj = -sin * work[k] + cos * qtbpj;
+712:                     work[k] = temp;
+713: 
+714:                     // accumulate the tranformation in the row of s
+715:                     for (int i = k + 1; i < solvedCols; ++i) {
+716:                         double rik = jacobian[i][pk];
+717:                         final double temp2 = cos * rik + sin * lmDiag[i];
+718:                         lmDiag[i] = -sin * rik + cos * lmDiag[i];
+719:                         jacobian[i][pk] = temp2;
+720:                     }
+721: 
+722:                 }
+723:             }
+724: 
+725:             // store the diagonal element of s and restore
+726:             // the corresponding diagonal element of R
+727:             lmDiag[j] = jacobian[j][permutation[j]];
+728:             jacobian[j][permutation[j]] = lmDir[j];
+729: 
+730:         }
+731: 
+732:         // solve the triangular system for z, if the system is
+733:         // singular, then obtain a least squares solution
+734:         int nSing = solvedCols;
+735:         for (int j = 0; j < solvedCols; ++j) {
+736:             if ((lmDiag[j] == 0) && (nSing == solvedCols)) {
+737:                 nSing = j;
+738:             }
+739:             if (nSing < solvedCols) {
+740:                 work[j] = 0;
+741:             }
+742:         }
+743:         if (nSing > 0) {
+744:             for (int j = nSing - 1; j >= 0; --j) {
+745:                 int pj = permutation[j];
+746:                 double sum = 0;
+747:                 for (int i = j + 1; i < nSing; ++i) {
+748:                     sum += jacobian[i][pj] * work[i];
+749:                 }
+750:                 work[j] = (work[j] - sum) / lmDiag[j];
+751:             }
+752:         }
+753: 
+754:         // permute the components of z back to components of lmDir
+755:         for (int j = 0; j < lmDir.length; ++j) {
+756:             lmDir[permutation[j]] = work[j];
+757:         }
+758: 
+759:     }
+
+[15] org.apache.commons.math.optimization.general.AbstractLeastSquaresOptimizer#setMaxIterations  (lines 123-125)
+123:     public void setMaxIterations(int maxIterations) {
+124:         this.maxIterations = maxIterations;
+125:     }
+
+[16] org.apache.commons.math.optimization.general.LevenbergMarquardtOptimizer#setCostRelativeTolerance  (lines 200-202)
+200:     public void setCostRelativeTolerance(double costRelativeTolerance) {
+201:         this.costRelativeTolerance = costRelativeTolerance;
+202:     }
+
+[17] org.apache.commons.math.optimization.general.AbstractLeastSquaresOptimizer#incrementIterationsCounter  (lines 171-176)
+171:     protected void incrementIterationsCounter()
+172:         throws OptimizationException {
+173:         if (++iterations > maxIterations) {
+174:             throw new OptimizationException(new MaxIterationsExceededException(maxIterations));
+175:         }
+176:     }
+
+[18] org.apache.commons.math.optimization.general.LevenbergMarquardtOptimizer#qrDecomposition  (lines 783-851)
+783:     private void qrDecomposition() throws OptimizationException {
+784: 
+785:         // initializations
+786:         for (int k = 0; k < cols; ++k) {
+787:             permutation[k] = k;
+788:             double norm2 = 0;
+789:             for (int i = 0; i < jacobian.length; ++i) {
+790:                 double akk = jacobian[i][k];
+791:                 norm2 += akk * akk;
+792:             }
+793:             jacNorm[k] = Math.sqrt(norm2);
+794:         }
+795: 
+796:         // transform the matrix column after column
+797:         for (int k = 0; k < cols; ++k) {
+798: 
+799:             // select the column with the greatest norm on active components
+800:             int nextColumn = -1;
+801:             double ak2 = Double.NEGATIVE_INFINITY;
+802:             for (int i = k; i < cols; ++i) {
+803:                 double norm2 = 0;
+804:                 for (int j = k; j < jacobian.length; ++j) {
+805:                     double aki = jacobian[j][permutation[i]];
+806:                     norm2 += aki * aki;
+807:                 }
+808:                 if (Double.isInfinite(norm2) || Double.isNaN(norm2)) {
+809:                     throw new OptimizationException(LocalizedFormats.UNABLE_TO_PERFORM_QR_DECOMPOSITION_ON_JACOBIAN,
+810:                             rows, cols);
+811:                 }
+812:                 if (norm2 > ak2) {
+813:                     nextColumn = i;
+814:                     ak2        = norm2;
+815:                 }
+816:             }
+817:             if (ak2 <= qrRankingThreshold) {
+818:                 rank = k;
+819:                 return;
+820:             }
+821:             int pk                  = permutation[nextColumn];
+822:             permutation[nextColumn] = permutation[k];
+823:             permutation[k]          = pk;
+824: 
+825:             // choose alpha such that Hk.u = alpha ek
+826:             double akk   = jacobian[k][pk];
+827:             double alpha = (akk > 0) ? -Math.sqrt(ak2) : Math.sqrt(ak2);
+828:             double betak = 1.0 / (ak2 - akk * alpha);
+829:             beta[pk]     = betak;
+830: 
+831:             // transform the current column
+832:             diagR[pk]        = alpha;
+833:             jacobian[k][pk] -= alpha;
+834: 
+835:             // transform the remaining columns
+836:             for (int dk = cols - 1 - k; dk > 0; --dk) {
+837:                 double gamma = 0;
+838:                 for (int j = k; j < jacobian.length; ++j) {
+839:                     gamma += jacobian[j][pk] * jacobian[j][permutation[k + dk]];
+840:                 }
+841:                 gamma *= betak;
+842:                 for (int j = k; j < jacobian.length; ++j) {
+843:                     jacobian[j][permutation[k + dk]] -= gamma * jacobian[j][pk];
+844:                 }
+845:             }
+846: 
+847:         }
+848: 
+849:         rank = solvedCols;
+850: 
+851:     }
+
+[19] org.apache.commons.math.optimization.general.LevenbergMarquardtOptimizer#determineLMParameter  (lines 488-635)
+488:     private void determineLMParameter(double[] qy, double delta, double[] diag,
+489:             double[] work1, double[] work2, double[] work3) {
+490: 
+491:         // compute and store in x the gauss-newton direction, if the
+492:         // jacobian is rank-deficient, obtain a least squares solution
+493:         for (int j = 0; j < rank; ++j) {
+494:             lmDir[permutation[j]] = qy[j];
+495:         }
+496:         for (int j = rank; j < cols; ++j) {
+497:             lmDir[permutation[j]] = 0;
+498:         }
+499:         for (int k = rank - 1; k >= 0; --k) {
+500:             int pk = permutation[k];
+501:             double ypk = lmDir[pk] / diagR[pk];
+502:             for (int i = 0; i < k; ++i) {
+503:                 lmDir[permutation[i]] -= ypk * jacobian[i][pk];
+504:             }
+505:             lmDir[pk] = ypk;
+506:         }
+507: 
+508:         // evaluate the function at the origin, and test
+509:         // for acceptance of the Gauss-Newton direction
+510:         double dxNorm = 0;
+511:         for (int j = 0; j < solvedCols; ++j) {
+512:             int pj = permutation[j];
+513:             double s = diag[pj] * lmDir[pj];
+514:             work1[pj] = s;
+515:             dxNorm += s * s;
+516:         }
+517:         dxNorm = Math.sqrt(dxNorm);
+518:         double fp = dxNorm - delta;
+519:         if (fp <= 0.1 * delta) {
+520:             lmPar = 0;
+521:             return;
+522:         }
+523: 
+524:         // if the jacobian is not rank deficient, the Newton step provides
+525:         // a lower bound, parl, for the zero of the function,
+526:         // otherwise set this bound to zero
+527:         double sum2;
+528:         double parl = 0;
+529:         if (rank == solvedCols) {
+530:             for (int j = 0; j < solvedCols; ++j) {
+531:                 int pj = permutation[j];
+532:                 work1[pj] *= diag[pj] / dxNorm;
+533:             }
+534:             sum2 = 0;
+535:             for (int j = 0; j < solvedCols; ++j) {
+536:                 int pj = permutation[j];
+537:                 double sum = 0;
+538:                 for (int i = 0; i < j; ++i) {
+539:                     sum += jacobian[i][pj] * work1[permutation[i]];
+540:                 }
+541:                 double s = (work1[pj] - sum) / diagR[pj];
+542:                 work1[pj] = s;
+543:                 sum2 += s * s;
+544:             }
+545:             parl = fp / (delta * sum2);
+546:         }
+547: 
+548:         // calculate an upper bound, paru, for the zero of the function
+549:         sum2 = 0;
+550:         for (int j = 0; j < solvedCols; ++j) {
+551:             int pj = permutation[j];
+552:             double sum = 0;
+553:             for (int i = 0; i <= j; ++i) {
+554:                 sum += jacobian[i][pj] * qy[i];
+555:             }
+556:             sum /= diag[pj];
+557:             sum2 += sum * sum;
+558:         }
+559:         double gNorm = Math.sqrt(sum2);
+560:         double paru = gNorm / delta;
+561:         if (paru == 0) {
+562:             // 2.2251e-308 is the smallest positive real for IEE754
+563:             paru = 2.2251e-308 / Math.min(delta, 0.1);
+564:         }
+565: 
+566:         // if the input par lies outside of the interval (parl,paru),
+567:         // set par to the closer endpoint
+568:         lmPar = Math.min(paru, Math.max(lmPar, parl));
+569:         if (lmPar == 0) {
+570:             lmPar = gNorm / dxNorm;
+571:         }
+572: 
+573:         for (int countdown = 10; countdown >= 0; --countdown) {
+574: 
+575:             // evaluate the function at the current value of lmPar
+576:             if (lmPar == 0) {
+577:                 lmPar = Math.max(2.2251e-308, 0.001 * paru);
+578:             }
+579:             double sPar = Math.sqrt(lmPar);
+580:             for (int j = 0; j < solvedCols; ++j) {
+581:                 int pj = permutation[j];
+582:                 work1[pj] = sPar * diag[pj];
+583:             }
+584:             determineLMDirection(qy, work1, work2, work3);
+585: 
+586:             dxNorm = 0;
+587:             for (int j = 0; j < solvedCols; ++j) {
+588:                 int pj = permutation[j];
+589:                 double s = diag[pj] * lmDir[pj];
+590:                 work3[pj] = s;
+591:                 dxNorm += s * s;
+592:             }
+593:             dxNorm = Math.sqrt(dxNorm);
+594:             double previousFP = fp;
+595:             fp = dxNorm - delta;
+596: 
+597:             // if the function is small enough, accept the current value
+598:             // of lmPar, also test for the exceptional cases where parl is zero
+599:             if ((Math.abs(fp) <= 0.1 * delta) ||
+600:                     ((parl == 0) && (fp <= previousFP) && (previousFP < 0))) {
+601:                 return;
+602:             }
+603: 
+604:             // compute the Newton correction
+605:             for (int j = 0; j < solvedCols; ++j) {
+606:                 int pj = permutation[j];
+607:                 work1[pj] = work3[pj] * diag[pj] / dxNorm;
+608:             }
+609:             for (int j = 0; j < solvedCols; ++j) {
+610:                 int pj = permutation[j];
+611:                 work1[pj] /= work2[j];
+612:                 double tmp = work1[pj];
+613:                 for (int i = j + 1; i < solvedCols; ++i) {
+614:                     work1[permutation[i]] -= jacobian[i][pj] * tmp;
+615:                 }
+616:             }
+617:             sum2 = 0;
+618:             for (int j = 0; j < solvedCols; ++j) {
+619:                 double s = work1[permutation[j]];
+620:                 sum2 += s * s;
+621:             }
+622:             double correction = fp / (delta * sum2);
+623: 
+624:             // depending on the sign of the function, update parl or paru.
+625:             if (fp > 0) {
+626:                 parl = Math.max(parl, lmPar);
+627:             } else if (fp < 0) {
+628:                 paru = Math.min(paru, lmPar);
+629:             }
+630: 
+631:             // compute an improved estimate for lmPar
+632:             lmPar = Math.max(parl, lmPar + correction);
+633: 
+634:         }
+635:     }
+
+[20] org.apache.commons.math.optimization.VectorialPointValuePair#getPointRef  (lines 80-82)
+80:     public double[] getPointRef() {
+81:         return point;
+82:     }
+
+[21] org.apache.commons.math.optimization.general.AbstractLeastSquaresOptimizer#updateJacobian  (lines 183-197)
+183:     protected void updateJacobian() throws FunctionEvaluationException {
+184:         ++jacobianEvaluations;
+185:         jacobian = jF.value(point);
+186:         if (jacobian.length != rows) {
+187:             throw new FunctionEvaluationException(point, LocalizedFormats.DIMENSIONS_MISMATCH_SIMPLE,
+188:                                                   jacobian.length, rows);
+189:         }
+190:         for (int i = 0; i < rows; i++) {
+191:             final double[] ji = jacobian[i];
+192:             final double factor = -Math.sqrt(residualsWeights[i]);
+193:             for (int j = 0; j < cols; ++j) {
+194:                 ji[j] *= factor;
+195:             }
+196:         }
+197:     }
+
+[22] org.apache.commons.math.optimization.general.AbstractLeastSquaresOptimizer#updateResidualsAndCost  (lines 205-227)
+205:     protected void updateResidualsAndCost()
+206:         throws FunctionEvaluationException {
+207: 
+208:         if (++objectiveEvaluations > maxEvaluations) {
+209:             throw new FunctionEvaluationException(new MaxEvaluationsExceededException(maxEvaluations),
+210:                                                   point);
+211:         }
+212:         objective = function.value(point);
+213:         if (objective.length != rows) {
+214:             throw new FunctionEvaluationException(point, LocalizedFormats.DIMENSIONS_MISMATCH_SIMPLE,
+215:                                                   objective.length, rows);
+216:         }
+217:         cost = 0;
+218:         int index = 0;
+219:         for (int i = 0; i < rows; i++) {
+220:             final double residual = targetValues[i] - objective[i];
+221:             residuals[i] = residual;
+222:             cost += residualsWeights[i] * residual * residual;
+223:             index += cols;
+224:         }
+225:         cost = Math.sqrt(cost);
+226: 
+227:     }
+
+[23] org.apache.commons.math.optimization.general.AbstractLeastSquaresOptimizer#setMaxEvaluations  (lines 138-140)
+138:     public void setMaxEvaluations(int maxEvaluations) {
+139:         this.maxEvaluations = maxEvaluations;
+140:     }
+
+[24] org.apache.commons.math.optimization.general.LevenbergMarquardtOptimizer#setQRRankingThreshold  (lines 235-237)
+235:     public void setQRRankingThreshold(final double threshold) {
+236:         this.qrRankingThreshold = threshold;
+237:     }

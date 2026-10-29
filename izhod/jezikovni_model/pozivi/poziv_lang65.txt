@@ -1,0 +1,119 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.lang.time.DateUtilsTest::testTruncateLang59
+junit.framework.AssertionFailedError: Truncate Calendar.SECOND expected:<Sun Oct 31 01:02:03 MDT 2004> but was:<Sun Oct 31 01:02:03 MST 2004>
+	at org.apache.commons.lang.time.DateUtilsTest.testTruncateLang59(DateUtilsTest.java:927)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.lang.time.DateUtils#modify  (lines 619-713)
+619:     private static void modify(Calendar val, int field, boolean round) {
+620:         if (val.get(Calendar.YEAR) > 280000000) {
+621:             throw new ArithmeticException("Calendar value too large for accurate calculations");
+622:         }
+623:         
+624: 
+625:         // ----------------- Fix for LANG-59 ---------------------- START ---------------
+626:         // see http://issues.apache.org/jira/browse/LANG-59
+627:         //
+628:         // Manually truncate milliseconds, seconds and minutes, rather than using
+629:         // Calendar methods.
+630: 
+631: 
+632:         // truncate milliseconds
+633: 
+634:         // truncate seconds
+635: 
+636:         // truncate minutes
+637: 
+638:         // reset time
+639:         // ----------------- Fix for LANG-59 ----------------------- END ----------------
+640: 
+641:         boolean roundUp = false;
+642:         for (int i = 0; i < fields.length; i++) {
+643:             for (int j = 0; j < fields[i].length; j++) {
+644:                 if (fields[i][j] == field) {
+645:                     //This is our field... we stop looping
+646:                     if (round && roundUp) {
+647:                         if (field == DateUtils.SEMI_MONTH) {
+648:                             //This is a special case that's hard to generalize
+649:                             //If the date is 1, we round up to 16, otherwise
+650:                             //  we subtract 15 days and add 1 month
+651:                             if (val.get(Calendar.DATE) == 1) {
+652:                                 val.add(Calendar.DATE, 15);
+653:                             } else {
+654:                                 val.add(Calendar.DATE, -15);
+655:                                 val.add(Calendar.MONTH, 1);
+656:                             }
+657:                         } else {
+658:                             //We need at add one to this field since the
+659:                             //  last number causes us to round up
+660:                             val.add(fields[i][0], 1);
+661:                         }
+662:                     }
+663:                     return;
+664:                 }
+665:             }
+666:             //We have various fields that are not easy roundings
+667:             int offset = 0;
+668:             boolean offsetSet = false;
+669:             //These are special types of fields that require different rounding rules
+670:             switch (field) {
+671:                 case DateUtils.SEMI_MONTH:
+672:                     if (fields[i][0] == Calendar.DATE) {
+673:                         //If we're going to drop the DATE field's value,
+674:                         //  we want to do this our own way.
+675:                         //We need to subtrace 1 since the date has a minimum of 1
+676:                         offset = val.get(Calendar.DATE) - 1;
+677:                         //If we're above 15 days adjustment, that means we're in the
+678:                         //  bottom half of the month and should stay accordingly.
+679:                         if (offset >= 15) {
+680:                             offset -= 15;
+681:                         }
+682:                         //Record whether we're in the top or bottom half of that range
+683:                         roundUp = offset > 7;
+684:                         offsetSet = true;
+685:                     }
+686:                     break;
+687:                 case Calendar.AM_PM:
+688:                     if (fields[i][0] == Calendar.HOUR_OF_DAY) {
+689:                         //If we're going to drop the HOUR field's value,
+690:                         //  we want to do this our own way.
+691:                         offset = val.get(Calendar.HOUR_OF_DAY);
+692:                         if (offset >= 12) {
+693:                             offset -= 12;
+694:                         }
+695:                         roundUp = offset > 6;
+696:                         offsetSet = true;
+697:                     }
+698:                     break;
+699:             }
+700:             if (!offsetSet) {
+701:                 int min = val.getActualMinimum(fields[i][0]);
+702:                 int max = val.getActualMaximum(fields[i][0]);
+703:                 //Calculate the offset from the minimum allowed value
+704:                 offset = val.get(fields[i][0]) - min;
+705:                 //Set roundUp if this is more than half way between the minimum and maximum
+706:                 roundUp = offset > ((max - min) / 2);
+707:             }
+708:             //We need to remove this field
+709:                 val.set(fields[i][0], val.get(fields[i][0]) - offset);
+710:         }
+711:         throw new IllegalArgumentException("The field " + field + " is not supported");
+712: 
+713:     }
+
+[2] org.apache.commons.lang.time.DateUtils#truncate  (lines 542-550)
+542:     public static Date truncate(Date date, int field) {
+543:         if (date == null) {
+544:             throw new IllegalArgumentException("The date must not be null");
+545:         }
+546:         Calendar gval = Calendar.getInstance();
+547:         gval.setTime(date);
+548:         modify(gval, field, false);
+549:         return gval.getTime();
+550:     }

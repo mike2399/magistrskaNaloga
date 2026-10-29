@@ -1,0 +1,1263 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.IntegrationTest::testDependencySorting
+junit.framework.AssertionFailedError: 
+Expected: goog.provide("x");goog.require("x")
+Result: goog.require("x");goog.provide("x")
+Node tree inequality:
+Tree1:
+BLOCK [synthetic: 1]
+	at com.google.javascript.jscomp.IntegrationTestCase.test(IntegrationTestCase.java:94)
+	at com.google.javascript.jscomp.IntegrationTest.testDependencySorting(IntegrationTest.java:2107)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.rhino.Node#toString  (lines 318-321)
+318:     @Override
+319:     public String toString() {
+320:       return objectValue == null ? "null" : objectValue.toString();
+321:     }
+
+[2] com.google.javascript.rhino.Node#getSortedPropTypes  (lines 878-892)
+878:   private int[] getSortedPropTypes() {
+879:     int count = 0;
+880:     for (PropListItem x = propListHead; x != null; x = x.getNext()) {
+881:       count++;
+882:     }
+883: 
+884:     int[] keys = new int[count];
+885:     for (PropListItem x = propListHead; x != null; x = x.getNext()) {
+886:       count--;
+887:       keys[count] = x.getType();
+888:     }
+889: 
+890:     Arrays.sort(keys);
+891:     return keys;
+892:   }
+
+[3] com.google.javascript.jscomp.JSModule#getDepth  (lines 301-303)
+301:   public int getDepth() {
+302:     return depth;
+303:   }
+
+[4] com.google.javascript.jscomp.ProcessDefines#visit  (lines 286-371)
+286:     @Override
+287:     public void visit(NodeTraversal t, Node n, Node parent) {
+288:       RefInfo refInfo = allRefInfo.get(n);
+289:       if (refInfo != null) {
+290:         Ref ref = refInfo.ref;
+291:         Name name = refInfo.name;
+292:         String fullName = name.getFullName();
+293:         switch (ref.type) {
+294:           case SET_FROM_GLOBAL:
+295:           case SET_FROM_LOCAL:
+296:             Node valParent = getValueParent(ref);
+297:             Node val = valParent.getLastChild();
+298:             if (valParent.isAssign() && name.isSimpleName() &&
+299:                 name.getDeclaration() == ref) {
+300:               // For defines, it's an error if a simple name is assigned
+301:               // before it's declared
+302:               compiler.report(
+303:                   t.makeError(val, INVALID_DEFINE_INIT_ERROR, fullName));
+304:             } else if (processDefineAssignment(t, fullName, val, valParent)) {
+305:               // remove the assignment so that the variable is still declared,
+306:               // but no longer assigned to a value, e.g.,
+307:               // DEF_FOO = 5; // becomes "5;"
+308: 
+309:               // We can't remove the ASSIGN/VAR when we're still visiting its
+310:               // children, so we'll have to come back later to remove it.
+311:               refInfo.name.removeRef(ref);
+312:               lvalueToRemoveLater = valParent;
+313:             }
+314:             break;
+315:           default:
+316:             if (t.inGlobalScope()) {
+317:               // Treat this as a reference to a define in the global scope.
+318:               // After this point, the define must not be reassigned,
+319:               // or it's an error.
+320:               DefineInfo info = assignableDefines.get(fullName);
+321:               if (info != null) {
+322:                 setDefineInfoNotAssignable(info, t);
+323:                 assignableDefines.remove(fullName);
+324:               }
+325:             }
+326:             break;
+327:         }
+328:       }
+329: 
+330:       if (!t.inGlobalScope() &&
+331:           n.getJSDocInfo() != null && n.getJSDocInfo().isDefine()) {
+332:         // warn about @define annotations in local scopes
+333:         compiler.report(
+334:             t.makeError(n, NON_GLOBAL_DEFINE_INIT_ERROR, ""));
+335:       }
+336: 
+337:       if (lvalueToRemoveLater == n) {
+338:         lvalueToRemoveLater = null;
+339:         if (n.isAssign()) {
+340:           Node last = n.getLastChild();
+341:           n.removeChild(last);
+342:           parent.replaceChild(n, last);
+343:         } else {
+344:           Preconditions.checkState(n.isName());
+345:           n.removeChild(n.getFirstChild());
+346:         }
+347:         compiler.reportCodeChange();
+348:       }
+349: 
+350:       if (n.isCall()) {
+351:         if (t.inGlobalScope()) {
+352:           // If there's a function call in the global scope,
+353:           // we just say it's unsafe and freeze all the defines.
+354:           //
+355:           // NOTE(nicksantos): We could be a lot smarter here. For example,
+356:           // ReplaceOverriddenVars keeps a call graph of all functions and
+357:           // which functions/variables that they reference, and tries
+358:           // to statically determine which functions are "safe" and which
+359:           // are not. But this would be overkill, especially because
+360:           // the intended use of defines is with config_files, where
+361:           // all the defines are at the top of the bundle.
+362:           for (DefineInfo info : assignableDefines.values()) {
+363:             setDefineInfoNotAssignable(info, t);
+364:           }
+365: 
+366:           assignableDefines.clear();
+367:         }
+368:       }
+369: 
+370:       updateAssignAllowedStack(n, false);
+371:     }
+
+[5] com.google.javascript.jscomp.CreateSyntheticBlocks#process  (lines 76-93)
+76:   @Override
+77:   public void process(Node externs, Node root) {
+78:     // Find and validate the markers.
+79:     NodeTraversal.traverse(compiler, root, new Callback());
+80: 
+81:     // Complain about any unmatched markers.
+82:     for (Node node : markerStack) {
+83:       compiler.report(
+84:           JSError.make(NodeUtil.getSourceName(node),
+85:           node,
+86:           UNMATCHED_START_MARKER, startMarkerName));
+87:     }
+88: 
+89:     // Add the block for the valid marker sets.
+90:     for (Marker marker : validMarkers) {
+91:       addBlocks(marker);
+92:     }
+93:   }
+
+[6] com.google.javascript.rhino.InputId#toString  (lines 72-75)
+72:   @Override
+73:   public String toString() {
+74:     return "InputId: " + getIdName();
+75:   }
+
+[7] com.google.javascript.jscomp.Scope#getGlobalScope  (lines 455-461)
+455:   Scope getGlobalScope() {
+456:     Scope result = this;
+457:     while (result.getParent() != null) {
+458:       result = result.getParent();
+459:     }
+460:     return result;
+461:   }
+
+[8] com.google.javascript.rhino.Node#toString  (lines 939-946)
+939:   public String toString(
+940:       boolean printSource,
+941:       boolean printAnnotations,
+942:       boolean printType) {
+943:     StringBuilder sb = new StringBuilder();
+944:     toString(sb, printSource, printAnnotations, printType);
+945:     return sb.toString();
+946:   }
+
+[9] com.google.javascript.jscomp.ReplaceIdGenerators#ReplaceIdGenerators  (lines 61-77)
+61:   public ReplaceIdGenerators(
+62:       AbstractCompiler compiler, Set<String> idGens,
+63:       boolean generatePseudoNames) {
+64:     this.compiler = compiler;
+65:     this.generatePseudoNames = generatePseudoNames;
+66:     nameGenerators = Maps.newLinkedHashMap();
+67:     consistNameGenerators = Maps.newLinkedHashMap();
+68:     idGeneratorMaps = Maps.newLinkedHashMap();
+69:     consistNameMap = Maps.newLinkedHashMap();
+70: 
+71:     if (idGens != null) {
+72:       for(String gen : idGens) {
+73:         nameGenerators.put(gen, createNameSupplier());
+74:         idGeneratorMaps.put(gen, Lists.<Replacement>newLinkedList());
+75:       }
+76:     }
+77:   }
+
+[10] com.google.javascript.jscomp.VarCheck#getSynthesizedExternsRoot  (lines 272-278)
+272:   private Node getSynthesizedExternsRoot() {
+273:     if (synthesizedExternsRoot == null) {
+274:       CompilerInput synthesizedExterns = getSynthesizedExternsInput();
+275:       synthesizedExternsRoot = synthesizedExterns.getAstRoot(compiler);
+276:     }
+277:     return synthesizedExternsRoot;
+278:   }
+
+[11] com.google.javascript.jscomp.SyntheticAst#getInputId  (lines 55-58)
+55:   @Override
+56:   public InputId getInputId() {
+57:     return inputId;
+58:   }
+
+[12] com.google.javascript.rhino.Node#toStringTreeHelper  (lines 1028-1040)
+1028:   private static void toStringTreeHelper(Node n, int level, Appendable sb)
+1029:       throws IOException {
+1030:     for (int i = 0; i != level; ++i) {
+1031:       sb.append("    ");
+1032:     }
+1033:     sb.append(n.toString());
+1034:     sb.append('\n');
+1035:     for (Node cursor = n.getFirstChild();
+1036:          cursor != null;
+1037:          cursor = cursor.getNext()) {
+1038:       toStringTreeHelper(cursor, level + 1, sb);
+1039:     }
+1040:   }
+
+[13] com.google.javascript.jscomp.ReplaceIdGenerators#process  (lines 150-156)
+150:   @Override
+151:   public void process(Node externs, Node root) {
+152:     NodeTraversal.traverse(compiler, root, new GatherGenerators());
+153:     if (!nameGenerators.isEmpty() || !this.consistNameGenerators.isEmpty()) {
+154:       NodeTraversal.traverse(compiler, root, new ReplaceGenerators());
+155:     }
+156:   }
+
+[14] com.google.javascript.jscomp.Compiler#hasRegExpGlobalReferences  (lines 2305-2308)
+2305:   @Override
+2306:   boolean hasRegExpGlobalReferences() {
+2307:     return hasRegExpGlobalReferences;
+2308:   }
+
+[15] com.google.javascript.jscomp.CheckSideEffects#visit  (lines 182-194)
+182:     @Override
+183:     public void visit(NodeTraversal t, Node n, Node parent) {
+184:       if (n.isCall()) {
+185:         Node target = n.getFirstChild();
+186:         // TODO(johnlenz): add this to the coding convention
+187:         // so we can remove goog.reflect.sinkValue as well.
+188:         if (target.isName() && target.getString().equals(PROTECTOR_FN)) {
+189:           Node expr = n.getLastChild();
+190:           n.detachChildren();
+191:           parent.replaceChild(n, expr);
+192:         }
+193:       }
+194:     }
+
+[16] com.google.javascript.jscomp.ReplaceIdGenerators#visit  (lines 110-147)
+110:     @Override
+111:     public void visit(NodeTraversal t, Node n, Node parent) {
+112:       JSDocInfo doc = n.getJSDocInfo();
+113:       if (doc == null) {
+114:         return;
+115:       }
+116: 
+117:       if (!doc.isConsistentIdGenerator() &&
+118:           !doc.isIdGenerator()) {
+119:         return;
+120:       }
+121: 
+122:       if (doc.isConsistentIdGenerator() && doc.isIdGenerator()) {
+123:         compiler.report(t.makeError(n, CONFLICTING_GENERATOR_TYPE));
+124:       }
+125: 
+126:       String name = null;
+127:       if (n.isAssign()) {
+128:         name = n.getFirstChild().getQualifiedName();
+129:       } else if (n.isVar()) {
+130:         name = n.getFirstChild().getString();
+131:       } else if (n.isFunction()){
+132:         name = n.getFirstChild().getString();
+133:         if (name.isEmpty()) {
+134:           return;
+135:         }
+136:       }
+137: 
+138:       // TODO(user): Error on function that has both. Or redeclartion
+139:       // on the same function.
+140:       if (doc.isConsistentIdGenerator()) {
+141:         consistNameGenerators.put(name, createNameSupplier());
+142:         consistNameMap.put(name, Maps.<String, String>newLinkedHashMap());
+143:       } else {
+144:         nameGenerators.put(name, createNameSupplier());
+145:       }
+146:       idGeneratorMaps.put(name, Lists.<Replacement>newArrayList());
+147:     }
+
+[17] com.google.javascript.rhino.Node#propToString  (lines 116-149)
+116:   private static final String propToString(int propType) {
+117:       switch (propType) {
+118:         case BRACELESS_TYPE:     return "braceless_type";
+119:         case VAR_ARGS_NAME:      return "var_args_name";
+120:         case SOURCENAME_PROP:    return "sourcename";
+121: 
+122:         case JSDOC_INFO_PROP:    return "jsdoc_info";
+123: 
+124:         case INCRDECR_PROP:      return "incrdecr";
+125:         case PARENTHESIZED_PROP: return "parenthesized";
+126:         case QUOTED_PROP:        return "quoted";
+127:         case OPT_ARG_NAME:       return "opt_arg";
+128: 
+129:         case SYNTHETIC_BLOCK_PROP: return "synthetic";
+130:         case EMPTY_BLOCK:        return "empty_block";
+131:         case ORIGINALNAME_PROP:  return "originalname";
+132:         case SIDE_EFFECT_FLAGS:  return "side_effect_flags";
+133: 
+134:         case IS_CONSTANT_NAME:   return "is_constant_name";
+135:         case IS_OPTIONAL_PARAM:  return "is_optional_param";
+136:         case IS_VAR_ARGS_PARAM:  return "is_var_args_param";
+137:         case IS_NAMESPACE:       return "is_namespace";
+138:         case IS_DISPATCHER:      return "is_dispatcher";
+139:         case DIRECTIVES:         return "directives";
+140:         case DIRECT_EVAL:        return "direct_eval";
+141:         case FREE_CALL:          return "free_call";
+142:         case STATIC_SOURCE_FILE:    return "source_file";
+143:         case INPUT_ID:  return "input_id";
+144:         case LENGTH:    return "length";
+145:         case SLASH_V:   return "slash_v";
+146:         default:
+147:           throw new IllegalStateException("unexpect prop id " + propType);
+148:       }
+149:   }
+
+[18] com.google.javascript.jscomp.SyntheticAst#SyntheticAst  (lines 37-41)
+37:   SyntheticAst(String sourceName) {
+38:     this.inputId = new InputId(sourceName);
+39:     this.sourceFile = new SourceFile(sourceName);
+40:     clearAst();
+41:   }
+
+[19] com.google.javascript.rhino.Node#toString  (lines 948-1007)
+948:   private void toString(
+949:       StringBuilder sb,
+950:       boolean printSource,
+951:       boolean printAnnotations,
+952:       boolean printType) {
+953:     sb.append(Token.name(type));
+954:     if (this instanceof StringNode) {
+955:       sb.append(' ');
+956:       sb.append(getString());
+957:     } else if (type == Token.FUNCTION) {
+958:       sb.append(' ');
+959:       // In the case of JsDoc trees, the first child is often not a string
+960:       // which causes exceptions to be thrown when calling toString or
+961:       // toStringTree.
+962:       if (first == null || first.getType() != Token.NAME) {
+963:         sb.append("<invalid>");
+964:       } else {
+965:         sb.append(first.getString());
+966:       }
+967:     } else if (type == Token.NUMBER) {
+968:       sb.append(' ');
+969:       sb.append(getDouble());
+970:     }
+971:     if (printSource) {
+972:       int lineno = getLineno();
+973:       if (lineno != -1) {
+974:         sb.append(' ');
+975:         sb.append(lineno);
+976:       }
+977:     }
+978: 
+979:     if (printAnnotations) {
+980:       int[] keys = getSortedPropTypes();
+981:       for (int i = 0; i < keys.length; i++) {
+982:         int type = keys[i];
+983:         PropListItem x = lookupProperty(type);
+984:         sb.append(" [");
+985:         sb.append(propToString(type));
+986:         sb.append(": ");
+987:         String value;
+988:         switch (type) {
+989:           default:
+990:             value = x.toString();
+991:             break;
+992:         }
+993:         sb.append(value);
+994:         sb.append(']');
+995:       }
+996:     }
+997: 
+998:     if (printType) {
+999:       if (jsType != null) {
+1000:         String jsTypeString = jsType.toString();
+1001:         if (jsTypeString != null) {
+1002:           sb.append(" : ");
+1003:           sb.append(jsTypeString);
+1004:         }
+1005:       }
+1006:     }
+1007:   }
+
+[20] com.google.javascript.jscomp.Compiler#newExternInput  (lines 1025-1036)
+1025:   @Override
+1026:   public CompilerInput newExternInput(String name) {
+1027:     SourceAst ast = new SyntheticAst(name);
+1028:     if (inputsById.containsKey(ast.getInputId())) {
+1029:       throw new IllegalArgumentException("Conflicting externs name: " + name);
+1030:     }
+1031:     CompilerInput input = new CompilerInput(ast, true);
+1032:     putCompilerInput(input.getInputId(), input);
+1033:     externsRoot.addChildToFront(ast.getAstRoot(this));
+1034:     externs.add(0, input);
+1035:     return input;
+1036:   }
+
+[21] com.google.javascript.jscomp.Compiler#getSynthesizedExternsInput  (lines 2332-2338)
+2332:   @Override
+2333:   CompilerInput getSynthesizedExternsInput() {
+2334:     if (synthesizedExternsInput == null) {
+2335:       synthesizedExternsInput = newExternInput(SYNTHETIC_EXTERNS);
+2336:     }
+2337:     return synthesizedExternsInput;
+2338:   }
+
+[22] com.google.javascript.rhino.Node#NodeMismatch  (lines 2147-2150)
+2147:     NodeMismatch(Node nodeA, Node nodeB) {
+2148:       this.nodeA = nodeA;
+2149:       this.nodeB = nodeB;
+2150:     }
+
+[23] com.google.javascript.jscomp.VarCheck#visit  (lines 120-203)
+120:   @Override
+121:   public void visit(NodeTraversal t, Node n, Node parent) {
+122:     if (!n.isName()) {
+123:       return;
+124:     }
+125: 
+126:     String varName = n.getString();
+127: 
+128:     // Only a function can have an empty name.
+129:     if (varName.isEmpty()) {
+130:       Preconditions.checkState(parent.isFunction());
+131:       Preconditions.checkState(NodeUtil.isFunctionExpression(parent));
+132:       return;
+133:     }
+134: 
+135:     // Check if this is a declaration for a var that has been declared
+136:     // elsewhere. If so, mark it as a duplicate.
+137:     if ((parent.isVar() ||
+138:          NodeUtil.isFunctionDeclaration(parent)) &&
+139:         varsToDeclareInExterns.contains(varName)) {
+140:       createSynthesizedExternVar(varName);
+141: 
+142:       n.addSuppression("duplicate");
+143:     }
+144: 
+145:     // Check that the var has been declared.
+146:     Scope scope = t.getScope();
+147:     Scope.Var var = scope.getVar(varName);
+148:     if (var == null) {
+149:       if (NodeUtil.isFunctionExpression(parent)) {
+150:         // e.g. [ function foo() {} ], it's okay if "foo" isn't defined in the
+151:         // current scope.
+152:       } else {
+153:         // The extern checks are stricter, don't report a second error.
+154:         if (!strictExternCheck || !t.getInput().isExtern()) {
+155:           t.report(n, UNDEFINED_VAR_ERROR, varName);
+156:         }
+157: 
+158:         if (sanityCheck) {
+159:           throw new IllegalStateException("Unexpected variable " + varName);
+160:         } else {
+161:           createSynthesizedExternVar(varName);
+162:           scope.getGlobalScope().declare(varName, n,
+163:               null, getSynthesizedExternsInput());
+164:         }
+165:       }
+166:       return;
+167:     }
+168: 
+169:     CompilerInput currInput = t.getInput();
+170:     CompilerInput varInput = var.input;
+171:     if (currInput == varInput || currInput == null || varInput == null) {
+172:       // The variable was defined in the same file. This is fine.
+173:       return;
+174:     }
+175: 
+176:     // Check module dependencies.
+177:     JSModule currModule = currInput.getModule();
+178:     JSModule varModule = varInput.getModule();
+179:     JSModuleGraph moduleGraph = compiler.getModuleGraph();
+180:     if (!sanityCheck &&
+181:         varModule != currModule && varModule != null && currModule != null) {
+182:       if (moduleGraph.dependsOn(currModule, varModule)) {
+183:         // The module dependency was properly declared.
+184:       } else {
+185:         if (scope.isGlobal()) {
+186:           if (moduleGraph.dependsOn(varModule, currModule)) {
+187:             // The variable reference violates a declared module dependency.
+188:             t.report(n, VIOLATED_MODULE_DEP_ERROR,
+189:                      currModule.getName(), varModule.getName(), varName);
+190:           } else {
+191:             // The variable reference is between two modules that have no
+192:             // dependency relationship. This should probably be considered an
+193:             // error, but just issue a warning for now.
+194:             t.report(n, MISSING_MODULE_DEP_ERROR,
+195:                      currModule.getName(), varModule.getName(), varName);
+196:           }
+197:         } else {
+198:           t.report(n, STRICT_MODULE_DEP_ERROR,
+199:                    currModule.getName(), varModule.getName(), varName);
+200:         }
+201:       }
+202:     }
+203:   }
+
+[24] com.google.javascript.jscomp.CreateSyntheticBlocks#CreateSyntheticBlocks  (lines 69-74)
+69:   public CreateSyntheticBlocks(AbstractCompiler compiler,
+70:       String startMarkerName, String endMarkerName) {
+71:     this.compiler = compiler;
+72:     this.startMarkerName = startMarkerName;
+73:     this.endMarkerName = endMarkerName;
+74:   }
+
+[25] com.google.javascript.jscomp.SyntheticAst#clearAst  (lines 48-53)
+48:   @Override
+49:   public void clearAst() {
+50:     root = IR.script();
+51:     root.setInputId(inputId);
+52:     root.setStaticSourceFile(sourceFile);
+53:   }
+
+[26] com.google.javascript.jscomp.SourceFile#toString  (lines 301-304)
+301:   @Override
+302:   public String toString() {
+303:     return fileName;
+304:   }
+
+[27] com.google.javascript.rhino.Node#toString  (lines 934-937)
+934:   @Override
+935:   public String toString() {
+936:     return toString(true, true, true);
+937:   }
+
+[28] com.google.javascript.jscomp.JSModule#addDependency  (lines 132-136)
+132:   public void addDependency(JSModule dep) {
+133:     Preconditions.checkNotNull(dep);
+134:     Preconditions.checkState(dep != this);
+135:     deps.add(dep);
+136:   }
+
+[29] com.google.javascript.jscomp.Compiler#initModules  (lines 349-379)
+349:   public <T extends SourceFile> void initModules(
+350:       List<T> externs, List<JSModule> modules, CompilerOptions options) {
+351:     initOptions(options);
+352: 
+353:     checkFirstModule(modules);
+354:     fillEmptyModules(modules);
+355: 
+356:     this.externs = makeCompilerInput(externs, true);
+357: 
+358:     // Generate the module graph, and report any errors in the module
+359:     // specification as errors.
+360:     this.modules = modules;
+361:     if (modules.size() > 1) {
+362:       try {
+363:         this.moduleGraph = new JSModuleGraph(modules);
+364:       } catch (JSModuleGraph.ModuleDependenceException e) {
+365:         // problems with the module format.  Report as an error.  The
+366:         // message gives all details.
+367:         report(JSError.make(MODULE_DEPENDENCY_ERROR,
+368:                 e.getModule().getName(), e.getDependentModule().getName()));
+369:         return;
+370:       }
+371:     } else {
+372:       this.moduleGraph = null;
+373:     }
+374: 
+375:     this.inputs = getAllInputsFromModules(modules);
+376:     initBasedOnOptions();
+377: 
+378:     initInputsByIdMap();
+379:   }
+
+[30] com.google.javascript.rhino.Node#checkTreeEqualsImpl  (lines 1444-1463)
+1444:   NodeMismatch checkTreeEqualsImpl(Node node2) {
+1445:     if (!isEquivalentTo(node2, false, false)) {
+1446:       return new NodeMismatch(this, node2);
+1447:     }
+1448: 
+1449:     NodeMismatch res = null;
+1450:     Node n, n2;
+1451:     for (n = first, n2 = node2.first;
+1452:          res == null && n != null;
+1453:          n = n.next, n2 = n2.next) {
+1454:       if (node2 == null) {
+1455:         throw new IllegalStateException();
+1456:       }
+1457:       res = n.checkTreeEqualsImpl(n2);
+1458:       if (res != null) {
+1459:         return res;
+1460:       }
+1461:     }
+1462:     return res;
+1463:   }
+
+[31] com.google.javascript.jscomp.VarCheck#getSynthesizedExternsInput  (lines 267-269)
+267:   private CompilerInput getSynthesizedExternsInput() {
+268:     return compiler.getSynthesizedExternsInput();
+269:   }
+
+[32] com.google.javascript.jscomp.CompilerOptions#setDependencyOptions  (lines 1309-1312)
+1309:   public void setDependencyOptions(DependencyOptions options) {
+1310:     Preconditions.checkNotNull(options);
+1311:     this.dependencyOptions = options;
+1312:   }
+
+[33] com.google.javascript.jscomp.SyntheticAst#getAstRoot  (lines 43-46)
+43:   @Override
+44:   public Node getAstRoot(AbstractCompiler compiler) {
+45:     return root;
+46:   }
+
+[34] com.google.javascript.jscomp.Compiler#compileModules  (lines 566-582)
+566:   public <T extends SourceFile> Result compileModules(List<T> externs,
+567:       List<JSModule> modules, CompilerOptions options) {
+568:     // The compile method should only be called once.
+569:     Preconditions.checkState(jsRoot == null);
+570: 
+571:     try {
+572:       initModules(externs, modules, options);
+573:       if (hasErrors()) {
+574:         return getResult();
+575:       }
+576:       return compile();
+577:     } finally {
+578:       Tracer t = newTracer("generateReport");
+579:       errorManager.generateReport();
+580:       stopTracer(t, "generateReport");
+581:     }
+582:   }
+
+[35] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1367-1378)
+1367:     @Override
+1368:     protected CompilerPass createInternal(final AbstractCompiler compiler) {
+1369:       return new CompilerPass() {
+1370:         @Override public void process(Node externs, Node root) {
+1371:           ReplaceIdGenerators pass =
+1372:               new ReplaceIdGenerators(
+1373:                   compiler, options.idGenerators, options.generatePseudoNames);
+1374:           pass.process(externs, root);
+1375:           idGeneratorMap = pass.getIdGeneratorMap();
+1376:         }
+1377:       };
+1378:     }
+
+[36] com.google.javascript.jscomp.VarCheck#createSynthesizedExternVar  (lines 209-226)
+209:   private void createSynthesizedExternVar(String varName) {
+210:     Node nameNode = IR.name(varName);
+211: 
+212:     // Mark the variable as constant if it matches the coding convention
+213:     // for constant vars.
+214:     // NOTE(nicksantos): honestly, I'm not sure how much this matters.
+215:     // AFAIK, all people who use the CONST coding convention also
+216:     // compile with undeclaredVars as errors. We have some test
+217:     // cases for this configuration though, and it makes them happier.
+218:     if (compiler.getCodingConvention().isConstant(varName)) {
+219:       nameNode.putBooleanProp(Node.IS_CONSTANT_NAME, true);
+220:     }
+221: 
+222:     getSynthesizedExternsRoot().addChildToBack(
+223:         IR.var(nameNode));
+224:     varsToDeclareInExterns.remove(varName);
+225:     compiler.reportCodeChange();
+226:   }
+
+[37] com.google.javascript.jscomp.JSModuleGraph#JSModuleGraph  (lines 84-110)
+84:   public JSModuleGraph(List<JSModule> modulesInDepOrder) {
+85:     Preconditions.checkState(
+86:         modulesInDepOrder.size() == Sets.newHashSet(modulesInDepOrder).size(),
+87:         "Found duplicate modules");
+88:     modules = ImmutableList.copyOf(modulesInDepOrder);
+89:     modulesByDepth = Lists.newArrayList();
+90: 
+91:     for (JSModule module : modulesInDepOrder) {
+92:       int depth = 0;
+93:       for (JSModule dep : module.getDependencies()) {
+94:         int depDepth = dep.getDepth();
+95:         if (depDepth < 0) {
+96:           throw new ModuleDependenceException(String.format(
+97:               "Modules not in dependency order: %s preceded %s",
+98:               module.getName(), dep.getName()),
+99:               module, dep);
+100:         }
+101:         depth = Math.max(depth, depDepth + 1);
+102:       }
+103: 
+104:       module.setDepth(depth);
+105:       if (depth == modulesByDepth.size()) {
+106:         modulesByDepth.add(new ArrayList<JSModule>());
+107:       }
+108:       modulesByDepth.get(depth).add(module);
+109:     }
+110:   }
+
+[38] com.google.javascript.rhino.Node#toStringTree  (lines 1010-1012)
+1010:   public String toStringTree() {
+1011:     return toStringTreeImpl();
+1012:   }
+
+[39] com.google.javascript.jscomp.SyntheticAst#getSourceFile  (lines 60-63)
+60:   @Override
+61:   public SourceFile getSourceFile() {
+62:     return sourceFile;
+63:   }
+
+[40] com.google.javascript.jscomp.DefaultPassConfig#getOptimizations  (lines 342-675)
+342:   @Override
+343:   protected List<PassFactory> getOptimizations() {
+344:     List<PassFactory> passes = Lists.newArrayList();
+345:     passes.add(garbageCollectChecks);
+346: 
+347:     // TODO(nicksantos): The order of these passes makes no sense, and needs
+348:     // to be re-arranged.
+349: 
+350:     if (options.runtimeTypeCheck) {
+351:       passes.add(runtimeTypeCheck);
+352:     }
+353: 
+354:     passes.add(createEmptyPass("beforeStandardOptimizations"));
+355: 
+356:     if (options.replaceIdGenerators) {
+357:       passes.add(replaceIdGenerators);
+358:     }
+359: 
+360:     // Optimizes references to the arguments variable.
+361:     if (options.optimizeArgumentsArray) {
+362:       passes.add(optimizeArgumentsArray);
+363:     }
+364: 
+365:     // Abstract method removal works best on minimally modified code, and also
+366:     // only needs to run once.
+367:     if (options.closurePass &&
+368:         (options.removeAbstractMethods || options.removeClosureAsserts)) {
+369:       passes.add(closureCodeRemoval);
+370:     }
+371: 
+372:     // Collapsing properties can undo constant inlining, so we do this before
+373:     // the main optimization loop.
+374:     if (options.collapseProperties) {
+375:       passes.add(collapseProperties);
+376:     }
+377: 
+378:     // ReplaceStrings runs after CollapseProperties in order to simplify
+379:     // pulling in values of constants defined in enums structures.
+380:     if (!options.replaceStringsFunctionDescriptions.isEmpty()) {
+381:       passes.add(replaceStrings);
+382:     }
+383: 
+384:     // Tighten types based on actual usage.
+385:     if (options.tightenTypes) {
+386:       passes.add(tightenTypesBuilder);
+387:     }
+388: 
+389:     // Property disambiguation should only run once and needs to be done
+390:     // soon after type checking, both so that it can make use of type
+391:     // information and so that other passes can take advantage of the renamed
+392:     // properties.
+393:     if (options.disambiguateProperties) {
+394:       passes.add(disambiguateProperties);
+395:     }
+396: 
+397:     if (options.computeFunctionSideEffects) {
+398:       passes.add(markPureFunctions);
+399:     } else if (options.markNoSideEffectCalls) {
+400:       // TODO(user) The properties that this pass adds to CALL and NEW
+401:       // AST nodes increase the AST's in-memory size.  Given that we are
+402:       // already running close to our memory limits, we could run into
+403:       // trouble if we end up using the @nosideeffects annotation a lot
+404:       // or compute @nosideeffects annotations by looking at function
+405:       // bodies.  It should be easy to propagate @nosideeffects
+406:       // annotations as part of passes that depend on this property and
+407:       // store the result outside the AST (which would allow garbage
+408:       // collection once the pass is done).
+409:       passes.add(markNoSideEffectCalls);
+410:     }
+411: 
+412:     if (options.chainCalls) {
+413:       passes.add(chainCalls);
+414:     }
+415: 
+416:     // Constant checking must be done after property collapsing because
+417:     // property collapsing can introduce new constants (e.g. enum values).
+418:     // TODO(johnlenz): make checkConsts namespace aware so it can be run
+419:     // as during the checks phase.
+420:     passes.add(checkConsts);
+421: 
+422:     // The Caja library adds properties to Object.prototype, which breaks
+423:     // most for-in loops.  This adds a check to each loop that skips
+424:     // any property matching /___$/.
+425:     if (options.ignoreCajaProperties) {
+426:       passes.add(ignoreCajaProperties);
+427:     }
+428: 
+429:     assertAllOneTimePasses(passes);
+430: 
+431:     if (options.smartNameRemoval || options.reportPath != null) {
+432:       passes.addAll(getCodeRemovingPasses());
+433:       passes.add(smartNamePass);
+434:     }
+435: 
+436:     // This needs to come after the inline constants pass, which is run within
+437:     // the code removing passes.
+438:     if (options.closurePass) {
+439:       passes.add(closureOptimizePrimitives);
+440:     }
+441: 
+442:     // TODO(user): This forces a first crack at crossModuleCodeMotion
+443:     // before devirtualization. Once certain functions are devirtualized,
+444:     // it confuses crossModuleCodeMotion ability to recognized that
+445:     // it is recursive.
+446: 
+447:     // TODO(user): This is meant for a temporary quick win.
+448:     // In the future, we might want to improve our analysis in
+449:     // CrossModuleCodeMotion so we don't need to do this.
+450:     if (options.crossModuleCodeMotion) {
+451:       passes.add(crossModuleCodeMotion);
+452:     }
+453: 
+454:     // Method devirtualization benefits from property disambiguation so
+455:     // it should run after that pass but before passes that do
+456:     // optimizations based on global names (like cross module code motion
+457:     // and inline functions).  Smart Name Removal does better if run before
+458:     // this pass.
+459:     if (options.devirtualizePrototypeMethods) {
+460:       passes.add(devirtualizePrototypeMethods);
+461:     }
+462: 
+463:     if (options.customPasses != null) {
+464:       passes.add(getCustomPasses(
+465:           CustomPassExecutionTime.BEFORE_OPTIMIZATION_LOOP));
+466:     }
+467: 
+468:     passes.add(createEmptyPass("beforeMainOptimizations"));
+469: 
+470:     if (options.specializeInitialModule) {
+471:       // When specializing the initial module, we want our fixups to be
+472:       // as lean as possible, so we run the entire optimization loop to a
+473:       // fixed point before specializing, then specialize, and then run the
+474:       // main optimization loop again.
+475: 
+476:       passes.addAll(getMainOptimizationLoop());
+477: 
+478:       if (options.crossModuleCodeMotion) {
+479:         passes.add(crossModuleCodeMotion);
+480:       }
+481: 
+482:       if (options.crossModuleMethodMotion) {
+483:         passes.add(crossModuleMethodMotion);
+484:       }
+485: 
+486:       passes.add(specializeInitialModule.makeOneTimePass());
+487:     }
+488: 
+489:     passes.addAll(getMainOptimizationLoop());
+490: 
+491:     passes.add(createEmptyPass("beforeModuleMotion"));
+492: 
+493:     if (options.crossModuleCodeMotion) {
+494:       passes.add(crossModuleCodeMotion);
+495:     }
+496: 
+497:     if (options.crossModuleMethodMotion) {
+498:       passes.add(crossModuleMethodMotion);
+499:     }
+500: 
+501:     passes.add(createEmptyPass("afterModuleMotion"));
+502: 
+503:     // Some optimizations belong outside the loop because running them more
+504:     // than once would either have no benefit or be incorrect.
+505:     if (options.customPasses != null) {
+506:       passes.add(getCustomPasses(
+507:           CustomPassExecutionTime.AFTER_OPTIMIZATION_LOOP));
+508:     }
+509: 
+510:     if (options.flowSensitiveInlineVariables) {
+511:       passes.add(flowSensitiveInlineVariables);
+512: 
+513:       // After inlining some of the variable uses, some variables are unused.
+514:       // Re-run remove unused vars to clean it up.
+515:       if (options.removeUnusedVars || options.removeUnusedLocalVars) {
+516:         passes.add(removeUnusedVars);
+517:       }
+518:     }
+519: 
+520:     // Running this pass again is required to have goog.events compile down to
+521:     // nothing when compiled on its own.
+522:     if (options.smartNameRemoval) {
+523:       passes.add(smartNamePass2);
+524:     }
+525: 
+526:     if (options.collapseAnonymousFunctions) {
+527:       passes.add(collapseAnonymousFunctions);
+528:     }
+529: 
+530:     // Move functions before extracting prototype member declarations.
+531:     if (options.moveFunctionDeclarations ||
+532:         // renamePrefixNamescape relies on moveFunctionDeclarations
+533:         // to preserve semantics.
+534:         options.renamePrefixNamespace != null) {
+535:       passes.add(moveFunctionDeclarations);
+536:     }
+537: 
+538:     if (options.anonymousFunctionNaming ==
+539:         AnonymousFunctionNamingPolicy.MAPPED) {
+540:       passes.add(nameMappedAnonymousFunctions);
+541:     }
+542: 
+543:     // The mapped name anonymous function pass makes use of information that
+544:     // the extract prototype member declarations pass removes so the former
+545:     // happens before the latter.
+546:     //
+547:     // Extracting prototype properties screws up the heuristic renaming
+548:     // policies, so never run it when those policies are requested.
+549:     if (options.extractPrototypeMemberDeclarations &&
+550:         (options.propertyRenaming != PropertyRenamingPolicy.HEURISTIC &&
+551:          options.propertyRenaming !=
+552:             PropertyRenamingPolicy.AGGRESSIVE_HEURISTIC)) {
+553:       passes.add(extractPrototypeMemberDeclarations);
+554:     }
+555: 
+556:     if (options.ambiguateProperties &&
+557:         (options.propertyRenaming == PropertyRenamingPolicy.ALL_UNQUOTED)) {
+558:       passes.add(ambiguateProperties);
+559:     }
+560: 
+561:     if (options.propertyRenaming != PropertyRenamingPolicy.OFF) {
+562:       passes.add(renameProperties);
+563:     }
+564: 
+565:     // Reserve global names added to the "windows" object.
+566:     if (options.reserveRawExports) {
+567:       passes.add(gatherRawExports);
+568:     }
+569: 
+570:     // This comes after property renaming because quoted property names must
+571:     // not be renamed.
+572:     if (options.convertToDottedProperties) {
+573:       passes.add(convertToDottedProperties);
+574:     }
+575: 
+576:     // Property renaming must happen before this pass runs since this
+577:     // pass may convert dotted properties into quoted properties.  It
+578:     // is beneficial to run before alias strings, alias keywords and
+579:     // variable renaming.
+580:     if (options.rewriteFunctionExpressions) {
+581:       passes.add(rewriteFunctionExpressions);
+582:     }
+583: 
+584:     // This comes after converting quoted property accesses to dotted property
+585:     // accesses in order to avoid aliasing property names.
+586:     if (!options.aliasableStrings.isEmpty() || options.aliasAllStrings) {
+587:       passes.add(aliasStrings);
+588:     }
+589: 
+590:     if (options.aliasExternals) {
+591:       passes.add(aliasExternals);
+592:     }
+593: 
+594:     if (options.aliasKeywords) {
+595:       passes.add(aliasKeywords);
+596:     }
+597: 
+598:     // Passes after this point can no longer depend on normalized AST
+599:     // assumptions.
+600:     passes.add(markUnnormalized);
+601: 
+602:     if (options.coalesceVariableNames) {
+603:       passes.add(coalesceVariableNames);
+604: 
+605:       // coalesceVariables creates identity assignments and more redundant code
+606:       // that can be removed, rerun the peephole optimizations to clean them
+607:       // up.
+608:       if (options.foldConstants) {
+609:         passes.add(peepholeOptimizations);
+610:       }
+611:     }
+612: 
+613:     if (options.collapseVariableDeclarations) {
+614:       passes.add(exploitAssign);
+615:       passes.add(collapseVariableDeclarations);
+616:     }
+617: 
+618:     // This pass works best after collapseVariableDeclarations.
+619:     passes.add(denormalize);
+620: 
+621:     if (options.instrumentationTemplate != null) {
+622:       passes.add(instrumentFunctions);
+623:     }
+624: 
+625:     if (options.variableRenaming != VariableRenamingPolicy.ALL) {
+626:       // If we're leaving some (or all) variables with their old names,
+627:       // then we need to undo any of the markers we added for distinguishing
+628:       // local variables ("$$1").
+629:       passes.add(invertContextualRenaming);
+630:     }
+631: 
+632:     if (options.variableRenaming != VariableRenamingPolicy.OFF) {
+633:       passes.add(renameVars);
+634:     }
+635: 
+636:     if (options.groupVariableDeclarations) {
+637:       passes.add(groupVariableDeclarations);
+638:     }
+639: 
+640:     // This pass should run after names stop changing.
+641:     if (options.processObjectPropertyString) {
+642:       passes.add(objectPropertyStringPostprocess);
+643:     }
+644: 
+645:     if (options.labelRenaming) {
+646:       passes.add(renameLabels);
+647:     }
+648: 
+649:     if (options.foldConstants) {
+650:       passes.add(latePeepholeOptimizations);
+651:     }
+652: 
+653:     if (options.anonymousFunctionNaming ==
+654:         AnonymousFunctionNamingPolicy.UNMAPPED) {
+655:       passes.add(nameUnmappedAnonymousFunctions);
+656:     }
+657: 
+658:     if (options.renamePrefixNamespace != null) {
+659:       if (!GLOBAL_SYMBOL_NAMESPACE_PATTERN.matcher(
+660:           options.renamePrefixNamespace).matches()) {
+661:         throw new IllegalArgumentException(
+662:             "Illegal character in renamePrefixNamespace name: "
+663:             + options.renamePrefixNamespace);
+664:       }
+665:       passes.add(rescopeGlobalSymbols);
+666:     }
+667: 
+668:     passes.add(stripSideEffectProtection);
+669: 
+670:     // Safety checks
+671:     passes.add(sanityCheckAst);
+672:     passes.add(sanityCheckVars);
+673: 
+674:     return passes;
+675:   }
+
+[41] com.google.javascript.jscomp.NodeUtil#functionCallHasSideEffects  (lines 994-1050)
+994:   static boolean functionCallHasSideEffects(
+995:       Node callNode, @Nullable AbstractCompiler compiler) {
+996:     if (!callNode.isCall()) {
+997:       throw new IllegalStateException(
+998:           "Expected CALL node, got " + Token.name(callNode.getType()));
+999:     }
+1000: 
+1001:     if (callNode.isNoSideEffectsCall()) {
+1002:       return false;
+1003:     }
+1004: 
+1005:     Node nameNode = callNode.getFirstChild();
+1006: 
+1007:     // Built-in functions with no side effects.
+1008:     if (nameNode.isName()) {
+1009:       String name = nameNode.getString();
+1010:       if (BUILTIN_FUNCTIONS_WITHOUT_SIDEEFFECTS.contains(name)) {
+1011:         return false;
+1012:       }
+1013:     } else if (nameNode.isGetProp()) {
+1014:       if (callNode.hasOneChild()
+1015:           && OBJECT_METHODS_WITHOUT_SIDEEFFECTS.contains(
+1016:                 nameNode.getLastChild().getString())) {
+1017:         return false;
+1018:       }
+1019: 
+1020:       if (callNode.isOnlyModifiesThisCall()
+1021:           && evaluatesToLocalValue(nameNode.getFirstChild())) {
+1022:         return false;
+1023:       }
+1024: 
+1025:       // Math.floor has no side-effects.
+1026:       // TODO(nicksantos): This is a terrible terrible hack, until
+1027:       // I create a definitionProvider that understands namespacing.
+1028:       if (nameNode.getFirstChild().isName()) {
+1029:         if ("Math.floor".equals(nameNode.getQualifiedName())) {
+1030:           return false;
+1031:         }
+1032:       }
+1033: 
+1034:       if (compiler != null && !compiler.hasRegExpGlobalReferences()) {
+1035:         if (nameNode.getFirstChild().isRegExp()
+1036:             && REGEXP_METHODS.contains(nameNode.getLastChild().getString())) {
+1037:           return false;
+1038:         } else if (nameNode.getFirstChild().isString()
+1039:             && STRING_REGEXP_METHODS.contains(
+1040:                 nameNode.getLastChild().getString())) {
+1041:           Node param = nameNode.getNext();
+1042:           if (param != null &&
+1043:               (param.isString() || param.isRegExp()))
+1044:           return false;
+1045:         }
+1046:       }
+1047:     }
+1048: 
+1049:     return true;
+1050:   }
+
+[42] com.google.javascript.jscomp.ReplaceIdGenerators#getIdGeneratorMap  (lines 224-238)
+224:   public String getIdGeneratorMap() {
+225:     StringBuilder sb = new StringBuilder();
+226:     for (Map.Entry<String, List<Replacement>> entry :
+227:         idGeneratorMaps.entrySet()) {
+228:       sb.append("[");
+229:       sb.append(entry.getKey());
+230:       sb.append("]\n\n");
+231:       for (Replacement replacement : entry.getValue()) {
+232:         sb.append(replacement.toString());
+233:         sb.append("\n");
+234:       }
+235:       sb.append("\n");
+236:     }
+237:     return sb.toString();
+238:   }
+
+[43] com.google.javascript.jscomp.DefaultPassConfig#getCodeRemovingPasses  (lines 714-746)
+714:   private List<PassFactory> getCodeRemovingPasses() {
+715:     List<PassFactory> passes = Lists.newArrayList();
+716:     if (options.collapseObjectLiterals && !isInliningForbidden()) {
+717:       passes.add(collapseObjectLiterals);
+718:     }
+719: 
+720:     if (options.inlineVariables || options.inlineLocalVariables) {
+721:       passes.add(inlineVariables);
+722:     } else if (options.inlineConstantVars) {
+723:       passes.add(inlineConstants);
+724:     }
+725: 
+726:     if (options.foldConstants) {
+727:       // These used to be one pass.
+728:       passes.add(minimizeExitPoints);
+729:       passes.add(peepholeOptimizations);
+730:     }
+731: 
+732:     if (options.removeDeadCode) {
+733:       passes.add(removeUnreachableCode);
+734:     }
+735: 
+736:     if (options.removeUnusedPrototypeProperties) {
+737:       passes.add(removeUnusedPrototypeProperties);
+738:     }
+739: 
+740:     if (options.removeUnusedClassProperties && !isInliningForbidden()) {
+741:       passes.add(removeUnusedClassProperties);
+742:     }
+743: 
+744:     assertAllLoopablePasses(passes);
+745:     return passes;
+746:   }
+
+[44] com.google.javascript.rhino.Node#checkTreeEquals  (lines 1427-1437)
+1427:   public String checkTreeEquals(Node node2) {
+1428:       NodeMismatch diff = checkTreeEqualsImpl(node2);
+1429:       if (diff != null) {
+1430:         return "Node tree inequality:" +
+1431:             "\nTree1:\n" + toStringTree() +
+1432:             "\n\nTree2:\n" + node2.toStringTree() +
+1433:             "\n\nSubtree1: " + diff.nodeA.toStringTree() +
+1434:             "\n\nSubtree2: " + diff.nodeB.toStringTree();
+1435:       }
+1436:       return null;
+1437:   }
+
+[45] com.google.javascript.rhino.Node#toString  (lines 350-353)
+350:     @Override
+351:     public String toString() {
+352:       return String.valueOf(intValue);
+353:     }
+
+[46] com.google.javascript.rhino.Node#toStringTreeImpl  (lines 1014-1022)
+1014:   private String toStringTreeImpl() {
+1015:     try {
+1016:       StringBuilder s = new StringBuilder();
+1017:       appendStringTree(s);
+1018:       return s.toString();
+1019:     } catch (IOException e) {
+1020:       throw new RuntimeException("Should not happen\n" + e);
+1021:     }
+1022:   }
+
+[47] com.google.javascript.jscomp.DependencyOptions#setDependencySorting  (lines 55-58)
+55:   public DependencyOptions setDependencySorting(boolean enabled) {
+56:     this.sortDependencies = enabled;
+57:     return this;
+58:   }
+
+[48] com.google.javascript.jscomp.DefaultPassConfig#process  (lines 1370-1376)
+1370:         @Override public void process(Node externs, Node root) {
+1371:           ReplaceIdGenerators pass =
+1372:               new ReplaceIdGenerators(
+1373:                   compiler, options.idGenerators, options.generatePseudoNames);
+1374:           pass.process(externs, root);
+1375:           idGeneratorMap = pass.getIdGeneratorMap();
+1376:         }
+
+[49] com.google.javascript.jscomp.CreateSyntheticBlocks#visit  (lines 169-215)
+169:     @Override
+170:     public void visit(NodeTraversal t, Node n, Node parent) {
+171:       if (!n.isCall() || !n.getFirstChild().isName()) {
+172:         return;
+173:       }
+174: 
+175:       Node callTarget = n.getFirstChild();
+176:       String callName = callTarget.getString();
+177: 
+178:       if (startMarkerName.equals(callName)) {
+179:         if (!parent.isExprResult()) {
+180:           compiler.report(
+181:               t.makeError(n, INVALID_MARKER_USAGE, startMarkerName));
+182:           return;
+183:         }
+184:         markerStack.push(parent);
+185:         return;
+186:       }
+187: 
+188:       if (!endMarkerName.equals(callName)) {
+189:         return;
+190:       }
+191: 
+192:       Node endMarkerNode = parent;
+193:       if (!endMarkerNode.isExprResult()) {
+194:         compiler.report(
+195:             t.makeError(n, INVALID_MARKER_USAGE, endMarkerName));
+196:         return;
+197:       }
+198: 
+199:       if (markerStack.isEmpty()) {
+200:         compiler.report(t.makeError(n, UNMATCHED_END_MARKER,
+201:             startMarkerName, endMarkerName));
+202:         return;
+203:       }
+204: 
+205:       Node startMarkerNode = markerStack.pop();
+206:       if (endMarkerNode.getParent() != startMarkerNode.getParent()) {
+207:         // The end marker isn't in the same block as the start marker.
+208:         compiler.report(t.makeError(n, UNMATCHED_END_MARKER,
+209:             startMarkerName, endMarkerName));
+210:         return;
+211:       }
+212: 
+213:       // This is a valid marker set add it to the list of markers to process.
+214:       validMarkers.add(new Marker(startMarkerNode, endMarkerNode));
+215:     }
+
+[50] com.google.javascript.rhino.Node#appendStringTree  (lines 1024-1026)
+1024:   public void appendStringTree(Appendable appendable) throws IOException {
+1025:     toStringTreeHelper(this, 0, appendable);
+1026:   }

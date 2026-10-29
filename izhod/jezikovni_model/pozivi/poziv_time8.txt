@@ -1,0 +1,983 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.joda.time.TestDateTimeZone::testForOffsetHoursMinutes_int_int
+java.lang.IllegalArgumentException: Minutes out of range: -15
+	at org.joda.time.DateTimeZone.forOffsetHoursMinutes(DateTimeZone.java:280)
+	at org.joda.time.TestDateTimeZone.testForOffsetHoursMinutes_int_int(TestDateTimeZone.java:316)
+
+=== CANDIDATE METHODS ===
+
+[1] org.joda.time.DateTimeZone#withUTC  (lines 633-635)
+633:             public Chronology withUTC() {
+634:                 return this;
+635:             }
+
+[2] org.joda.time.tz.DateTimeZoneBuilder#OfYear  (lines 499-515)
+499:         OfYear(char mode,
+500:                int monthOfYear,
+501:                int dayOfMonth,
+502:                int dayOfWeek, boolean advanceDayOfWeek,
+503:                int millisOfDay)
+504:         {
+505:             if (mode != 'u' && mode != 'w' && mode != 's') {
+506:                 throw new IllegalArgumentException("Unknown mode: " + mode);
+507:             }
+508: 
+509:             iMode = mode;
+510:             iMonthOfYear = monthOfYear;
+511:             iDayOfMonth = dayOfMonth;
+512:             iDayOfWeek = dayOfWeek;
+513:             iAdvance = advanceDayOfWeek;
+514:             iMillisOfDay = millisOfDay;
+515:         }
+
+[3] org.joda.time.tz.DateTimeZoneBuilder#Recurrence  (lines 747-751)
+747:         Recurrence(OfYear ofYear, String nameKey, int saveMillis) {
+748:             iOfYear = ofYear;
+749:             iNameKey = nameKey;
+750:             iSaveMillis = saveMillis;
+751:         }
+
+[4] org.joda.time.tz.DateTimeZoneBuilder#readFrom  (lines 109-125)
+109:     public static DateTimeZone readFrom(DataInput in, String id) throws IOException {
+110:         switch (in.readUnsignedByte()) {
+111:         case 'F':
+112:             DateTimeZone fixed = new FixedDateTimeZone
+113:                 (id, in.readUTF(), (int)readMillis(in), (int)readMillis(in));
+114:             if (fixed.equals(DateTimeZone.UTC)) {
+115:                 fixed = DateTimeZone.UTC;
+116:             }
+117:             return fixed;
+118:         case 'C':
+119:             return CachedDateTimeZone.forZone(PrecalculatedZone.readFrom(in, id));
+120:         case 'P':
+121:             return PrecalculatedZone.readFrom(in, id);
+122:         default:
+123:             throw new IOException("Invalid encoding");
+124:         }
+125:     }
+
+[5] org.joda.time.tz.CachedDateTimeZone#forZone  (lines 67-72)
+67:     public static CachedDateTimeZone forZone(DateTimeZone zone) {
+68:         if (zone instanceof CachedDateTimeZone) {
+69:             return (CachedDateTimeZone)zone;
+70:         }
+71:         return new CachedDateTimeZone(zone);
+72:     }
+
+[6] org.joda.time.DateTimeZone#getZone  (lines 630-632)
+630:             public DateTimeZone getZone() {
+631:                 return null;
+632:             }
+
+[7] org.joda.time.DateTimeZone#fixedOffsetZone  (lines 373-391)
+373:     private static synchronized DateTimeZone fixedOffsetZone(String id, int offset) {
+374:         if (offset == 0) {
+375:             return DateTimeZone.UTC;
+376:         }
+377:         if (iFixedOffsetCache == null) {
+378:             iFixedOffsetCache = new HashMap<String, SoftReference<DateTimeZone>>();
+379:         }
+380:         DateTimeZone zone;
+381:         Reference<DateTimeZone> ref = iFixedOffsetCache.get(id);
+382:         if (ref != null) {
+383:             zone = ref.get();
+384:             if (zone != null) {
+385:                 return zone;
+386:             }
+387:         }
+388:         zone = new FixedDateTimeZone(id, null, offset, offset);
+389:         iFixedOffsetCache.put(id, new SoftReference<DateTimeZone>(zone));
+390:         return zone;
+391:     }
+
+[8] org.joda.time.DateTimeZone#forID  (lines 203-225)
+203:     @FromString
+204:     public static DateTimeZone forID(String id) {
+205:         if (id == null) {
+206:             return getDefault();
+207:         }
+208:         if (id.equals("UTC")) {
+209:             return DateTimeZone.UTC;
+210:         }
+211:         DateTimeZone zone = cProvider.getZone(id);
+212:         if (zone != null) {
+213:             return zone;
+214:         }
+215:         if (id.startsWith("+") || id.startsWith("-")) {
+216:             int offset = parseOffset(id);
+217:             if (offset == 0L) {
+218:                 return DateTimeZone.UTC;
+219:             } else {
+220:                 id = printOffset(offset);
+221:                 return fixedOffsetZone(id, offset);
+222:             }
+223:         }
+224:         throw new IllegalArgumentException("The datetime zone id '" + id + "' is not recognised");
+225:     }
+
+[9] org.joda.time.DateTimeZone#offsetFormatter  (lines 694-701)
+694:     private static synchronized DateTimeFormatter offsetFormatter() {
+695:         if (cOffsetFormatter == null) {
+696:             cOffsetFormatter = new DateTimeFormatterBuilder()
+697:                 .appendTimeZoneOffset(null, true, 2, 4)
+698:                 .toFormatter();
+699:         }
+700:         return cOffsetFormatter;
+701:     }
+
+[10] org.joda.time.DateTimeUtils#put  (lines 61-67)
+61:     private static void put(Map<String, DateTimeZone> map, String name, String id) {
+62:         try {
+63:             map.put(name, DateTimeZone.forID(id));
+64:         } catch (RuntimeException ex) {
+65:             // ignore
+66:         }
+67:     }
+
+[11] org.joda.time.tz.ZoneInfoProvider#openResource  (lines 194-215)
+194:     private InputStream openResource(String name) throws IOException {
+195:         InputStream in;
+196:         if (iFileDir != null) {
+197:             in = new FileInputStream(new File(iFileDir, name));
+198:         } else {
+199:             String path = iResourcePath.concat(name);
+200:             if (iLoader != null) {
+201:                 in = iLoader.getResourceAsStream(path);
+202:             } else {
+203:                 in = ClassLoader.getSystemResourceAsStream(path);
+204:             }
+205:             if (in == null) {
+206:                 StringBuilder buf = new StringBuilder(40)
+207:                     .append("Resource not found: \"")
+208:                     .append(path)
+209:                     .append("\" ClassLoader: ")
+210:                     .append(iLoader != null ? iLoader.toString() : "system");
+211:                 throw new IOException(buf.toString());
+212:             }
+213:         }
+214:         return in;
+215:     }
+
+[12] org.joda.time.format.DateTimeFormatter#DateTimeFormatter  (lines 107-118)
+107:     public DateTimeFormatter(
+108:             DateTimePrinter printer, DateTimeParser parser) {
+109:         super();
+110:         iPrinter = printer;
+111:         iParser = parser;
+112:         iLocale = null;
+113:         iOffsetParsed = false;
+114:         iChrono = null;
+115:         iZone = null;
+116:         iPivotYear = null;
+117:         iDefaultYear = 2000;
+118:     }
+
+[13] org.joda.time.format.DateTimeFormatter#DateTimeFormatter  (lines 123-137)
+123:     private DateTimeFormatter(
+124:             DateTimePrinter printer, DateTimeParser parser,
+125:             Locale locale, boolean offsetParsed,
+126:             Chronology chrono, DateTimeZone zone,
+127:             Integer pivotYear, int defaultYear) {
+128:         super();
+129:         iPrinter = printer;
+130:         iParser = parser;
+131:         iLocale = locale;
+132:         iOffsetParsed = offsetParsed;
+133:         iChrono = chrono;
+134:         iZone = zone;
+135:         iPivotYear = pivotYear;
+136:         iDefaultYear = defaultYear;
+137:     }
+
+[14] org.joda.time.format.DateTimeFormatterBuilder#digitCount  (lines 2452-2463)
+2452:         private int digitCount(String text, int position, int amount) {
+2453:             int limit = Math.min(text.length() - position, amount);
+2454:             amount = 0;
+2455:             for (; limit > 0; limit--) {
+2456:                 char c = text.charAt(position + amount);
+2457:                 if (c < '0' || c > '9') {
+2458:                     break;
+2459:                 }
+2460:                 amount++;
+2461:             }
+2462:             return amount;
+2463:         }
+
+[15] org.joda.time.format.DateTimeFormatterBuilder#TimeZoneOffset  (lines 2117-2134)
+2117:         TimeZoneOffset(String zeroOffsetPrintText, String zeroOffsetParseText,
+2118:                                 boolean showSeparators,
+2119:                                 int minFields, int maxFields)
+2120:         {
+2121:             super();
+2122:             iZeroOffsetPrintText = zeroOffsetPrintText;
+2123:             iZeroOffsetParseText = zeroOffsetParseText;
+2124:             iShowSeparators = showSeparators;
+2125:             if (minFields <= 0 || maxFields < minFields) {
+2126:                 throw new IllegalArgumentException();
+2127:             }
+2128:             if (minFields > 4) {
+2129:                 minFields = 4;
+2130:                 maxFields = 4;
+2131:             }
+2132:             iMinFields = minFields;
+2133:             iMaxFields = maxFields;
+2134:         }
+
+[16] org.joda.time.DateTimeZone#forOffsetMillis  (lines 303-309)
+303:     public static DateTimeZone forOffsetMillis(int millisOffset) {
+304:         if (millisOffset < -MAX_MILLIS || millisOffset > MAX_MILLIS) {
+305:             throw new IllegalArgumentException("Millis out of range: " + millisOffset);
+306:         }
+307:         String id = printOffset(millisOffset);
+308:         return fixedOffsetZone(id, millisOffset);
+309:     }
+
+[17] org.joda.time.format.DateTimeParserBucket#sort  (lines 415-427)
+415:     private static void sort(SavedField[] array, int high) {
+416:         if (high > 10) {
+417:             Arrays.sort(array, 0, high);
+418:         } else {
+419:             for (int i=0; i<high; i++) {
+420:                 for (int j=i; j>0 && (array[j-1]).compareTo(array[j])>0; j--) {
+421:                     SavedField t = array[j];
+422:                     array[j] = array[j-1];
+423:                     array[j-1] = t;
+424:                 }
+425:             }
+426:         }
+427:     }
+
+[18] org.joda.time.format.DateTimeFormatter#requireParser  (lines 924-930)
+924:     private DateTimeParser requireParser() {
+925:         DateTimeParser parser = iParser;
+926:         if (parser == null) {
+927:             throw new UnsupportedOperationException("Parsing not supported");
+928:         }
+929:         return parser;
+930:     }
+
+[19] org.joda.time.format.DateTimeFormatterBuilder#DateTimeFormatterBuilder  (lines 83-86)
+83:     public DateTimeFormatterBuilder() {
+84:         super();
+85:         iElementPairs = new ArrayList<Object>();
+86:     }
+
+[20] org.joda.time.chrono.BaseChronology#BaseChronology  (lines 53-55)
+53:     protected BaseChronology() {
+54:         super();
+55:     }
+
+[21] org.joda.time.DateTimeZone#getDefault  (lines 133-163)
+133:     public static DateTimeZone getDefault() {
+134:         DateTimeZone zone = cDefault;
+135:         if (zone == null) {
+136:             synchronized(DateTimeZone.class) {
+137:                 zone = cDefault;
+138:                 if (zone == null) {
+139:                     DateTimeZone temp = null;
+140:                     try {
+141:                         try {
+142:                             String id = System.getProperty("user.timezone");
+143:                             if (id != null) {  // null check avoids stack overflow
+144:                                 temp = forID(id);
+145:                             }
+146:                         } catch (RuntimeException ex) {
+147:                             // ignored
+148:                         }
+149:                         if (temp == null) {
+150:                             temp = forTimeZone(TimeZone.getDefault());
+151:                         }
+152:                     } catch (IllegalArgumentException ex) {
+153:                         // ignored
+154:                     }
+155:                     if (temp == null) {
+156:                         temp = UTC;
+157:                     }
+158:                     cDefault = zone = temp;
+159:                 }
+160:             }
+161:         }
+162:         return zone;
+163:     }
+
+[22] org.joda.time.tz.DateTimeZoneBuilder#PrecalculatedZone  (lines 1497-1506)
+1497:         private PrecalculatedZone(String id, long[] transitions, int[] wallOffsets,
+1498:                           int[] standardOffsets, String[] nameKeys, DSTZone tailZone)
+1499:         {
+1500:             super(id);
+1501:             iTransitions = transitions;
+1502:             iWallOffsets = wallOffsets;
+1503:             iStandardOffsets = standardOffsets;
+1504:             iNameKeys = nameKeys;
+1505:             iTailZone = tailZone;
+1506:         }
+
+[23] org.joda.time.format.DateTimeFormatter#withChronology  (lines 256-262)
+256:     public DateTimeFormatter withChronology(Chronology chrono) {
+257:         if (iChrono == chrono) {
+258:             return this;
+259:         }
+260:         return new DateTimeFormatter(iPrinter, iParser, iLocale,
+261:                 iOffsetParsed, chrono, iZone, iPivotYear, iDefaultYear);
+262:     }
+
+[24] org.joda.time.format.DateTimeFormatter#parseMillis  (lines 739-753)
+739:     public long parseMillis(String text) {
+740:         DateTimeParser parser = requireParser();
+741:         
+742:         Chronology chrono = selectChronology(iChrono);
+743:         DateTimeParserBucket bucket = new DateTimeParserBucket(0, chrono, iLocale, iPivotYear, iDefaultYear);
+744:         int newPos = parser.parseInto(bucket, text, 0);
+745:         if (newPos >= 0) {
+746:             if (newPos >= text.length()) {
+747:                 return bucket.computeMillis(true, text);
+748:             }
+749:         } else {
+750:             newPos = ~newPos;
+751:         }
+752:         throw new IllegalArgumentException(FormatUtils.createErrorMessage(text, newPos));
+753:     }
+
+[25] org.joda.time.DateTimeUtils#getChronology  (lines 281-286)
+281:     public static final Chronology getChronology(Chronology chrono) {
+282:         if (chrono == null) {
+283:             return ISOChronology.getInstance();
+284:         }
+285:         return chrono;
+286:     }
+
+[26] org.joda.time.tz.DateTimeZoneBuilder#readFrom  (lines 94-100)
+94:     public static DateTimeZone readFrom(InputStream in, String id) throws IOException {
+95:         if (in instanceof DataInput) {
+96:             return readFrom((DataInput)in, id);
+97:         } else {
+98:             return readFrom((DataInput)new DataInputStream(in), id);
+99:         }
+100:     }
+
+[27] org.joda.time.DateTimeZone#printOffset  (lines 655-687)
+655:     private static String printOffset(int offset) {
+656:         StringBuffer buf = new StringBuffer();
+657:         if (offset >= 0) {
+658:             buf.append('+');
+659:         } else {
+660:             buf.append('-');
+661:             offset = -offset;
+662:         }
+663: 
+664:         int hours = offset / DateTimeConstants.MILLIS_PER_HOUR;
+665:         FormatUtils.appendPaddedInteger(buf, hours, 2);
+666:         offset -= hours * (int) DateTimeConstants.MILLIS_PER_HOUR;
+667: 
+668:         int minutes = offset / DateTimeConstants.MILLIS_PER_MINUTE;
+669:         buf.append(':');
+670:         FormatUtils.appendPaddedInteger(buf, minutes, 2);
+671:         offset -= minutes * DateTimeConstants.MILLIS_PER_MINUTE;
+672:         if (offset == 0) {
+673:             return buf.toString();
+674:         }
+675: 
+676:         int seconds = offset / DateTimeConstants.MILLIS_PER_SECOND;
+677:         buf.append(':');
+678:         FormatUtils.appendPaddedInteger(buf, seconds, 2);
+679:         offset -= seconds * DateTimeConstants.MILLIS_PER_SECOND;
+680:         if (offset == 0) {
+681:             return buf.toString();
+682:         }
+683: 
+684:         buf.append('.');
+685:         FormatUtils.appendPaddedInteger(buf, offset, 3);
+686:         return buf.toString();
+687:     }
+
+[28] org.joda.time.format.DateTimeFormatterBuilder#isParser  (lines 1174-1182)
+1174:     private boolean isParser(Object f) {
+1175:         if (f instanceof DateTimeParser) {
+1176:             if (f instanceof Composite) {
+1177:                 return ((Composite)f).isParser();
+1178:             }
+1179:             return true;
+1180:         }
+1181:         return false;
+1182:     }
+
+[29] org.joda.time.format.DateTimeParserBucket#computeMillis  (lines 344-395)
+344:     public long computeMillis(boolean resetFields, String text) {
+345:         SavedField[] savedFields = iSavedFields;
+346:         int count = iSavedFieldsCount;
+347:         if (iSavedFieldsShared) {
+348:             iSavedFields = savedFields = (SavedField[])iSavedFields.clone();
+349:             iSavedFieldsShared = false;
+350:         }
+351:         sort(savedFields, count);
+352:         if (count > 0) {
+353:             // alter base year for parsing if first field is month or day
+354:             DurationField months = DurationFieldType.months().getField(iChrono);
+355:             DurationField days = DurationFieldType.days().getField(iChrono);
+356:             DurationField first = savedFields[0].iField.getDurationField();
+357:             if (compareReverse(first, months) >= 0 && compareReverse(first, days) <= 0) {
+358:                 saveField(DateTimeFieldType.year(), iDefaultYear);
+359:                 return computeMillis(resetFields, text);
+360:             }
+361:         }
+362: 
+363:         long millis = iMillis;
+364:         try {
+365:             for (int i = 0; i < count; i++) {
+366:                 millis = savedFields[i].set(millis, resetFields);
+367:             }
+368:             if (resetFields) {
+369:                 for (int i = 0; i < count; i++) {
+370:                     millis = savedFields[i].set(millis, i == (count - 1));
+371:                 }
+372:             }
+373:         } catch (IllegalFieldValueException e) {
+374:             if (text != null) {
+375:                 e.prependMessage("Cannot parse \"" + text + '"');
+376:             }
+377:             throw e;
+378:         }
+379:         
+380:         if (iOffset != null) {
+381:             millis -= iOffset;
+382:         } else if (iZone != null) {
+383:             int offset = iZone.getOffsetFromLocal(millis);
+384:             millis -= offset;
+385:             if (offset != iZone.getOffset(millis)) {
+386:                 String message = "Illegal instant due to time zone offset transition (" + iZone + ')';
+387:                 if (text != null) {
+388:                     message = "Cannot parse \"" + text + "\": " + message;
+389:                 }
+390:                 throw new IllegalInstantException(message);
+391:             }
+392:         }
+393:         
+394:         return millis;
+395:     }
+
+[30] org.joda.time.format.DateTimeFormatterBuilder#parseInto  (lines 2277-2446)
+2277:         public int parseInto(DateTimeParserBucket bucket, String text, int position) {
+2278:             int limit = text.length() - position;
+2279: 
+2280:             zeroOffset:
+2281:             if (iZeroOffsetParseText != null) {
+2282:                 if (iZeroOffsetParseText.length() == 0) {
+2283:                     // Peek ahead, looking for sign character.
+2284:                     if (limit > 0) {
+2285:                         char c = text.charAt(position);
+2286:                         if (c == '-' || c == '+') {
+2287:                             break zeroOffset;
+2288:                         }
+2289:                     }
+2290:                     bucket.setOffset(Integer.valueOf(0));
+2291:                     return position;
+2292:                 }
+2293:                 if (text.regionMatches(true, position, iZeroOffsetParseText, 0, iZeroOffsetParseText.length())) {
+2294:                     bucket.setOffset(Integer.valueOf(0));
+2295:                     return position + iZeroOffsetParseText.length();
+2296:                 }
+2297:             }
+2298: 
+2299:             // Format to expect is sign character followed by at least one digit.
+2300: 
+2301:             if (limit <= 1) {
+2302:                 return ~position;
+2303:             }
+2304: 
+2305:             boolean negative;
+2306:             char c = text.charAt(position);
+2307:             if (c == '-') {
+2308:                 negative = true;
+2309:             } else if (c == '+') {
+2310:                 negative = false;
+2311:             } else {
+2312:                 return ~position;
+2313:             }
+2314: 
+2315:             limit--;
+2316:             position++;
+2317: 
+2318:             // Format following sign is one of:
+2319:             //
+2320:             // hh
+2321:             // hhmm
+2322:             // hhmmss
+2323:             // hhmmssSSS
+2324:             // hh:mm
+2325:             // hh:mm:ss
+2326:             // hh:mm:ss.SSS
+2327: 
+2328:             // First parse hours.
+2329: 
+2330:             if (digitCount(text, position, 2) < 2) {
+2331:                 // Need two digits for hour.
+2332:                 return ~position;
+2333:             }
+2334: 
+2335:             int offset;
+2336: 
+2337:             int hours = FormatUtils.parseTwoDigits(text, position);
+2338:             if (hours > 23) {
+2339:                 return ~position;
+2340:             }
+2341:             offset = hours * DateTimeConstants.MILLIS_PER_HOUR;
+2342:             limit -= 2;
+2343:             position += 2;
+2344: 
+2345:             parse: {
+2346:                 // Need to decide now if separators are expected or parsing
+2347:                 // stops at hour field.
+2348: 
+2349:                 if (limit <= 0) {
+2350:                     break parse;
+2351:                 }
+2352: 
+2353:                 boolean expectSeparators;
+2354:                 c = text.charAt(position);
+2355:                 if (c == ':') {
+2356:                     expectSeparators = true;
+2357:                     limit--;
+2358:                     position++;
+2359:                 } else if (c >= '0' && c <= '9') {
+2360:                     expectSeparators = false;
+2361:                 } else {
+2362:                     break parse;
+2363:                 }
+2364: 
+2365:                 // Proceed to parse minutes.
+2366: 
+2367:                 int count = digitCount(text, position, 2);
+2368:                 if (count == 0 && !expectSeparators) {
+2369:                     break parse;
+2370:                 } else if (count < 2) {
+2371:                     // Need two digits for minute.
+2372:                     return ~position;
+2373:                 }
+2374: 
+2375:                 int minutes = FormatUtils.parseTwoDigits(text, position);
+2376:                 if (minutes > 59) {
+2377:                     return ~position;
+2378:                 }
+2379:                 offset += minutes * DateTimeConstants.MILLIS_PER_MINUTE;
+2380:                 limit -= 2;
+2381:                 position += 2;
+2382: 
+2383:                 // Proceed to parse seconds.
+2384: 
+2385:                 if (limit <= 0) {
+2386:                     break parse;
+2387:                 }
+2388: 
+2389:                 if (expectSeparators) {
+2390:                     if (text.charAt(position) != ':') {
+2391:                         break parse;
+2392:                     }
+2393:                     limit--;
+2394:                     position++;
+2395:                 }
+2396: 
+2397:                 count = digitCount(text, position, 2);
+2398:                 if (count == 0 && !expectSeparators) {
+2399:                     break parse;
+2400:                 } else if (count < 2) {
+2401:                     // Need two digits for second.
+2402:                     return ~position;
+2403:                 }
+2404: 
+2405:                 int seconds = FormatUtils.parseTwoDigits(text, position);
+2406:                 if (seconds > 59) {
+2407:                     return ~position;
+2408:                 }
+2409:                 offset += seconds * DateTimeConstants.MILLIS_PER_SECOND;
+2410:                 limit -= 2;
+2411:                 position += 2;
+2412: 
+2413:                 // Proceed to parse fraction of second.
+2414: 
+2415:                 if (limit <= 0) {
+2416:                     break parse;
+2417:                 }
+2418: 
+2419:                 if (expectSeparators) {
+2420:                     if (text.charAt(position) != '.' && text.charAt(position) != ',') {
+2421:                         break parse;
+2422:                     }
+2423:                     limit--;
+2424:                     position++;
+2425:                 }
+2426:                 
+2427:                 count = digitCount(text, position, 3);
+2428:                 if (count == 0 && !expectSeparators) {
+2429:                     break parse;
+2430:                 } else if (count < 1) {
+2431:                     // Need at least one digit for fraction of second.
+2432:                     return ~position;
+2433:                 }
+2434: 
+2435:                 offset += (text.charAt(position++) - '0') * 100;
+2436:                 if (count > 1) {
+2437:                     offset += (text.charAt(position++) - '0') * 10;
+2438:                     if (count > 2) {
+2439:                         offset += text.charAt(position++) - '0';
+2440:                     }
+2441:                 }
+2442:             }
+2443: 
+2444:             bucket.setOffset(Integer.valueOf(negative ? -offset : offset));
+2445:             return position;
+2446:         }
+
+[31] org.joda.time.DateTimeZone#parseOffset  (lines 626-644)
+626:     private static int parseOffset(String str) {
+627:         // Can't use a real chronology if called during class
+628:         // initialization. Offset parser doesn't need it anyhow.
+629:         Chronology chrono = new BaseChronology() {
+630:             public DateTimeZone getZone() {
+631:                 return null;
+632:             }
+633:             public Chronology withUTC() {
+634:                 return this;
+635:             }
+636:             public Chronology withZone(DateTimeZone zone) {
+637:                 return this;
+638:             }
+639:             public String toString() {
+640:                 return getClass().getName();
+641:             }
+642:         };
+643:         return -(int) offsetFormatter().withChronology(chrono).parseMillis(str);
+644:     }
+
+[32] org.joda.time.format.DateTimeFormatterBuilder#appendTimeZoneOffset  (lines 1088-1093)
+1088:     public DateTimeFormatterBuilder appendTimeZoneOffset(
+1089:             String zeroOffsetText, boolean showSeparators,
+1090:             int minFields, int maxFields) {
+1091:         return append0(new TimeZoneOffset
+1092:                        (zeroOffsetText, zeroOffsetText, showSeparators, minFields, maxFields));
+1093:     }
+
+[33] org.joda.time.tz.ZoneInfoProvider#loadZoneData  (lines 223-242)
+223:     private DateTimeZone loadZoneData(String id) {
+224:         InputStream in = null;
+225:         try {
+226:             in = openResource(id);
+227:             DateTimeZone tz = DateTimeZoneBuilder.readFrom(in, id);
+228:             iZoneInfoMap.put(id, new SoftReference<DateTimeZone>(tz));
+229:             return tz;
+230:         } catch (IOException ex) {
+231:             uncaughtException(ex);
+232:             iZoneInfoMap.remove(id);
+233:             return null;
+234:         } finally {
+235:             try {
+236:                 if (in != null) {
+237:                     in.close();
+238:                 }
+239:             } catch (IOException ex) {
+240:             }
+241:         }
+242:     }
+
+[34] org.joda.time.format.FormatUtils#appendPaddedInteger  (lines 49-92)
+49:     public static void appendPaddedInteger(StringBuffer buf, int value, int size) {
+50:         if (value < 0) {
+51:             buf.append('-');
+52:             if (value != Integer.MIN_VALUE) {
+53:                 value = -value;
+54:             } else {
+55:                 for (; size > 10; size--) {
+56:                     buf.append('0');
+57:                 }
+58:                 buf.append("" + -(long)Integer.MIN_VALUE);
+59:                 return;
+60:             }
+61:         }
+62:         if (value < 10) {
+63:             for (; size > 1; size--) {
+64:                 buf.append('0');
+65:             }
+66:             buf.append((char)(value + '0'));
+67:         } else if (value < 100) {
+68:             for (; size > 2; size--) {
+69:                 buf.append('0');
+70:             }
+71:             // Calculate value div/mod by 10 without using two expensive
+72:             // division operations. (2 ^ 27) / 10 = 13421772. Add one to
+73:             // value to correct rounding error.
+74:             int d = ((value + 1) * 13421772) >> 27;
+75:             buf.append((char) (d + '0'));
+76:             // Append remainder by calculating (value - d * 10).
+77:             buf.append((char) (value - (d << 3) - (d << 1) + '0'));
+78:         } else {
+79:             int digits;
+80:             if (value < 1000) {
+81:                 digits = 3;
+82:             } else if (value < 10000) {
+83:                 digits = 4;
+84:             } else {
+85:                 digits = (int)(Math.log(value) / LOG_10) + 1;
+86:             }
+87:             for (; size > digits; size--) {
+88:                 buf.append('0');
+89:             }
+90:             buf.append(Integer.toString(value));
+91:         }
+92:     }
+
+[35] org.joda.time.tz.DateTimeZoneBuilder#readFrom  (lines 1339-1377)
+1339:         static PrecalculatedZone readFrom(DataInput in, String id) throws IOException {
+1340:             // Read string pool.
+1341:             int poolSize = in.readUnsignedShort();
+1342:             String[] pool = new String[poolSize];
+1343:             for (int i=0; i<poolSize; i++) {
+1344:                 pool[i] = in.readUTF();
+1345:             }
+1346: 
+1347:             int size = in.readInt();
+1348:             long[] transitions = new long[size];
+1349:             int[] wallOffsets = new int[size];
+1350:             int[] standardOffsets = new int[size];
+1351:             String[] nameKeys = new String[size];
+1352:             
+1353:             for (int i=0; i<size; i++) {
+1354:                 transitions[i] = readMillis(in);
+1355:                 wallOffsets[i] = (int)readMillis(in);
+1356:                 standardOffsets[i] = (int)readMillis(in);
+1357:                 try {
+1358:                     int index;
+1359:                     if (poolSize < 256) {
+1360:                         index = in.readUnsignedByte();
+1361:                     } else {
+1362:                         index = in.readUnsignedShort();
+1363:                     }
+1364:                     nameKeys[i] = pool[index];
+1365:                 } catch (ArrayIndexOutOfBoundsException e) {
+1366:                     throw new IOException("Invalid encoding");
+1367:                 }
+1368:             }
+1369: 
+1370:             DSTZone tailZone = null;
+1371:             if (in.readBoolean()) {
+1372:                 tailZone = DSTZone.readFrom(in, id);
+1373:             }
+1374: 
+1375:             return new PrecalculatedZone
+1376:                 (id, transitions, wallOffsets, standardOffsets, nameKeys, tailZone);
+1377:         }
+
+[36] org.joda.time.tz.CachedDateTimeZone#CachedDateTimeZone  (lines 86-89)
+86:     private CachedDateTimeZone(DateTimeZone zone) {
+87:         super(zone.getID());
+88:         iZone = zone;
+89:     }
+
+[37] org.joda.time.format.DateTimeParserBucket#DateTimeParserBucket  (lines 118-128)
+118:     public DateTimeParserBucket(long instantLocal, Chronology chrono,
+119:             Locale locale, Integer pivotYear, int defaultYear) {
+120:         super();
+121:         chrono = DateTimeUtils.getChronology(chrono);
+122:         iMillis = instantLocal;
+123:         iZone = chrono.getZone();
+124:         iChrono = chrono.withUTC();
+125:         iLocale = (locale == null ? Locale.getDefault() : locale);
+126:         iPivotYear = pivotYear;
+127:         iDefaultYear = defaultYear;
+128:     }
+
+[38] org.joda.time.format.DateTimeFormatterBuilder#getFormatter  (lines 1137-1162)
+1137:     private Object getFormatter() {
+1138:         Object f = iFormatter;
+1139: 
+1140:         if (f == null) {
+1141:             if (iElementPairs.size() == 2) {
+1142:                 Object printer = iElementPairs.get(0);
+1143:                 Object parser = iElementPairs.get(1);
+1144: 
+1145:                 if (printer != null) {
+1146:                     if (printer == parser || parser == null) {
+1147:                         f = printer;
+1148:                     }
+1149:                 } else {
+1150:                     f = parser;
+1151:                 }
+1152:             }
+1153: 
+1154:             if (f == null) {
+1155:                 f = new Composite(iElementPairs);
+1156:             }
+1157: 
+1158:             iFormatter = f;
+1159:         }
+1160: 
+1161:         return f;
+1162:     }
+
+[39] org.joda.time.format.DateTimeFormatterBuilder#isPrinter  (lines 1164-1172)
+1164:     private boolean isPrinter(Object f) {
+1165:         if (f instanceof DateTimePrinter) {
+1166:             if (f instanceof Composite) {
+1167:                 return ((Composite)f).isPrinter();
+1168:             }
+1169:             return true;
+1170:         }
+1171:         return false;
+1172:     }
+
+[40] org.joda.time.DateTimeZone#setDefault  (lines 174-185)
+174:     public static void setDefault(DateTimeZone zone) throws SecurityException {
+175:         SecurityManager sm = System.getSecurityManager();
+176:         if (sm != null) {
+177:             sm.checkPermission(new JodaTimePermission("DateTimeZone.setDefault"));
+178:         }
+179:         if (zone == null) {
+180:             throw new IllegalArgumentException("The datetime zone must not be null");
+181:         }
+182:         synchronized(DateTimeZone.class) {
+183:             cDefault = zone;
+184:         }
+185:     }
+
+[41] org.joda.time.field.FieldUtils#safeMultiply  (lines 118-124)
+118:     public static int safeMultiply(int val1, int val2) {
+119:         long total = (long) val1 * (long) val2;
+120:         if (total < Integer.MIN_VALUE || total > Integer.MAX_VALUE) {
+121:           throw new ArithmeticException("Multiplication overflows an int: " + val1 + " * " + val2);
+122:         }
+123:         return (int) total;
+124:     }
+
+[42] org.joda.time.tz.ZoneInfoProvider#getZone  (lines 135-163)
+135:     public DateTimeZone getZone(String id) {
+136:         if (id == null) {
+137:             return null;
+138:         }
+139: 
+140:         Object obj = iZoneInfoMap.get(id);
+141:         if (obj == null) {
+142:             return null;
+143:         }
+144: 
+145:         if (id.equals(obj)) {
+146:             // Load zone data for the first time.
+147:             return loadZoneData(id);
+148:         }
+149: 
+150:         if (obj instanceof SoftReference<?>) {
+151:             @SuppressWarnings("unchecked")
+152:             SoftReference<DateTimeZone> ref = (SoftReference<DateTimeZone>) obj;
+153:             DateTimeZone tz = ref.get();
+154:             if (tz != null) {
+155:                 return tz;
+156:             }
+157:             // Reference cleared; load data again.
+158:             return loadZoneData(id);
+159:         }
+160: 
+161:         // If this point is reached, mapping must link to another.
+162:         return getZone((String)obj);
+163:     }
+
+[43] org.joda.time.format.DateTimeFormatterBuilder#append0  (lines 373-379)
+373:     private DateTimeFormatterBuilder append0(Object element) {
+374:         iFormatter = null;
+375:         // Add the element as both a printer and parser.
+376:         iElementPairs.add(element);
+377:         iElementPairs.add(element);
+378:         return this;
+379:     }
+
+[44] org.joda.time.format.DateTimeFormatterBuilder#toFormatter  (lines 104-118)
+104:     public DateTimeFormatter toFormatter() {
+105:         Object f = getFormatter();
+106:         DateTimePrinter printer = null;
+107:         if (isPrinter(f)) {
+108:             printer = (DateTimePrinter) f;
+109:         }
+110:         DateTimeParser parser = null;
+111:         if (isParser(f)) {
+112:             parser = (DateTimeParser) f;
+113:         }
+114:         if (printer != null || parser != null) {
+115:             return new DateTimeFormatter(printer, parser);
+116:         }
+117:         throw new UnsupportedOperationException("Both printing and parsing not supported");
+118:     }
+
+[45] org.joda.time.tz.FixedDateTimeZone#equals  (lines 87-99)
+87:     public boolean equals(Object obj) {
+88:         if (this == obj) {
+89:             return true;
+90:         }
+91:         if (obj instanceof FixedDateTimeZone) {
+92:             FixedDateTimeZone other = (FixedDateTimeZone) obj;
+93:             return
+94:                 getID().equals(other.getID()) &&
+95:                 iStandardOffset == other.iStandardOffset &&
+96:                 iWallOffset == other.iWallOffset;
+97:         }
+98:         return false;
+99:     }
+
+[46] org.joda.time.DateTimeZone#forOffsetHoursMinutes  (lines 272-295)
+272:     public static DateTimeZone forOffsetHoursMinutes(int hoursOffset, int minutesOffset) throws IllegalArgumentException {
+273:         if (hoursOffset == 0 && minutesOffset == 0) {
+274:             return DateTimeZone.UTC;
+275:         }
+276:         if (hoursOffset < -23 || hoursOffset > 23) {
+277:             throw new IllegalArgumentException("Hours out of range: " + hoursOffset);
+278:         }
+279:         if (minutesOffset < 0 || minutesOffset > 59) {
+280:             throw new IllegalArgumentException("Minutes out of range: " + minutesOffset);
+281:         }
+282:         int offset = 0;
+283:         try {
+284:             int hoursInMinutes = hoursOffset * 60;
+285:             if (hoursInMinutes < 0) {
+286:                 minutesOffset = hoursInMinutes - minutesOffset;
+287:             } else {
+288:                 minutesOffset = hoursInMinutes + minutesOffset;
+289:             }
+290:             offset = FieldUtils.safeMultiply(minutesOffset, DateTimeConstants.MILLIS_PER_MINUTE);
+291:         } catch (ArithmeticException ex) {
+292:             throw new IllegalArgumentException("Offset is too large");
+293:         }
+294:         return forOffsetMillis(offset);
+295:     }
+
+[47] org.joda.time.format.DateTimeFormatter#selectChronology  (lines 939-948)
+939:     private Chronology selectChronology(Chronology chrono) {
+940:         chrono = DateTimeUtils.getChronology(chrono);
+941:         if (iChrono != null) {
+942:             chrono = iChrono;
+943:         }
+944:         if (iZone != null) {
+945:             chrono = chrono.withZone(iZone);
+946:         }
+947:         return chrono;
+948:     }
+
+[48] org.joda.time.tz.DateTimeZoneBuilder#DSTZone  (lines 1174-1180)
+1174:         DSTZone(String id, int standardOffset,
+1175:                 Recurrence startRecurrence, Recurrence endRecurrence) {
+1176:             super(id);
+1177:             iStandardOffset = standardOffset;
+1178:             iStartRecurrence = startRecurrence;
+1179:             iEndRecurrence = endRecurrence;
+1180:         }
+
+[49] org.joda.time.format.DateTimeParserBucket#setOffset  (lines 194-197)
+194:     public void setOffset(Integer offset) {
+195:         iSavedState = null;
+196:         iOffset = offset;
+197:     }
+
+[50] org.joda.time.format.FormatUtils#parseTwoDigits  (lines 351-354)
+351:     static int parseTwoDigits(String text, int position) {
+352:         int value = text.charAt(position) - '0';
+353:         return ((value << 3) + (value << 1)) + text.charAt(position + 1) - '0';
+354:     }

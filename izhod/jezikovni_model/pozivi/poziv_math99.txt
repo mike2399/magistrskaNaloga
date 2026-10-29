@@ -1,0 +1,88 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math.util.MathUtilsTest::testGcd
+junit.framework.AssertionFailedError: expecting ArithmeticException
+	at org.apache.commons.math.util.MathUtilsTest.testGcd(MathUtilsTest.java:437)
+--- org.apache.commons.math.util.MathUtilsTest::testLcm
+junit.framework.AssertionFailedError: Expecting ArithmeticException
+	at org.apache.commons.math.util.MathUtilsTest.testLcm(MathUtilsTest.java:590)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math.util.MathUtils#gcd  (lines 539-592)
+539:     public static int gcd(final int p, final int q) {
+540:         int u = p;
+541:         int v = q;
+542:         if ((u == 0) || (v == 0)) {
+543:             return (Math.abs(u) + Math.abs(v));
+544:         }
+545:         // keep u and v negative, as negative integers range down to
+546:         // -2^31, while positive numbers can only be as large as 2^31-1
+547:         // (i.e. we can't necessarily negate a negative number without
+548:         // overflow)
+549:         /* assert u!=0 && v!=0; */
+550:         if (u > 0) {
+551:             u = -u;
+552:         } // make u negative
+553:         if (v > 0) {
+554:             v = -v;
+555:         } // make v negative
+556:         // B1. [Find power of 2]
+557:         int k = 0;
+558:         while ((u & 1) == 0 && (v & 1) == 0 && k < 31) { // while u and v are
+559:                                                             // both even...
+560:             u /= 2;
+561:             v /= 2;
+562:             k++; // cast out twos.
+563:         }
+564:         if (k == 31) {
+565:             throw MathRuntimeException.createArithmeticException(
+566:                     "overflow: gcd({0}, {1}) is 2^31",
+567:                     new Object[] { p, q });
+568:         }
+569:         // B2. Initialize: u and v have been divided by 2^k and at least
+570:         // one is odd.
+571:         int t = ((u & 1) == 1) ? v : -(u / 2)/* B3 */;
+572:         // t negative: u was odd, v may be even (t replaces v)
+573:         // t positive: u was even, v is odd (t replaces u)
+574:         do {
+575:             /* assert u<0 && v<0; */
+576:             // B4/B3: cast out twos from t.
+577:             while ((t & 1) == 0) { // while t is even..
+578:                 t /= 2; // cast out twos
+579:             }
+580:             // B5 [reset max(u,v)]
+581:             if (t > 0) {
+582:                 u = -t;
+583:             } else {
+584:                 v = t;
+585:             }
+586:             // B6/B3. at this point both u and v should be odd.
+587:             t = (v - u) / 2;
+588:             // |u| larger: t positive (replace u)
+589:             // |v| larger: t negative (replace v)
+590:         } while (t != 0);
+591:         return -u * (1 << k); // gcd is u*2^k
+592:     }
+
+[2] org.apache.commons.math.util.MathUtils#lcm  (lines 709-715)
+709:     public static int lcm(int a, int b) {
+710:         if (a==0 || b==0){
+711:             return 0;
+712:         }
+713:         int lcm = Math.abs(mulAndCheck(a / gcd(a, b), b));
+714:         return lcm;
+715:     }
+
+[3] org.apache.commons.math.util.MathUtils#mulAndCheck  (lines 747-753)
+747:     public static int mulAndCheck(int x, int y) {
+748:         long m = ((long)x) * ((long)y);
+749:         if (m < Integer.MIN_VALUE || m > Integer.MAX_VALUE) {
+750:             throw new ArithmeticException("overflow: mul");
+751:         }
+752:         return (int)m;
+753:     }

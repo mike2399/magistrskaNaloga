@@ -1,0 +1,1197 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.InlineVariablesTest::testExternalIssue1053
+junit.framework.AssertionFailedError: 
+Expected: var u;function f(){u=Random();var x=u;f();alert(x===u)}
+Result: var u;function f(){u=Random();f();alert(u===u)}
+Node tree inequality:
+Tree1:
+BLOCK [synthetic: 1]
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:957)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:477)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:403)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:372)
+	at com.google.javascript.jscomp.CompilerTestCase.test(CompilerTestCase.java:360)
+	at com.google.javascript.jscomp.CompilerTestCase.testSame(CompilerTestCase.java:599)
+	at com.google.javascript.jscomp.InlineVariablesTest.testExternalIssue1053(InlineVariablesTest.java:1069)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.InlineVariables#isInlineableDeclaredConstant  (lines 448-479)
+448:     private boolean isInlineableDeclaredConstant(Var var,
+449:         ReferenceCollection refInfo) {
+450:       if (!identifyConstants.apply(var)) {
+451:         return false;
+452:       }
+453: 
+454:       if (!refInfo.isAssignedOnceInLifetime()) {
+455:         return false;
+456:       }
+457: 
+458:       Reference init = refInfo.getInitializingReferenceForConstants();
+459:       if (init == null) {
+460:         return false;
+461:       }
+462: 
+463:       Node value = init.getAssignedValue();
+464:       if (value == null) {
+465:         // This constant is either externally defined or initialized indirectly
+466:         // (e.g. in an function expression used to hide
+467:         // temporary variables), so the constant is ineligible for inlining.
+468:         return false;
+469:       }
+470: 
+471:       // Is the constant's value immutable?
+472:       if (!NodeUtil.isImmutableValue(value)) {
+473:         return false;
+474:       }
+475: 
+476:       // Determine if we should really inline a String or not.
+477:       return !value.isString() ||
+478:           isStringWorthInlining(var, refInfo.references);
+479:     }
+
+[2] com.google.javascript.jscomp.InlineVariables#AliasCandidate  (lines 131-134)
+131:     AliasCandidate(Var alias, ReferenceCollection refInfo) {
+132:       this.alias = alias;
+133:       this.refInfo = refInfo;
+134:     }
+
+[3] com.google.javascript.jscomp.ReferenceCollectingCallback#isInitializingAssignmentAt  (lines 374-386)
+374:     private boolean isInitializingAssignmentAt(int index) {
+375:       if (index < references.size() && index > 0) {
+376:         Reference maybeDecl = references.get(index - 1);
+377:         if (maybeDecl.isVarDeclaration()) {
+378:           Preconditions.checkState(!maybeDecl.isInitializingDeclaration());
+379:           Reference maybeInit = references.get(index);
+380:           if (maybeInit.isSimpleAssignmentToName()) {
+381:             return true;
+382:           }
+383:         }
+384:       }
+385:       return false;
+386:     }
+
+[4] com.google.javascript.jscomp.ReferenceCollectingCallback#isNeverAssigned  (lines 463-472)
+463:     boolean isNeverAssigned() {
+464:       int size = references.size();
+465:       for (int i = 0; i < size; i++) {
+466:         Reference ref = references.get(i);
+467:         if (ref.isLvalue() || ref.isInitializingDeclaration()) {
+468:           return false;
+469:         }
+470:       }
+471:       return true;
+472:     }
+
+[5] com.google.javascript.jscomp.ReferenceCollectingCallback#isLhsOfForInExpression  (lines 606-612)
+606:     private static boolean isLhsOfForInExpression(Node n) {
+607:       Node parent = n.getParent();
+608:       if (parent.isVar()) {
+609:         return isLhsOfForInExpression(parent);
+610:       }
+611:       return NodeUtil.isForIn(parent) && parent.getFirstChild() == n;
+612:     }
+
+[6] com.google.javascript.rhino.Node#checkTreeEquals  (lines 1427-1437)
+1427:   public String checkTreeEquals(Node node2) {
+1428:       NodeMismatch diff = checkTreeEqualsImpl(node2);
+1429:       if (diff != null) {
+1430:         return "Node tree inequality:" +
+1431:             "\nTree1:\n" + toStringTree() +
+1432:             "\n\nTree2:\n" + node2.toStringTree() +
+1433:             "\n\nSubtree1: " + diff.nodeA.toStringTree() +
+1434:             "\n\nSubtree2: " + diff.nodeB.toStringTree();
+1435:       }
+1436:       return null;
+1437:   }
+
+[7] com.google.javascript.jscomp.InlineVariables#apply  (lines 111-114)
+111:     @Override
+112:     public boolean apply(Var var) {
+113:       return var.isConst();
+114:     }
+
+[8] com.google.javascript.rhino.Node#NodeMismatch  (lines 2194-2197)
+2194:     NodeMismatch(Node nodeA, Node nodeB) {
+2195:       this.nodeA = nodeA;
+2196:       this.nodeB = nodeB;
+2197:     }
+
+[9] com.google.javascript.jscomp.InlineVariables#inlineNonConstants  (lines 254-323)
+254:     private void inlineNonConstants(
+255:         Var v, ReferenceCollection referenceInfo,
+256:         boolean maybeModifiedArguments) {
+257:       int refCount = referenceInfo.references.size();
+258:       Reference declaration = referenceInfo.references.get(0);
+259:       Reference init = referenceInfo.getInitializingReference();
+260:       int firstRefAfterInit = (declaration == init) ? 2 : 3;
+261: 
+262:       if (refCount > 1 &&
+263:           isImmutableAndWellDefinedVariable(v, referenceInfo)) {
+264:         // if the variable is referenced more than once, we can only
+265:         // inline it if it's immutable and never defined before referenced.
+266:         Node value;
+267:         if (init != null) {
+268:           value = init.getAssignedValue();
+269:         } else {
+270:           // Create a new node for variable that is never initialized.
+271:           Node srcLocation = declaration.getNode();
+272:           value = NodeUtil.newUndefinedNode(srcLocation);
+273:         }
+274:         Preconditions.checkNotNull(value);
+275:         inlineWellDefinedVariable(v, value, referenceInfo.references);
+276:         staleVars.add(v);
+277:       } else if (refCount == firstRefAfterInit) {
+278:         // The variable likely only read once, try some more
+279:         // complex inlining heuristics.
+280:         Reference reference = referenceInfo.references.get(
+281:             firstRefAfterInit - 1);
+282:         if (canInline(declaration, init, reference)) {
+283:           inline(v, declaration, init, reference);
+284:           staleVars.add(v);
+285:         }
+286:       } else if (declaration != init && refCount == 2) {
+287:         if (isValidDeclaration(declaration) && isValidInitialization(init)) {
+288:           // The only reference is the initialization, remove the assignment and
+289:           // the variable declaration.
+290:           Node value = init.getAssignedValue();
+291:           Preconditions.checkNotNull(value);
+292:           inlineWellDefinedVariable(v, value, referenceInfo.references);
+293:           staleVars.add(v);
+294:         }
+295:       }
+296: 
+297:       // If this variable was not inlined normally, check if we can
+298:       // inline an alias of it. (If the variable was inlined, then the
+299:       // reference data is out of sync. We're better off just waiting for
+300:       // the next pass.)
+301:       if (!maybeModifiedArguments &&
+302:           !staleVars.contains(v) && referenceInfo.isWellDefined() &&
+303:           referenceInfo.isAssignedOnceInLifetime()) {
+304:         List<Reference> refs = referenceInfo.references;
+305:         for (int i = 1 /* start from a read */; i < refs.size(); i++) {
+306:           Node nameNode = refs.get(i).getNode();
+307:           if (aliasCandidates.containsKey(nameNode)) {
+308:             AliasCandidate candidate = aliasCandidates.get(nameNode);
+309:             if (!staleVars.contains(candidate.alias) &&
+310:                 !isVarInlineForbidden(candidate.alias)) {
+311:               Reference aliasInit;
+312:               aliasInit = candidate.refInfo.getInitializingReference();
+313:               Node value = aliasInit.getAssignedValue();
+314:               Preconditions.checkNotNull(value);
+315:               inlineWellDefinedVariable(candidate.alias,
+316:                   value,
+317:                   candidate.refInfo.references);
+318:               staleVars.add(candidate.alias);
+319:             }
+320:           }
+321:         }
+322:       }
+323:     }
+
+[10] com.google.javascript.jscomp.NodeIterators#LocalVarMotion  (lines 193-201)
+193:     private LocalVarMotion(Node nameNode, FunctionlessLocalScope iterator) {
+194:       Preconditions.checkArgument(nameNode.isName());
+195:       Node valueNode = NodeUtil.getAssignedValue(nameNode);
+196:       this.varName = nameNode.getString();
+197:       this.valueHasSideEffects = valueNode != null &&
+198:           NodeUtil.mayHaveSideEffects(valueNode);
+199:       this.iterator = iterator;
+200:       advanceLookAhead(true);
+201:     }
+
+[11] com.google.javascript.jscomp.NodeIterators#next  (lines 208-213)
+208:     @Override
+209:     public Node next() {
+210:       Node next = lookAhead;
+211:       advanceLookAhead(false);
+212:       return next;
+213:     }
+
+[12] com.google.javascript.jscomp.InlineVariables#canMoveModerately  (lines 594-626)
+594:     private boolean canMoveModerately(
+595:         Reference initialization,
+596:         Reference reference) {
+597:       // Check if declaration can be inlined without passing
+598:       // any side-effect causing nodes.
+599:       Iterator<Node> it;
+600:       if (initialization.getParent().isVar()) {
+601:         it = NodeIterators.LocalVarMotion.forVar(
+602:             initialization.getNode(),     // NAME
+603:             initialization.getParent(),       // VAR
+604:             initialization.getGrandparent()); // VAR container
+605:       } else if (initialization.getParent().isAssign()) {
+606:         Preconditions.checkState(
+607:             initialization.getGrandparent().isExprResult());
+608:         it = NodeIterators.LocalVarMotion.forAssign(
+609:             initialization.getNode(),     // NAME
+610:             initialization.getParent(),       // ASSIGN
+611:             initialization.getGrandparent(),  // EXPR_RESULT
+612:             initialization.getGrandparent().getParent()); // EXPR container
+613:       } else {
+614:         throw new IllegalStateException("Unexpected initialization parent " +
+615:             initialization.getParent().toStringTree());
+616:       }
+617:       Node targetName = reference.getNode();
+618:       while (it.hasNext()) {
+619:         Node curNode = it.next();
+620:         if (curNode == targetName) {
+621:           return true;
+622:         }
+623:       }
+624: 
+625:       return false;
+626:     }
+
+[13] com.google.javascript.jscomp.NodeIterators#hasNext  (lines 203-206)
+203:     @Override
+204:     public boolean hasNext() {
+205:       return lookAhead != null;
+206:     }
+
+[14] com.google.javascript.jscomp.InlineVariables#maybeEscapedOrModifiedArguments  (lines 224-244)
+224:     private boolean maybeEscapedOrModifiedArguments(
+225:         Scope scope, ReferenceMap referenceMap) {
+226:       if (scope.isLocal()) {
+227:         Var arguments = scope.getArgumentsVar();
+228:         ReferenceCollection refs = referenceMap.getReferences(arguments);
+229:         if (refs != null && !refs.references.isEmpty()) {
+230:           for (Reference ref : refs.references) {
+231:             Node refNode = ref.getNode();
+232:             Node refParent = ref.getParent();
+233:             // Any reference that is not a read of the arguments property
+234:             // consider a escape of the arguments object.
+235:             if (!(NodeUtil.isGet(refParent)
+236:                 && refNode == ref.getParent().getFirstChild()
+237:                 && !isLValue(refParent))) {
+238:               return true;
+239:             }
+240:           }
+241:         }
+242:       }
+243:       return false;
+244:     }
+
+[15] com.google.javascript.jscomp.InlineVariables#blacklistVarReferencesInTree  (lines 329-337)
+329:     private void blacklistVarReferencesInTree(Node root, Scope scope) {
+330:       for (Node c = root.getFirstChild(); c != null; c = c.getNext()) {
+331:         blacklistVarReferencesInTree(c, scope);
+332:       }
+333: 
+334:       if (root.isName()) {
+335:         staleVars.add(scope.getVar(root.getString()));
+336:       }
+337:     }
+
+[16] com.google.javascript.jscomp.NodeIterators#hasNext  (lines 63-67)
+63:     @Override
+64:     public boolean hasNext() {
+65:       // Check if the current node has any nodes after it.
+66:       return !(ancestors.size() == 1 && ancestors.peek().getNext() == null);
+67:     }
+
+[17] com.google.javascript.jscomp.InlineVariables#removeDeclaration  (lines 412-423)
+412:     private void removeDeclaration(Reference decl) {
+413:       Node varNode = decl.getParent();
+414:       Node grandparent = decl.getGrandparent();
+415: 
+416:       compiler.reportChangeToEnclosingScope(decl.getNode());
+417:       varNode.removeChild(decl.getNode());
+418:       // Remove var node if empty
+419:       if (!varNode.hasChildren()) {
+420:         Preconditions.checkState(varNode.isVar());
+421:         NodeUtil.removeChild(grandparent, varNode);
+422:       }
+423:     }
+
+[18] com.google.javascript.jscomp.ReferenceCollectingCallback#isWellDefined  (lines 310-333)
+310:     protected boolean isWellDefined() {
+311:       int size = references.size();
+312:       if (size == 0) {
+313:         return false;
+314:       }
+315: 
+316:       // If this is a declaration that does not instantiate the variable,
+317:       // it's not well-defined.
+318:       Reference init = getInitializingReference();
+319:       if (init == null) {
+320:         return false;
+321:       }
+322: 
+323:       Preconditions.checkState(references.get(0).isDeclaration());
+324:       BasicBlock initBlock = init.getBasicBlock();
+325:       for (int i = 1; i < size; i++) {
+326:         if (!initBlock.provablyExecutesBefore(
+327:                 references.get(i).getBasicBlock())) {
+328:           return false;
+329:         }
+330:       }
+331: 
+332:       return true;
+333:     }
+
+[19] com.google.javascript.jscomp.NodeIterators#current  (lines 110-112)
+110:     protected Node current() {
+111:       return ancestors.peek();
+112:     }
+
+[20] com.google.javascript.jscomp.ReferenceCollectingCallback#isLvalue  (lines 620-629)
+620:     boolean isLvalue() {
+621:       Node parent = getParent();
+622:       int parentType = parent.getType();
+623:       return (parentType == Token.VAR && nameNode.getFirstChild() != null)
+624:           || parentType == Token.INC
+625:           || parentType == Token.DEC
+626:           || (NodeUtil.isAssignmentOp(parent)
+627:               && parent.getFirstChild() == nameNode)
+628:           || isLhsOfForInExpression(nameNode);
+629:     }
+
+[21] com.google.javascript.jscomp.ReferenceCollectingCallback#getAssignedValue  (lines 587-591)
+587:     Node getAssignedValue() {
+588:       Node parent = getParent();
+589:       return (parent.isFunction())
+590:           ? parent : NodeUtil.getAssignedValue(nameNode);
+591:     }
+
+[22] com.google.javascript.jscomp.ReferenceCollectingCallback#getGrandparent  (lines 601-604)
+601:     Node getGrandparent() {
+602:       Node parent = getParent();
+603:       return parent == null ? null : parent.getParent();
+604:     }
+
+[23] com.google.javascript.jscomp.NodeUtil#precedenceWithDefault  (lines 1199-1274)
+1199:   static int precedenceWithDefault(int type) {
+1200:     switch (type) {
+1201:       case Token.COMMA:  return 0;
+1202:       case Token.ASSIGN_BITOR:
+1203:       case Token.ASSIGN_BITXOR:
+1204:       case Token.ASSIGN_BITAND:
+1205:       case Token.ASSIGN_LSH:
+1206:       case Token.ASSIGN_RSH:
+1207:       case Token.ASSIGN_URSH:
+1208:       case Token.ASSIGN_ADD:
+1209:       case Token.ASSIGN_SUB:
+1210:       case Token.ASSIGN_MUL:
+1211:       case Token.ASSIGN_DIV:
+1212:       case Token.ASSIGN_MOD:
+1213:       case Token.ASSIGN: return 1;
+1214:       case Token.HOOK:   return 2;  // ?: operator
+1215:       case Token.OR:     return 3;
+1216:       case Token.AND:    return 4;
+1217:       case Token.BITOR:  return 5;
+1218:       case Token.BITXOR: return 6;
+1219:       case Token.BITAND: return 7;
+1220:       case Token.EQ:
+1221:       case Token.NE:
+1222:       case Token.SHEQ:
+1223:       case Token.SHNE:   return 8;
+1224:       case Token.LT:
+1225:       case Token.GT:
+1226:       case Token.LE:
+1227:       case Token.GE:
+1228:       case Token.INSTANCEOF:
+1229:       case Token.IN:     return 9;
+1230:       case Token.LSH:
+1231:       case Token.RSH:
+1232:       case Token.URSH:   return 10;
+1233:       case Token.SUB:
+1234:       case Token.ADD:    return 11;
+1235:       case Token.MUL:
+1236:       case Token.MOD:
+1237:       case Token.DIV:    return 12;
+1238:       case Token.INC:
+1239:       case Token.DEC:
+1240:       case Token.NEW:
+1241:       case Token.DELPROP:
+1242:       case Token.TYPEOF:
+1243:       case Token.VOID:
+1244:       case Token.NOT:
+1245:       case Token.BITNOT:
+1246:       case Token.POS:
+1247:       case Token.NEG:    return 13;
+1248: 
+1249:       case Token.CALL:
+1250:       case Token.GETELEM:
+1251:       case Token.GETPROP:
+1252:       // Data values
+1253:       case Token.ARRAYLIT:
+1254:       case Token.EMPTY:  // TODO(johnlenz): remove this.
+1255:       case Token.FALSE:
+1256:       case Token.FUNCTION:
+1257:       case Token.NAME:
+1258:       case Token.NULL:
+1259:       case Token.NUMBER:
+1260:       case Token.OBJECTLIT:
+1261:       case Token.REGEXP:
+1262:       case Token.STRING:
+1263:       case Token.STRING_KEY:
+1264:       case Token.THIS:
+1265:       case Token.TRUE:
+1266:         return 15;
+1267:       case Token.CAST:
+1268:         return 16;
+1269: 
+1270:       default:
+1271:         // Statements are lower precedence than expressions.
+1272:         return -1;
+1273:     }
+1274:   }
+
+[24] com.google.javascript.jscomp.NodeIterators#forVar  (lines 163-173)
+163:     static LocalVarMotion forVar(
+164:         Node name, Node var, Node block) {
+165:       Preconditions.checkArgument(var.isVar());
+166:       Preconditions.checkArgument(NodeUtil.isStatement(var));
+167:       // The FunctionlessLocalScope must start at "name" as this may be used
+168:       // before the Normalize pass, and thus the VAR node may define multiple
+169:       // names and the "name" node may have siblings.  The actual assigned
+170:       // value is skipped as it is a child of name.
+171:       return new LocalVarMotion(
+172:           name, new FunctionlessLocalScope(name, var, block));
+173:     }
+
+[25] com.google.javascript.jscomp.InlineVariables#inlineWellDefinedVariable  (lines 381-388)
+381:     private void inlineWellDefinedVariable(Var v, Node value,
+382:         List<Reference> refSet) {
+383:       Reference decl = refSet.get(0);
+384:       for (int i = 1; i < refSet.size(); i++) {
+385:         inlineValue(v, refSet.get(i), value.cloneTree());
+386:       }
+387:       removeDeclaration(decl);
+388:     }
+
+[26] com.google.javascript.jscomp.ReferenceCollectingCallback#isAssignedOnceInLifetime  (lines 421-438)
+421:     boolean isAssignedOnceInLifetime() {
+422:       Reference ref = getOneAndOnlyAssignment();
+423:       if (ref == null) {
+424:         return false;
+425:       }
+426: 
+427:       // Make sure this assignment is not in a loop.
+428:       for (BasicBlock block = ref.getBasicBlock();
+429:            block != null; block = block.getParent()) {
+430:         if (block.isFunction) {
+431:           break;
+432:         } else if (block.isLoop) {
+433:           return false;
+434:         }
+435:       }
+436: 
+437:       return true;
+438:     }
+
+[27] com.google.javascript.jscomp.NodeIterators#FunctionlessLocalScope  (lines 51-61)
+51:     FunctionlessLocalScope(Node ... ancestors) {
+52:       Preconditions.checkArgument(ancestors.length > 0);
+53: 
+54:       for (Node n : ancestors) {
+55:         if (n.isFunction()) {
+56:           break;
+57:         }
+58: 
+59:         this.ancestors.add(0, n);
+60:       }
+61:     }
+
+[28] com.google.javascript.jscomp.NodeUtil#getAssignedValue  (lines 1601-1611)
+1601:   static Node getAssignedValue(Node n) {
+1602:     Preconditions.checkState(n.isName());
+1603:     Node parent = n.getParent();
+1604:     if (parent.isVar()) {
+1605:       return n.getFirstChild();
+1606:     } else if (parent.isAssign() && parent.getFirstChild() == n) {
+1607:       return n.getNext();
+1608:     } else {
+1609:       return null;
+1610:     }
+1611:   }
+
+[29] com.google.javascript.jscomp.ReferenceCollectingCallback#provablyExecutesBefore  (lines 703-722)
+703:     boolean provablyExecutesBefore(BasicBlock thatBlock) {
+704:       // If thatBlock is a descendant of this block, and there are no hoisted
+705:       // blocks between them, then this block must start before thatBlock.
+706:       BasicBlock currentBlock;
+707:       for (currentBlock = thatBlock;
+708:            currentBlock != null && currentBlock != this;
+709:            currentBlock = currentBlock.getParent()) {
+710:         if (currentBlock.isHoisted) {
+711:           return false;
+712:         }
+713:       }
+714: 
+715:       if (currentBlock == this) {
+716:         return true;
+717:       }
+718:       if (isGlobalScopeBlock() && thatBlock.isGlobalScopeBlock()) {
+719:         return true;
+720:       }
+721:       return false;
+722:     }
+
+[30] com.google.javascript.jscomp.ReferenceCollectingCallback#isInitializingDeclarationAt  (lines 357-366)
+357:     private boolean isInitializingDeclarationAt(int index) {
+358:       Reference maybeInit = references.get(index);
+359:       if (maybeInit.isInitializingDeclaration()) {
+360:         // This is a declaration that represents the initial value.
+361:         // Specifically, var declarations without assignments such as "var a;"
+362:         // are not.
+363:         return true;
+364:       }
+365:       return false;
+366:     }
+
+[31] com.google.javascript.jscomp.ReferenceCollectingCallback#getInitializingReference  (lines 395-402)
+395:     Reference getInitializingReference() {
+396:       if (isInitializingDeclarationAt(0)) {
+397:         return references.get(0);
+398:       } else if (isInitializingAssignmentAt(1)) {
+399:         return references.get(1);
+400:       }
+401:       return null;
+402:     }
+
+[32] com.google.javascript.jscomp.InlineVariables#getFilterForMode  (lines 89-100)
+89:   private Predicate<Var> getFilterForMode() {
+90:     switch (mode) {
+91:       case ALL:
+92:         return Predicates.<Var>alwaysTrue();
+93:       case LOCALS_ONLY:
+94:         return new IdentifyLocals();
+95:       case CONSTANTS_ONLY:
+96:         return new IdentifyConstants();
+97:       default:
+98:         throw new IllegalStateException();
+99:     }
+100:   }
+
+[33] com.google.javascript.jscomp.NodeIterators#currentParent  (lines 117-120)
+117:     protected Node currentParent() {
+118:       return ancestors.size() >= 2 ?
+119:           ancestors.get(ancestors.size() - 2) : null;
+120:     }
+
+[34] com.google.javascript.rhino.Node#checkTreeEqualsImpl  (lines 1444-1463)
+1444:   NodeMismatch checkTreeEqualsImpl(Node node2) {
+1445:     if (!isEquivalentTo(node2, false, false, false)) {
+1446:       return new NodeMismatch(this, node2);
+1447:     }
+1448: 
+1449:     NodeMismatch res = null;
+1450:     Node n, n2;
+1451:     for (n = first, n2 = node2.first;
+1452:          res == null && n != null;
+1453:          n = n.next, n2 = n2.next) {
+1454:       if (node2 == null) {
+1455:         throw new IllegalStateException();
+1456:       }
+1457:       res = n.checkTreeEqualsImpl(n2);
+1458:       if (res != null) {
+1459:         return res;
+1460:       }
+1461:     }
+1462:     return res;
+1463:   }
+
+[35] com.google.javascript.jscomp.InlineVariables#canMoveAggressively  (lines 582-587)
+582:     private boolean canMoveAggressively(Node value) {
+583:       // Function expressions and other mutable objects can move within
+584:       // the same basic block.
+585:       return NodeUtil.isLiteralValue(value, true)
+586:           || value.isFunction();
+587:     }
+
+[36] com.google.javascript.jscomp.InlineVariables#canInline  (lines 513-577)
+513:     private boolean canInline(
+514:         Reference declaration,
+515:         Reference initialization,
+516:         Reference reference) {
+517:       if (!isValidDeclaration(declaration)
+518:           || !isValidInitialization(initialization)
+519:           || !isValidReference(reference)) {
+520:         return false;
+521:       }
+522: 
+523:       // If the value is read more than once, skip it.
+524:       // VAR declarations and EXPR_RESULT don't need the value, but other
+525:       // ASSIGN expressions parents do.
+526:       if (declaration != initialization &&
+527:           !initialization.getGrandparent().isExprResult()) {
+528:         return false;
+529:       }
+530: 
+531:       // Be very conservative and do no cross control structures or
+532:       // scope boundaries
+533:       if (declaration.getBasicBlock() != initialization.getBasicBlock()
+534:           || declaration.getBasicBlock() != reference.getBasicBlock()) {
+535:         return false;
+536:       }
+537: 
+538:       // Do not inline into a call node. This would change
+539:       // the context in which it was being called. For example,
+540:       //   var a = b.c;
+541:       //   a();
+542:       // should not be inlined, because it calls a in the context of b
+543:       // rather than the context of the window.
+544:       //   var a = b.c;
+545:       //   f(a)
+546:       // is OK.
+547:       Node value = initialization.getAssignedValue();
+548:       Preconditions.checkState(value != null);
+549:       if (value.isGetProp()
+550:           && reference.getParent().isCall()
+551:           && reference.getParent().getFirstChild() == reference.getNode()) {
+552:         return false;
+553:       }
+554: 
+555:       if (value.isFunction()) {
+556:         Node callNode = reference.getParent();
+557:         if (reference.getParent().isCall()) {
+558:           CodingConvention convention = compiler.getCodingConvention();
+559:           // Bug 2388531: Don't inline subclass definitions into class defining
+560:           // calls as this confused class removing logic.
+561:           SubclassRelationship relationship =
+562:               convention.getClassesDefinedByCall(callNode);
+563:           if (relationship != null) {
+564:             return false;
+565:           }
+566: 
+567:           // issue 668: Don't inline singleton getter methods
+568:           // calls as this confused class removing logic.
+569:           if (convention.getSingletonGetterClassName(callNode) != null) {
+570:             return false;
+571:           }
+572:         }
+573:       }
+574: 
+575:       return canMoveAggressively(value) ||
+576:           canMoveModerately(initialization, reference);
+577:     }
+
+[37] com.google.javascript.jscomp.InlineVariables#doInlinesForScope  (lines 194-222)
+194:     private void doInlinesForScope(NodeTraversal t, ReferenceMap referenceMap) {
+195: 
+196:       boolean maybeModifiedArguments =
+197:           maybeEscapedOrModifiedArguments(t.getScope(), referenceMap);
+198:       for (Iterator<Var> it = t.getScope().getVars(); it.hasNext();) {
+199:         Var v = it.next();
+200: 
+201:         ReferenceCollection referenceInfo = referenceMap.getReferences(v);
+202: 
+203:         // referenceInfo will be null if we're in constants-only mode
+204:         // and the variable is not a constant.
+205:         if (referenceInfo == null || isVarInlineForbidden(v)) {
+206:           // Never try to inline exported variables or variables that
+207:           // were not collected or variables that have already been inlined.
+208:           continue;
+209:         } else if (isInlineableDeclaredConstant(v, referenceInfo)) {
+210:           Reference init = referenceInfo.getInitializingReferenceForConstants();
+211:           Node value = init.getAssignedValue();
+212:           inlineDeclaredConstant(v, value, referenceInfo.references);
+213:           staleVars.add(v);
+214:         } else if (mode == Mode.CONSTANTS_ONLY) {
+215:           // If we're in constants-only mode, don't run more aggressive
+216:           // inlining heuristics. See InlineConstantsTest.
+217:           continue;
+218:         } else {
+219:           inlineNonConstants(v, referenceInfo, maybeModifiedArguments);
+220:         }
+221:       }
+222:     }
+
+[38] com.google.javascript.jscomp.ReferenceCollectingCallback#getOneAndOnlyAssignment  (lines 444-458)
+444:     private Reference getOneAndOnlyAssignment() {
+445:       Reference assignment = null;
+446:       int size = references.size();
+447:       for (int i = 0; i < size; i++) {
+448:         Reference ref = references.get(i);
+449:         if (ref.isLvalue() || ref.isInitializingDeclaration()) {
+450:           if (assignment == null) {
+451:             assignment = ref;
+452:           } else {
+453:             return null;
+454:           }
+455:         }
+456:       }
+457:       return assignment;
+458:     }
+
+[39] com.google.javascript.jscomp.InlineVariables#isValidInitialization  (lines 640-663)
+640:     private boolean isValidInitialization(Reference initialization) {
+641:       if (initialization == null) {
+642:         return false;
+643:       } else if (initialization.isDeclaration()) {
+644:         // The reference is a FUNCTION declaration or normal VAR declaration
+645:         // with a value.
+646:         if (!NodeUtil.isFunctionDeclaration(initialization.getParent())
+647:             && initialization.getNode().getFirstChild() == null) {
+648:           return false;
+649:         }
+650:       } else {
+651:         Node parent = initialization.getParent();
+652:         Preconditions.checkState(
+653:             parent.isAssign()
+654:             && parent.getFirstChild() == initialization.getNode());
+655:       }
+656: 
+657:       Node n = initialization.getAssignedValue();
+658:       if (n.isFunction()) {
+659:         return compiler.getCodingConvention().isInlinableFunction(n);
+660:       }
+661: 
+662:       return true;
+663:     }
+
+[40] com.google.javascript.jscomp.InlineVariables#isImmutableAndWellDefinedVariable  (lines 677-727)
+677:     private boolean isImmutableAndWellDefinedVariable(Var v,
+678:         ReferenceCollection refInfo) {
+679:       List<Reference> refSet = refInfo.references;
+680:       int startingReadRef = 1;
+681:       Reference refDecl = refSet.get(0);
+682:       if (!isValidDeclaration(refDecl)) {
+683:         return false;
+684:       }
+685: 
+686:       boolean isNeverAssigned = refInfo.isNeverAssigned();
+687:       // For values that are never assigned, only the references need to be
+688:       // checked.
+689:       if (!isNeverAssigned) {
+690:         Reference refInit = refInfo.getInitializingReference();
+691:         if (!isValidInitialization(refInit)) {
+692:           return false;
+693:         }
+694: 
+695:         if (refDecl != refInit) {
+696:           Preconditions.checkState(refInit == refSet.get(1));
+697:           startingReadRef = 2;
+698:         }
+699: 
+700:         if (!refInfo.isWellDefined()) {
+701:           return false;
+702:         }
+703: 
+704:         Node value = refInit.getAssignedValue();
+705:         Preconditions.checkNotNull(value);
+706: 
+707:         boolean isImmutableValueWorthInlining =
+708:             NodeUtil.isImmutableValue(value) &&
+709:             (!value.isString() ||
+710:                 isStringWorthInlining(v, refInfo.references));
+711:         boolean isInlinableThisAlias =
+712:             value.isThis() &&
+713:             !refInfo.isEscaped();
+714:         if (!isImmutableValueWorthInlining && !isInlinableThisAlias) {
+715:           return false;
+716:         }
+717:       }
+718: 
+719:       for (int i = startingReadRef; i < refSet.size(); i++) {
+720:         Reference ref = refSet.get(i);
+721:         if (!isValidReference(ref)) {
+722:           return false;
+723:         }
+724:       }
+725: 
+726:       return true;
+727:     }
+
+[41] com.google.javascript.jscomp.InlineVariables#collectAliasCandidates  (lines 167-188)
+167:     private void collectAliasCandidates(NodeTraversal t,
+168:         ReferenceMap referenceMap) {
+169:       if (mode != Mode.CONSTANTS_ONLY) {
+170:         for (Iterator<Var> it = t.getScope().getVars(); it.hasNext();) {
+171:           Var v = it.next();
+172:           ReferenceCollection referenceInfo = referenceMap.getReferences(v);
+173: 
+174:           // NOTE(nicksantos): Don't handle variables that are never used.
+175:           // The tests are much easier to write if you don't, and there's
+176:           // another pass that handles unused variables much more elegantly.
+177:           if (referenceInfo != null && referenceInfo.references.size() >= 2 &&
+178:               referenceInfo.isWellDefined() &&
+179:               referenceInfo.isAssignedOnceInLifetime()) {
+180:             Reference init = referenceInfo.getInitializingReference();
+181:             Node value = init.getAssignedValue();
+182:             if (value != null && value.isName()) {
+183:               aliasCandidates.put(value, new AliasCandidate(v, referenceInfo));
+184:             }
+185:           }
+186:         }
+187:       }
+188:     }
+
+[42] com.google.javascript.jscomp.ReferenceCollectingCallback#isVarDeclaration  (lines 564-566)
+564:     boolean isVarDeclaration() {
+565:       return getParent().isVar();
+566:     }
+
+[43] com.google.javascript.jscomp.InlineVariables#isValidReference  (lines 668-670)
+668:     private boolean isValidReference(Reference reference) {
+669:       return !reference.isDeclaration() && !reference.isLvalue();
+670:     }
+
+[44] com.google.javascript.jscomp.InlineVariables#isValidDeclaration  (lines 631-635)
+631:     private boolean isValidDeclaration(Reference declaration) {
+632:       return (declaration.getParent().isVar()
+633:           && !declaration.getGrandparent().isFor())
+634:           || NodeUtil.isFunctionDeclaration(declaration.getParent());
+635:     }
+
+[45] com.google.javascript.jscomp.InlineVariables#inlineValue  (lines 433-442)
+433:     private void inlineValue(Var v, Reference ref, Node value) {
+434:       compiler.reportChangeToEnclosingScope(ref.getNode());
+435:       if (ref.isSimpleAssignmentToName()) {
+436:         // This is the initial assignment.
+437:         ref.getGrandparent().replaceChild(ref.getParent(), value);
+438:       } else {
+439:         ref.getParent().replaceChild(ref.getNode(), value);
+440:       }
+441:       blacklistVarReferencesInTree(value, v.scope);
+442:     }
+
+[46] com.google.javascript.jscomp.ReferenceCollectingCallback#isSimpleAssignmentToName  (lines 614-618)
+614:     boolean isSimpleAssignmentToName() {
+615:       Node parent = getParent();
+616:       return parent.isAssign()
+617:           && parent.getFirstChild() == nameNode;
+618:     }
+
+[47] com.google.javascript.jscomp.NodeUtil#opToStr  (lines 2178-2223)
+2178:   static String opToStr(int operator) {
+2179:     switch (operator) {
+2180:       case Token.BITOR: return "|";
+2181:       case Token.OR: return "||";
+2182:       case Token.BITXOR: return "^";
+2183:       case Token.AND: return "&&";
+2184:       case Token.BITAND: return "&";
+2185:       case Token.SHEQ: return "===";
+2186:       case Token.EQ: return "==";
+2187:       case Token.NOT: return "!";
+2188:       case Token.NE: return "!=";
+2189:       case Token.SHNE: return "!==";
+2190:       case Token.LSH: return "<<";
+2191:       case Token.IN: return "in";
+2192:       case Token.LE: return "<=";
+2193:       case Token.LT: return "<";
+2194:       case Token.URSH: return ">>>";
+2195:       case Token.RSH: return ">>";
+2196:       case Token.GE: return ">=";
+2197:       case Token.GT: return ">";
+2198:       case Token.MUL: return "*";
+2199:       case Token.DIV: return "/";
+2200:       case Token.MOD: return "%";
+2201:       case Token.BITNOT: return "~";
+2202:       case Token.ADD: return "+";
+2203:       case Token.SUB: return "-";
+2204:       case Token.POS: return "+";
+2205:       case Token.NEG: return "-";
+2206:       case Token.ASSIGN: return "=";
+2207:       case Token.ASSIGN_BITOR: return "|=";
+2208:       case Token.ASSIGN_BITXOR: return "^=";
+2209:       case Token.ASSIGN_BITAND: return "&=";
+2210:       case Token.ASSIGN_LSH: return "<<=";
+2211:       case Token.ASSIGN_RSH: return ">>=";
+2212:       case Token.ASSIGN_URSH: return ">>>=";
+2213:       case Token.ASSIGN_ADD: return "+=";
+2214:       case Token.ASSIGN_SUB: return "-=";
+2215:       case Token.ASSIGN_MUL: return "*=";
+2216:       case Token.ASSIGN_DIV: return "/=";
+2217:       case Token.ASSIGN_MOD: return "%=";
+2218:       case Token.VOID: return "void";
+2219:       case Token.TYPEOF: return "typeof";
+2220:       case Token.INSTANCEOF: return "instanceof";
+2221:       default: return null;
+2222:     }
+2223:   }
+
+[48] com.google.javascript.jscomp.NodeIterators#advanceLookAhead  (lines 220-288)
+220:     private void advanceLookAhead(boolean atStart) {
+221:       if (!atStart) {
+222:         if (lookAhead == null) {
+223:           return;
+224:         }
+225: 
+226:         // Don't advance past a reference to the variable that we're trying
+227:         // to inline.
+228:         Node curNode = iterator.current();
+229:         if (curNode.isName() &&
+230:             varName.equals(curNode.getString())) {
+231:           lookAhead = null;
+232:           return;
+233:         }
+234:       }
+235: 
+236:       if (!iterator.hasNext()) {
+237:         lookAhead = null;
+238:         return;
+239:       }
+240: 
+241:       Node nextNode = iterator.next();
+242:       Node nextParent = iterator.currentParent();
+243:       int type = nextNode.getType();
+244: 
+245:       if (valueHasSideEffects) {
+246:         // Reject anything that might read state
+247:         boolean readsState = false;
+248: 
+249:         if (// Any read of a different variable.
+250:             (nextNode.isName() && !varName.equals(nextNode.getString())) ||
+251:             // Any read of a property.
+252:             (nextNode.isGetProp() || nextNode.isGetElem())) {
+253: 
+254:           // If this is a simple assign, we'll be ok.
+255:           if (nextParent == null ||
+256:               !NodeUtil.isVarOrSimpleAssignLhs(nextNode, nextParent)) {
+257:             readsState = true;
+258:           }
+259: 
+260:         } else if (nextNode.isCall() || nextNode.isNew()) {
+261:           // This isn't really an important case. In most cases when we use
+262:           // CALL or NEW, we're invoking it on a NAME or a GETPROP. And in the
+263:           // few cases where we're not, it's because we have an anonymous
+264:           // function that escapes the variable we're worried about. But we
+265:           // include this for completeness.
+266:           readsState = true;
+267:         }
+268: 
+269:         if (readsState) {
+270:           lookAhead = null;
+271:           return;
+272:         }
+273:       }
+274: 
+275:       // Reject anything that might modify relevant state. We assume that
+276:       // nobody relies on variables being undeclared, which will break
+277:       // constructions like:
+278:       //   var a = b;
+279:       //   var b = 3;
+280:       //   alert(a);
+281:       if (NodeUtil.nodeTypeMayHaveSideEffects(nextNode) && type != Token.NAME
+282:           || type == Token.NAME && nextParent.isCatch()) {
+283:         lookAhead = null;
+284:         return;
+285:       }
+286: 
+287:       lookAhead = nextNode;
+288:     }
+
+[49] com.google.javascript.jscomp.parsing.IRFactory#transformTokenType  (lines 1324-1504)
+1324:   private static int transformTokenType(int token) {
+1325:     switch (token) {
+1326:       case com.google.javascript.rhino.head.Token.RETURN:
+1327:         return Token.RETURN;
+1328:       case com.google.javascript.rhino.head.Token.BITOR:
+1329:         return Token.BITOR;
+1330:       case com.google.javascript.rhino.head.Token.BITXOR:
+1331:         return Token.BITXOR;
+1332:       case com.google.javascript.rhino.head.Token.BITAND:
+1333:         return Token.BITAND;
+1334:       case com.google.javascript.rhino.head.Token.EQ:
+1335:         return Token.EQ;
+1336:       case com.google.javascript.rhino.head.Token.NE:
+1337:         return Token.NE;
+1338:       case com.google.javascript.rhino.head.Token.LT:
+1339:         return Token.LT;
+1340:       case com.google.javascript.rhino.head.Token.LE:
+1341:         return Token.LE;
+1342:       case com.google.javascript.rhino.head.Token.GT:
+1343:         return Token.GT;
+1344:       case com.google.javascript.rhino.head.Token.GE:
+1345:         return Token.GE;
+1346:       case com.google.javascript.rhino.head.Token.LSH:
+1347:         return Token.LSH;
+1348:       case com.google.javascript.rhino.head.Token.RSH:
+1349:         return Token.RSH;
+1350:       case com.google.javascript.rhino.head.Token.URSH:
+1351:         return Token.URSH;
+1352:       case com.google.javascript.rhino.head.Token.ADD:
+1353:         return Token.ADD;
+1354:       case com.google.javascript.rhino.head.Token.SUB:
+1355:         return Token.SUB;
+1356:       case com.google.javascript.rhino.head.Token.MUL:
+1357:         return Token.MUL;
+1358:       case com.google.javascript.rhino.head.Token.DIV:
+1359:         return Token.DIV;
+1360:       case com.google.javascript.rhino.head.Token.MOD:
+1361:         return Token.MOD;
+1362:       case com.google.javascript.rhino.head.Token.NOT:
+1363:         return Token.NOT;
+1364:       case com.google.javascript.rhino.head.Token.BITNOT:
+1365:         return Token.BITNOT;
+1366:       case com.google.javascript.rhino.head.Token.POS:
+1367:         return Token.POS;
+1368:       case com.google.javascript.rhino.head.Token.NEG:
+1369:         return Token.NEG;
+1370:       case com.google.javascript.rhino.head.Token.NEW:
+1371:         return Token.NEW;
+1372:       case com.google.javascript.rhino.head.Token.DELPROP:
+1373:         return Token.DELPROP;
+1374:       case com.google.javascript.rhino.head.Token.TYPEOF:
+1375:         return Token.TYPEOF;
+1376:       case com.google.javascript.rhino.head.Token.GETPROP:
+1377:         return Token.GETPROP;
+1378:       case com.google.javascript.rhino.head.Token.GETELEM:
+1379:         return Token.GETELEM;
+1380:       case com.google.javascript.rhino.head.Token.CALL:
+1381:         return Token.CALL;
+1382:       case com.google.javascript.rhino.head.Token.NAME:
+1383:         return Token.NAME;
+1384:       case com.google.javascript.rhino.head.Token.NUMBER:
+1385:         return Token.NUMBER;
+1386:       case com.google.javascript.rhino.head.Token.STRING:
+1387:         return Token.STRING;
+1388:       case com.google.javascript.rhino.head.Token.NULL:
+1389:         return Token.NULL;
+1390:       case com.google.javascript.rhino.head.Token.THIS:
+1391:         return Token.THIS;
+1392:       case com.google.javascript.rhino.head.Token.FALSE:
+1393:         return Token.FALSE;
+1394:       case com.google.javascript.rhino.head.Token.TRUE:
+1395:         return Token.TRUE;
+1396:       case com.google.javascript.rhino.head.Token.SHEQ:
+1397:         return Token.SHEQ;
+1398:       case com.google.javascript.rhino.head.Token.SHNE:
+1399:         return Token.SHNE;
+1400:       case com.google.javascript.rhino.head.Token.REGEXP:
+1401:         return Token.REGEXP;
+1402:       case com.google.javascript.rhino.head.Token.THROW:
+1403:         return Token.THROW;
+1404:       case com.google.javascript.rhino.head.Token.IN:
+1405:         return Token.IN;
+1406:       case com.google.javascript.rhino.head.Token.INSTANCEOF:
+1407:         return Token.INSTANCEOF;
+1408:       case com.google.javascript.rhino.head.Token.ARRAYLIT:
+1409:         return Token.ARRAYLIT;
+1410:       case com.google.javascript.rhino.head.Token.OBJECTLIT:
+1411:         return Token.OBJECTLIT;
+1412:       case com.google.javascript.rhino.head.Token.TRY:
+1413:         return Token.TRY;
+1414:       // The LP represents a parameter list
+1415:       case com.google.javascript.rhino.head.Token.LP:
+1416:         return Token.PARAM_LIST;
+1417:       case com.google.javascript.rhino.head.Token.COMMA:
+1418:         return Token.COMMA;
+1419:       case com.google.javascript.rhino.head.Token.ASSIGN:
+1420:         return Token.ASSIGN;
+1421:       case com.google.javascript.rhino.head.Token.ASSIGN_BITOR:
+1422:         return Token.ASSIGN_BITOR;
+1423:       case com.google.javascript.rhino.head.Token.ASSIGN_BITXOR:
+1424:         return Token.ASSIGN_BITXOR;
+1425:       case com.google.javascript.rhino.head.Token.ASSIGN_BITAND:
+1426:         return Token.ASSIGN_BITAND;
+1427:       case com.google.javascript.rhino.head.Token.ASSIGN_LSH:
+1428:         return Token.ASSIGN_LSH;
+1429:       case com.google.javascript.rhino.head.Token.ASSIGN_RSH:
+1430:         return Token.ASSIGN_RSH;
+1431:       case com.google.javascript.rhino.head.Token.ASSIGN_URSH:
+1432:         return Token.ASSIGN_URSH;
+1433:       case com.google.javascript.rhino.head.Token.ASSIGN_ADD:
+1434:         return Token.ASSIGN_ADD;
+1435:       case com.google.javascript.rhino.head.Token.ASSIGN_SUB:
+1436:         return Token.ASSIGN_SUB;
+1437:       case com.google.javascript.rhino.head.Token.ASSIGN_MUL:
+1438:         return Token.ASSIGN_MUL;
+1439:       case com.google.javascript.rhino.head.Token.ASSIGN_DIV:
+1440:         return Token.ASSIGN_DIV;
+1441:       case com.google.javascript.rhino.head.Token.ASSIGN_MOD:
+1442:         return Token.ASSIGN_MOD;
+1443:       case com.google.javascript.rhino.head.Token.HOOK:
+1444:         return Token.HOOK;
+1445:       case com.google.javascript.rhino.head.Token.OR:
+1446:         return Token.OR;
+1447:       case com.google.javascript.rhino.head.Token.AND:
+1448:         return Token.AND;
+1449:       case com.google.javascript.rhino.head.Token.INC:
+1450:         return Token.INC;
+1451:       case com.google.javascript.rhino.head.Token.DEC:
+1452:         return Token.DEC;
+1453:       case com.google.javascript.rhino.head.Token.FUNCTION:
+1454:         return Token.FUNCTION;
+1455:       case com.google.javascript.rhino.head.Token.IF:
+1456:         return Token.IF;
+1457:       case com.google.javascript.rhino.head.Token.SWITCH:
+1458:         return Token.SWITCH;
+1459:       case com.google.javascript.rhino.head.Token.CASE:
+1460:         return Token.CASE;
+1461:       case com.google.javascript.rhino.head.Token.DEFAULT:
+1462:         return Token.DEFAULT_CASE;
+1463:       case com.google.javascript.rhino.head.Token.WHILE:
+1464:         return Token.WHILE;
+1465:       case com.google.javascript.rhino.head.Token.DO:
+1466:         return Token.DO;
+1467:       case com.google.javascript.rhino.head.Token.FOR:
+1468:         return Token.FOR;
+1469:       case com.google.javascript.rhino.head.Token.BREAK:
+1470:         return Token.BREAK;
+1471:       case com.google.javascript.rhino.head.Token.CONTINUE:
+1472:         return Token.CONTINUE;
+1473:       case com.google.javascript.rhino.head.Token.VAR:
+1474:         return Token.VAR;
+1475:       case com.google.javascript.rhino.head.Token.WITH:
+1476:         return Token.WITH;
+1477:       case com.google.javascript.rhino.head.Token.CATCH:
+1478:         return Token.CATCH;
+1479:       case com.google.javascript.rhino.head.Token.VOID:
+1480:         return Token.VOID;
+1481:       case com.google.javascript.rhino.head.Token.EMPTY:
+1482:         return Token.EMPTY;
+1483:       case com.google.javascript.rhino.head.Token.BLOCK:
+1484:         return Token.BLOCK;
+1485:       case com.google.javascript.rhino.head.Token.LABEL:
+1486:         return Token.LABEL;
+1487:       case com.google.javascript.rhino.head.Token.EXPR_VOID:
+1488:       case com.google.javascript.rhino.head.Token.EXPR_RESULT:
+1489:         return Token.EXPR_RESULT;
+1490:       case com.google.javascript.rhino.head.Token.SCRIPT:
+1491:         return Token.SCRIPT;
+1492:       case com.google.javascript.rhino.head.Token.GET:
+1493:         return Token.GETTER_DEF;
+1494:       case com.google.javascript.rhino.head.Token.SET:
+1495:         return Token.SETTER_DEF;
+1496:       case com.google.javascript.rhino.head.Token.CONST:
+1497:         return Token.CONST;
+1498:       case com.google.javascript.rhino.head.Token.DEBUGGER:
+1499:         return Token.DEBUGGER;
+1500:     }
+1501: 
+1502:     // Token without name
+1503:     throw new IllegalStateException(String.valueOf(token));
+1504:   }
+
+[50] com.google.javascript.jscomp.NodeIterators#next  (lines 69-100)
+69:     @Override
+70:     public Node next() {
+71:       Node current = ancestors.pop();
+72:       if (current.getNext() == null) {
+73:         current = ancestors.peek();
+74: 
+75:         // If this is a function node, skip it.
+76:         if (current.isFunction()) {
+77:           return next();
+78:         }
+79:       } else {
+80:         current = current.getNext();
+81:         ancestors.push(current);
+82: 
+83:         // If this is a function node, skip it.
+84:         if (current.isFunction()) {
+85:           return next();
+86:         }
+87: 
+88:         while (current.hasChildren()) {
+89:           current = current.getFirstChild();
+90:           ancestors.push(current);
+91: 
+92:           // If this is a function node, skip it.
+93:           if (current.isFunction()) {
+94:             return next();
+95:           }
+96:         }
+97:       }
+98: 
+99:       return current;
+100:     }

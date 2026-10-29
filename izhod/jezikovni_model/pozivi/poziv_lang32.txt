@@ -1,0 +1,212 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.lang3.builder.HashCodeBuilderTest::testReflectionObjectCycle
+junit.framework.AssertionFailedError: Expected: <null> but was: []
+	at org.apache.commons.lang3.builder.HashCodeBuilderTest.testReflectionObjectCycle(HashCodeBuilderTest.java:524)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.lang3.ArrayUtils#indexOf  (lines 1644-1665)
+1644:     public static int indexOf(Object[] array, Object objectToFind, int startIndex) {
+1645:         if (array == null) {
+1646:             return INDEX_NOT_FOUND;
+1647:         }
+1648:         if (startIndex < 0) {
+1649:             startIndex = 0;
+1650:         }
+1651:         if (objectToFind == null) {
+1652:             for (int i = startIndex; i < array.length; i++) {
+1653:                 if (array[i] == null) {
+1654:                     return i;
+1655:                 }
+1656:             }
+1657:         } else if (array.getClass().getComponentType().isInstance(objectToFind)) {
+1658:             for (int i = startIndex; i < array.length; i++) {
+1659:                 if (objectToFind.equals(array[i])) {
+1660:                     return i;
+1661:                 }
+1662:             }
+1663:         }
+1664:         return INDEX_NOT_FOUND;
+1665:     }
+
+[2] org.apache.commons.lang3.builder.IDKey#equals  (lines 63-74)
+63:         @Override
+64:         public boolean equals(Object other) {
+65:             if (!(other instanceof IDKey)) {
+66:                 return false;
+67:             }
+68:             IDKey idKey = (IDKey) other;
+69:             if (id != idKey.id) {
+70:                 return false;
+71:             }
+72:             // Note that identity equals is used.
+73:             return value == idKey.value;
+74:          }
+
+[3] org.apache.commons.lang3.builder.HashCodeBuilder#initialValue  (lines 105-108)
+105:         @Override
+106:         protected Set<IDKey> initialValue() {
+107:             return new HashSet<IDKey>();
+108:         }
+
+[4] org.apache.commons.lang3.builder.IDKey#hashCode  (lines 53-56)
+53:         @Override
+54:         public int hashCode() {
+55:            return id;
+56:         }
+
+[5] org.apache.commons.lang3.builder.HashCodeBuilder#isRegistered  (lines 151-153)
+151:     static boolean isRegistered(Object value) {
+152:         return getRegistry().contains(new IDKey(value));
+153:     }
+
+[6] org.apache.commons.lang3.builder.HashCodeBuilder#unregister  (lines 537-539)
+537:     static void unregister(Object value) {
+538:         getRegistry().remove(new IDKey(value));
+539:     }
+
+[7] org.apache.commons.lang3.builder.HashCodeBuilder#reflectionAppend  (lines 171-198)
+171:     private static void reflectionAppend(Object object, Class<?> clazz, HashCodeBuilder builder, boolean useTransients,
+172:             String[] excludeFields) {
+173:         if (isRegistered(object)) {
+174:             return;
+175:         }
+176:         try {
+177:             register(object);
+178:             Field[] fields = clazz.getDeclaredFields();
+179:             AccessibleObject.setAccessible(fields, true);
+180:             for (Field field : fields) {
+181:                 if (!ArrayUtils.contains(excludeFields, field.getName())
+182:                     && (field.getName().indexOf('$') == -1)
+183:                     && (useTransients || !Modifier.isTransient(field.getModifiers()))
+184:                     && (!Modifier.isStatic(field.getModifiers()))) {
+185:                     try {
+186:                         Object fieldValue = field.get(object);
+187:                         builder.append(fieldValue);
+188:                     } catch (IllegalAccessException e) {
+189:                         // this can't happen. Would get a Security exception instead
+190:                         // throw a runtime exception in case the impossible happens.
+191:                         throw new InternalError("Unexpected IllegalAccessException");
+192:                     }
+193:                 }
+194:             }
+195:         } finally {
+196:             unregister(object);
+197:         }
+198:     }
+
+[8] org.apache.commons.lang3.builder.HashCodeBuilder#reflectionHashCode  (lines 353-367)
+353:     public static <T> int reflectionHashCode(int initialNonZeroOddNumber, int multiplierNonZeroOddNumber, T object,
+354:             boolean testTransients, Class<? super T> reflectUpToClass, String[] excludeFields) {
+355: 
+356:         if (object == null) {
+357:             throw new IllegalArgumentException("The object to build a hash code for must not be null");
+358:         }
+359:         HashCodeBuilder builder = new HashCodeBuilder(initialNonZeroOddNumber, multiplierNonZeroOddNumber);
+360:         Class<?> clazz = object.getClass();
+361:         reflectionAppend(object, clazz, builder, testTransients, excludeFields);
+362:         while (clazz.getSuperclass() != null && clazz != reflectUpToClass) {
+363:             clazz = clazz.getSuperclass();
+364:             reflectionAppend(object, clazz, builder, testTransients, excludeFields);
+365:         }
+366:         return builder.toHashCode();
+367:     }
+
+[9] org.apache.commons.lang3.ArrayUtils#indexOf  (lines 1626-1628)
+1626:     public static int indexOf(Object[] array, Object objectToFind) {
+1627:         return indexOf(array, objectToFind, 0);
+1628:     }
+
+[10] org.apache.commons.lang3.builder.HashCodeBuilder#getRegistry  (lines 136-138)
+136:     static Set<IDKey> getRegistry() {
+137:         return REGISTRY.get();
+138:     }
+
+[11] org.apache.commons.lang3.builder.HashCodeBuilder#append  (lines 854-887)
+854:     public HashCodeBuilder append(Object object) {
+855:         if (object == null) {
+856:             iTotal = iTotal * iConstant;
+857: 
+858:         } else {
+859:             if(object.getClass().isArray()) {
+860:                 // 'Switch' on type of array, to dispatch to the correct handler
+861:                 // This handles multi dimensional arrays
+862:                 if (object instanceof long[]) {
+863:                     append((long[]) object);
+864:                 } else if (object instanceof int[]) {
+865:                     append((int[]) object);
+866:                 } else if (object instanceof short[]) {
+867:                     append((short[]) object);
+868:                 } else if (object instanceof char[]) {
+869:                     append((char[]) object);
+870:                 } else if (object instanceof byte[]) {
+871:                     append((byte[]) object);
+872:                 } else if (object instanceof double[]) {
+873:                     append((double[]) object);
+874:                 } else if (object instanceof float[]) {
+875:                     append((float[]) object);
+876:                 } else if (object instanceof boolean[]) {
+877:                     append((boolean[]) object);
+878:                 } else {
+879:                     // Not an array of primitives
+880:                     append((Object[]) object);
+881:                 }
+882:             } else {
+883:                 iTotal = iTotal * iConstant + object.hashCode();
+884:             }
+885:         }
+886:         return this;
+887:     }
+
+[12] org.apache.commons.lang3.ArrayUtils#contains  (lines 1729-1731)
+1729:     public static boolean contains(Object[] array, Object objectToFind) {
+1730:         return indexOf(array, objectToFind) != INDEX_NOT_FOUND;
+1731:     }
+
+[13] org.apache.commons.lang3.builder.IDKey#IDKey  (lines 40-47)
+40:         public IDKey(Object _value) {
+41:             // This is the Object hashcode 
+42:             id = System.identityHashCode(_value);  
+43:             // There have been some cases (LANG-459) that return the 
+44:             // same identity hash code for different objects.  So 
+45:             // the value is also added to disambiguate these cases.
+46:             value = _value;
+47:         }
+
+[14] org.apache.commons.lang3.builder.HashCodeBuilder#reflectionHashCode  (lines 399-401)
+399:     public static int reflectionHashCode(Object object) {
+400:         return reflectionHashCode(17, 37, object, false, null, null);
+401:     }
+
+[15] org.apache.commons.lang3.builder.HashCodeBuilder#HashCodeBuilder  (lines 578-593)
+578:     public HashCodeBuilder(int initialNonZeroOddNumber, int multiplierNonZeroOddNumber) {
+579:         if (initialNonZeroOddNumber == 0) {
+580:             throw new IllegalArgumentException("HashCodeBuilder requires a non zero initial value");
+581:         }
+582:         if (initialNonZeroOddNumber % 2 == 0) {
+583:             throw new IllegalArgumentException("HashCodeBuilder requires an odd initial value");
+584:         }
+585:         if (multiplierNonZeroOddNumber == 0) {
+586:             throw new IllegalArgumentException("HashCodeBuilder requires a non zero multiplier");
+587:         }
+588:         if (multiplierNonZeroOddNumber % 2 == 0) {
+589:             throw new IllegalArgumentException("HashCodeBuilder requires an odd multiplier");
+590:         }
+591:         iConstant = multiplierNonZeroOddNumber;
+592:         iTotal = initialNonZeroOddNumber;
+593:     }
+
+[16] org.apache.commons.lang3.builder.HashCodeBuilder#register  (lines 521-523)
+521:     static void register(Object value) {
+522:         getRegistry().add(new IDKey(value));
+523:     }
+
+[17] org.apache.commons.lang3.builder.HashCodeBuilder#toHashCode  (lines 965-967)
+965:     public int toHashCode() {
+966:         return iTotal;
+967:     }

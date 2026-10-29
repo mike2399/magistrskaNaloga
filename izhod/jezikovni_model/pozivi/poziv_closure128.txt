@@ -1,0 +1,1570 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.CodePrinterTest::testIssue942
+junit.framework.ComparisonFailure: expected:<var x={[0]:1}> but was:<var x={["0"]:1}>
+	at com.google.javascript.jscomp.CodePrinterTest.assertPrint(CodePrinterTest.java:465)
+	at com.google.javascript.jscomp.CodePrinterTest.testIssue942(CodePrinterTest.java:1423)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.CodeGenerator#add  (lines 103-756)
+103:   void add(Node n, Context context) {
+104:     if (!cc.continueProcessing()) {
+105:       return;
+106:     }
+107: 
+108:     int type = n.getType();
+109:     String opstr = NodeUtil.opToStr(type);
+110:     int childCount = n.getChildCount();
+111:     Node first = n.getFirstChild();
+112:     Node last = n.getLastChild();
+113: 
+114:     // Handle all binary operators
+115:     if (opstr != null && first != last) {
+116:       Preconditions.checkState(
+117:           childCount == 2,
+118:           "Bad binary operator \"%s\": expected 2 arguments but got %s",
+119:           opstr, childCount);
+120:       int p = NodeUtil.precedence(type);
+121: 
+122:       // For right-hand-side of operations, only pass context if it's
+123:       // the IN_FOR_INIT_CLAUSE one.
+124:       Context rhsContext = getContextForNoInOperator(context);
+125: 
+126:       // Handle associativity.
+127:       // e.g. if the parse tree is a * (b * c),
+128:       // we can simply generate a * b * c.
+129:       if (last.getType() == type &&
+130:           NodeUtil.isAssociative(type)) {
+131:         addExpr(first, p, context);
+132:         cc.addOp(opstr, true);
+133:         addExpr(last, p, rhsContext);
+134:       } else if (NodeUtil.isAssignmentOp(n) && NodeUtil.isAssignmentOp(last)) {
+135:         // Assignments are the only right-associative binary operators
+136:         addExpr(first, p, context);
+137:         cc.addOp(opstr, true);
+138:         addExpr(last, p, rhsContext);
+139:       } else {
+140:         unrollBinaryOperator(n, type, opstr, context, rhsContext, p, p + 1);
+141:       }
+142:       return;
+143:     }
+144: 
+145:     cc.startSourceMapping(n);
+146: 
+147:     switch (type) {
+148:       case Token.TRY: {
+149:         Preconditions.checkState(first.getNext().isBlock() &&
+150:                 !first.getNext().hasMoreThanOneChild());
+151:         Preconditions.checkState(childCount >= 2 && childCount <= 3);
+152: 
+153:         add("try");
+154:         add(first, Context.PRESERVE_BLOCK);
+155: 
+156:         // second child contains the catch block, or nothing if there
+157:         // isn't a catch block
+158:         Node catchblock = first.getNext().getFirstChild();
+159:         if (catchblock != null) {
+160:           add(catchblock);
+161:         }
+162: 
+163:         if (childCount == 3) {
+164:           add("finally");
+165:           add(last, Context.PRESERVE_BLOCK);
+166:         }
+167:         break;
+168:       }
+169: 
+170:       case Token.CATCH:
+171:         Preconditions.checkState(childCount == 2);
+172:         add("catch(");
+173:         add(first);
+174:         add(")");
+175:         add(last, Context.PRESERVE_BLOCK);
+176:         break;
+177: 
+178:       case Token.THROW:
+179:         Preconditions.checkState(childCount == 1);
+180:         add("throw");
+181:         add(first);
+182: 
+183:         // Must have a ';' after a throw statement, otherwise safari can't
+184:         // parse this.
+185:         cc.endStatement(true);
+186:         break;
+187: 
+188:       case Token.RETURN:
+189:         add("return");
+190:         if (childCount == 1) {
+191:           add(first);
+192:         } else {
+193:           Preconditions.checkState(childCount == 0);
+194:         }
+195:         cc.endStatement();
+196:         break;
+197: 
+198:       case Token.VAR:
+199:         if (first != null) {
+200:           add("var ");
+201:           addList(first, false, getContextForNoInOperator(context));
+202:         }
+203:         break;
+204: 
+205:       case Token.LABEL_NAME:
+206:         Preconditions.checkState(!n.getString().isEmpty());
+207:         addIdentifier(n.getString());
+208:         break;
+209: 
+210:       case Token.NAME:
+211:         if (first == null || first.isEmpty()) {
+212:           addIdentifier(n.getString());
+213:         } else {
+214:           Preconditions.checkState(childCount == 1);
+215:           addIdentifier(n.getString());
+216:           cc.addOp("=", true);
+217:           if (first.isComma()) {
+218:             addExpr(first, NodeUtil.precedence(Token.ASSIGN), Context.OTHER);
+219:           } else {
+220:             // Add expression, consider nearby code at lowest level of
+221:             // precedence.
+222:             addExpr(first, 0, getContextForNoInOperator(context));
+223:           }
+224:         }
+225:         break;
+226: 
+227:       case Token.ARRAYLIT:
+228:         add("[");
+229:         addArrayList(first);
+230:         add("]");
+231:         break;
+232: 
+233:       case Token.PARAM_LIST:
+234:         add("(");
+235:         addList(first);
+236:         add(")");
+237:         break;
+238: 
+239:       case Token.COMMA:
+240:         Preconditions.checkState(childCount == 2);
+241:         unrollBinaryOperator(n, Token.COMMA, ",", context, Context.OTHER, 0, 0);
+242:         break;
+243: 
+244:       case Token.NUMBER:
+245:         Preconditions.checkState(childCount == 0);
+246:         cc.addNumber(n.getDouble());
+247:         break;
+248: 
+249:       case Token.TYPEOF:
+250:       case Token.VOID:
+251:       case Token.NOT:
+252:       case Token.BITNOT:
+253:       case Token.POS: {
+254:         // All of these unary operators are right-associative
+255:         Preconditions.checkState(childCount == 1);
+256:         cc.addOp(NodeUtil.opToStrNoFail(type), false);
+257:         addExpr(first, NodeUtil.precedence(type), Context.OTHER);
+258:         break;
+259:       }
+260: 
+261:       case Token.NEG: {
+262:         Preconditions.checkState(childCount == 1);
+263: 
+264:         // It's important to our sanity checker that the code
+265:         // we print produces the same AST as the code we parse back.
+266:         // NEG is a weird case because Rhino parses "- -2" as "2".
+267:         if (n.getFirstChild().isNumber()) {
+268:           cc.addNumber(-n.getFirstChild().getDouble());
+269:         } else {
+270:           cc.addOp(NodeUtil.opToStrNoFail(type), false);
+271:           addExpr(first, NodeUtil.precedence(type), Context.OTHER);
+272:         }
+273: 
+274:         break;
+275:       }
+276: 
+277:       case Token.HOOK: {
+278:         Preconditions.checkState(childCount == 3);
+279:         int p = NodeUtil.precedence(type);
+280:         addExpr(first, p + 1, context);
+281:         cc.addOp("?", true);
+282:         addExpr(first.getNext(), 1, Context.OTHER);
+283:         cc.addOp(":", true);
+284:         addExpr(last, 1, Context.OTHER);
+285:         break;
+286:       }
+287: 
+288:       case Token.REGEXP:
+289:         if (!first.isString() ||
+290:             !last.isString()) {
+291:           throw new Error("Expected children to be strings");
+292:         }
+293: 
+294:         String regexp = regexpEscape(first.getString(), outputCharsetEncoder);
+295: 
+296:         // I only use one .add because whitespace matters
+297:         if (childCount == 2) {
+298:           add(regexp + last.getString());
+299:         } else {
+300:           Preconditions.checkState(childCount == 1);
+301:           add(regexp);
+302:         }
+303:         break;
+304: 
+305:       case Token.FUNCTION:
+306:         if (n.getClass() != Node.class) {
+307:           throw new Error("Unexpected Node subclass.");
+308:         }
+309:         Preconditions.checkState(childCount == 3);
+310:         boolean funcNeedsParens = (context == Context.START_OF_EXPR);
+311:         if (funcNeedsParens) {
+312:           add("(");
+313:         }
+314: 
+315:         add("function");
+316:         add(first);
+317: 
+318:         add(first.getNext());
+319:         add(last, Context.PRESERVE_BLOCK);
+320:         cc.endFunction(context == Context.STATEMENT);
+321: 
+322:         if (funcNeedsParens) {
+323:           add(")");
+324:         }
+325:         break;
+326: 
+327:       case Token.GETTER_DEF:
+328:       case Token.SETTER_DEF:
+329:         Preconditions.checkState(n.getParent().isObjectLit());
+330:         Preconditions.checkState(childCount == 1);
+331:         Preconditions.checkState(first.isFunction());
+332: 
+333:         // Get methods are unnamed
+334:         Preconditions.checkState(first.getFirstChild().getString().isEmpty());
+335:         if (type == Token.GETTER_DEF) {
+336:           // Get methods have no parameters.
+337:           Preconditions.checkState(!first.getChildAtIndex(1).hasChildren());
+338:           add("get ");
+339:         } else {
+340:           // Set methods have one parameter.
+341:           Preconditions.checkState(first.getChildAtIndex(1).hasOneChild());
+342:           add("set ");
+343:         }
+344: 
+345:         // The name is on the GET or SET node.
+346:         String name = n.getString();
+347:         Node fn = first;
+348:         Node parameters = fn.getChildAtIndex(1);
+349:         Node body = fn.getLastChild();
+350: 
+351:         // Add the property name.
+352:         if (!n.isQuotedString() &&
+353:             TokenStream.isJSIdentifier(name) &&
+354:             // do not encode literally any non-literal characters that were
+355:             // Unicode escaped.
+356:             NodeUtil.isLatin(name)) {
+357:           add(name);
+358:         } else {
+359:           // Determine if the string is a simple number.
+360:           double d = getSimpleNumber(name);
+361:           if (!Double.isNaN(d)) {
+362:             cc.addNumber(d);
+363:           } else {
+364:             addJsString(n);
+365:           }
+366:         }
+367: 
+368:         add(parameters);
+369:         add(body, Context.PRESERVE_BLOCK);
+370:         break;
+371: 
+372:       case Token.SCRIPT:
+373:       case Token.BLOCK: {
+374:         if (n.getClass() != Node.class) {
+375:           throw new Error("Unexpected Node subclass.");
+376:         }
+377:         boolean preserveBlock = context == Context.PRESERVE_BLOCK;
+378:         if (preserveBlock) {
+379:           cc.beginBlock();
+380:         }
+381: 
+382:         boolean preferLineBreaks =
+383:             type == Token.SCRIPT ||
+384:             (type == Token.BLOCK &&
+385:                 !preserveBlock &&
+386:                 n.getParent() != null &&
+387:                 n.getParent().isScript());
+388:         for (Node c = first; c != null; c = c.getNext()) {
+389:           add(c, Context.STATEMENT);
+390: 
+391:           // VAR doesn't include ';' since it gets used in expressions
+392:           if (c.isVar()) {
+393:             cc.endStatement();
+394:           }
+395: 
+396:           if (c.isFunction()) {
+397:             cc.maybeLineBreak();
+398:           }
+399: 
+400:           // Prefer to break lines in between top-level statements
+401:           // because top-level statements are more homogeneous.
+402:           if (preferLineBreaks) {
+403:             cc.notePreferredLineBreak();
+404:           }
+405:         }
+406:         if (preserveBlock) {
+407:           cc.endBlock(cc.breakAfterBlockFor(n, context == Context.STATEMENT));
+408:         }
+409:         break;
+410:       }
+411: 
+412:       case Token.FOR:
+413:         if (childCount == 4) {
+414:           add("for(");
+415:           if (first.isVar()) {
+416:             add(first, Context.IN_FOR_INIT_CLAUSE);
+417:           } else {
+418:             addExpr(first, 0, Context.IN_FOR_INIT_CLAUSE);
+419:           }
+420:           add(";");
+421:           add(first.getNext());
+422:           add(";");
+423:           add(first.getNext().getNext());
+424:           add(")");
+425:           addNonEmptyStatement(
+426:               last, getContextForNonEmptyExpression(context), false);
+427:         } else {
+428:           Preconditions.checkState(childCount == 3);
+429:           add("for(");
+430:           add(first);
+431:           add("in");
+432:           add(first.getNext());
+433:           add(")");
+434:           addNonEmptyStatement(
+435:               last, getContextForNonEmptyExpression(context), false);
+436:         }
+437:         break;
+438: 
+439:       case Token.DO:
+440:         Preconditions.checkState(childCount == 2);
+441:         add("do");
+442:         addNonEmptyStatement(first, Context.OTHER, false);
+443:         add("while(");
+444:         add(last);
+445:         add(")");
+446:         cc.endStatement();
+447:         break;
+448: 
+449:       case Token.WHILE:
+450:         Preconditions.checkState(childCount == 2);
+451:         add("while(");
+452:         add(first);
+453:         add(")");
+454:         addNonEmptyStatement(
+455:             last, getContextForNonEmptyExpression(context), false);
+456:         break;
+457: 
+458:       case Token.EMPTY:
+459:         Preconditions.checkState(childCount == 0);
+460:         break;
+461: 
+462:       case Token.GETPROP: {
+463:         Preconditions.checkState(
+464:             childCount == 2,
+465:             "Bad GETPROP: expected 2 children, but got %s", childCount);
+466:         Preconditions.checkState(
+467:             last.isString(),
+468:             "Bad GETPROP: RHS should be STRING");
+469:         boolean needsParens = (first.isNumber());
+470:         if (needsParens) {
+471:           add("(");
+472:         }
+473:         addExpr(first, NodeUtil.precedence(type), context);
+474:         if (needsParens) {
+475:           add(")");
+476:         }
+477:         add(".");
+478:         addIdentifier(last.getString());
+479:         break;
+480:       }
+481: 
+482:       case Token.GETELEM:
+483:         Preconditions.checkState(
+484:             childCount == 2,
+485:             "Bad GETELEM: expected 2 children but got %s", childCount);
+486:         addExpr(first, NodeUtil.precedence(type), context);
+487:         add("[");
+488:         add(first.getNext());
+489:         add("]");
+490:         break;
+491: 
+492:       case Token.WITH:
+493:         Preconditions.checkState(childCount == 2);
+494:         add("with(");
+495:         add(first);
+496:         add(")");
+497:         addNonEmptyStatement(
+498:             last, getContextForNonEmptyExpression(context), false);
+499:         break;
+500: 
+501:       case Token.INC:
+502:       case Token.DEC: {
+503:         Preconditions.checkState(childCount == 1);
+504:         String o = type == Token.INC ? "++" : "--";
+505:         int postProp = n.getIntProp(Node.INCRDECR_PROP);
+506:         // A non-zero post-prop value indicates a post inc/dec, default of zero
+507:         // is a pre-inc/dec.
+508:         if (postProp != 0) {
+509:           addExpr(first, NodeUtil.precedence(type), context);
+510:           cc.addOp(o, false);
+511:         } else {
+512:           cc.addOp(o, false);
+513:           add(first);
+514:         }
+515:         break;
+516:       }
+517: 
+518:       case Token.CALL:
+519:         // We have two special cases here:
+520:         // 1) If the left hand side of the call is a direct reference to eval,
+521:         // then it must have a DIRECT_EVAL annotation. If it does not, then
+522:         // that means it was originally an indirect call to eval, and that
+523:         // indirectness must be preserved.
+524:         // 2) If the left hand side of the call is a property reference,
+525:         // then the call must not a FREE_CALL annotation. If it does, then
+526:         // that means it was originally an call without an explicit this and
+527:         // that must be preserved.
+528:         if (isIndirectEval(first)
+529:             || n.getBooleanProp(Node.FREE_CALL) && NodeUtil.isGet(first)) {
+530:           add("(0,");
+531:           addExpr(first, NodeUtil.precedence(Token.COMMA), Context.OTHER);
+532:           add(")");
+533:         } else {
+534:           addExpr(first, NodeUtil.precedence(type), context);
+535:         }
+536:         add("(");
+537:         addList(first.getNext());
+538:         add(")");
+539:         break;
+540: 
+541:       case Token.IF:
+542:         boolean hasElse = childCount == 3;
+543:         boolean ambiguousElseClause =
+544:             context == Context.BEFORE_DANGLING_ELSE && !hasElse;
+545:         if (ambiguousElseClause) {
+546:           cc.beginBlock();
+547:         }
+548: 
+549:         add("if(");
+550:         add(first);
+551:         add(")");
+552: 
+553:         if (hasElse) {
+554:           addNonEmptyStatement(
+555:               first.getNext(), Context.BEFORE_DANGLING_ELSE, false);
+556:           add("else");
+557:           addNonEmptyStatement(
+558:               last, getContextForNonEmptyExpression(context), false);
+559:         } else {
+560:           addNonEmptyStatement(first.getNext(), Context.OTHER, false);
+561:           Preconditions.checkState(childCount == 2);
+562:         }
+563: 
+564:         if (ambiguousElseClause) {
+565:           cc.endBlock();
+566:         }
+567:         break;
+568: 
+569:       case Token.NULL:
+570:         Preconditions.checkState(childCount == 0);
+571:         cc.addConstant("null");
+572:         break;
+573: 
+574:       case Token.THIS:
+575:         Preconditions.checkState(childCount == 0);
+576:         add("this");
+577:         break;
+578: 
+579:       case Token.FALSE:
+580:         Preconditions.checkState(childCount == 0);
+581:         cc.addConstant("false");
+582:         break;
+583: 
+584:       case Token.TRUE:
+585:         Preconditions.checkState(childCount == 0);
+586:         cc.addConstant("true");
+587:         break;
+588: 
+589:       case Token.CONTINUE:
+590:         Preconditions.checkState(childCount <= 1);
+591:         add("continue");
+592:         if (childCount == 1) {
+593:           if (!first.isLabelName()) {
+594:             throw new Error("Unexpected token type. Should be LABEL_NAME.");
+595:           }
+596:           add(" ");
+597:           add(first);
+598:         }
+599:         cc.endStatement();
+600:         break;
+601: 
+602:       case Token.DEBUGGER:
+603:         Preconditions.checkState(childCount == 0);
+604:         add("debugger");
+605:         cc.endStatement();
+606:         break;
+607: 
+608:       case Token.BREAK:
+609:         Preconditions.checkState(childCount <= 1);
+610:         add("break");
+611:         if (childCount == 1) {
+612:           if (!first.isLabelName()) {
+613:             throw new Error("Unexpected token type. Should be LABEL_NAME.");
+614:           }
+615:           add(" ");
+616:           add(first);
+617:         }
+618:         cc.endStatement();
+619:         break;
+620: 
+621:       case Token.EXPR_RESULT:
+622:         Preconditions.checkState(childCount == 1);
+623:         add(first, Context.START_OF_EXPR);
+624:         cc.endStatement();
+625:         break;
+626: 
+627:       case Token.NEW:
+628:         add("new ");
+629:         int precedence = NodeUtil.precedence(type);
+630: 
+631:         // If the first child contains a CALL, then claim higher precedence
+632:         // to force parentheses. Otherwise, when parsed, NEW will bind to the
+633:         // first viable parentheses (don't traverse into functions).
+634:         if (NodeUtil.containsType(
+635:             first, Token.CALL, NodeUtil.MATCH_NOT_FUNCTION)) {
+636:           precedence = NodeUtil.precedence(first.getType()) + 1;
+637:         }
+638:         addExpr(first, precedence, Context.OTHER);
+639: 
+640:         // '()' is optional when no arguments are present
+641:         Node next = first.getNext();
+642:         if (next != null) {
+643:           add("(");
+644:           addList(next);
+645:           add(")");
+646:         }
+647:         break;
+648: 
+649:       case Token.STRING_KEY:
+650:         Preconditions.checkState(
+651:             childCount == 1, "Object lit key must have 1 child");
+652:         addJsString(n);
+653:         break;
+654: 
+655:       case Token.STRING:
+656:         Preconditions.checkState(
+657:             childCount == 0, "A string may not have children");
+658:         addJsString(n);
+659:         break;
+660: 
+661:       case Token.DELPROP:
+662:         Preconditions.checkState(childCount == 1);
+663:         add("delete ");
+664:         add(first);
+665:         break;
+666: 
+667:       case Token.OBJECTLIT: {
+668:         boolean needsParens = (context == Context.START_OF_EXPR);
+669:         if (needsParens) {
+670:           add("(");
+671:         }
+672:         add("{");
+673:         for (Node c = first; c != null; c = c.getNext()) {
+674:           if (c != first) {
+675:             cc.listSeparator();
+676:           }
+677: 
+678:           if (c.isGetterDef() || c.isSetterDef()) {
+679:             add(c);
+680:           } else {
+681:             Preconditions.checkState(c.isStringKey());
+682:             String key = c.getString();
+683:             // Object literal property names don't have to be quoted if they
+684:             // are not JavaScript keywords
+685:             if (!c.isQuotedString() &&
+686:                 !TokenStream.isKeyword(key) &&
+687:                 TokenStream.isJSIdentifier(key) &&
+688:                 // do not encode literally any non-literal characters that
+689:                 // were Unicode escaped.
+690:                 NodeUtil.isLatin(key)) {
+691:               add(key);
+692:             } else {
+693:               // Determine if the string is a simple number.
+694:               double d = getSimpleNumber(key);
+695:               if (!Double.isNaN(d)) {
+696:                 cc.addNumber(d);
+697:               } else {
+698:                 addExpr(c, 1, Context.OTHER);
+699:               }
+700:             }
+701:             add(":");
+702:             addExpr(c.getFirstChild(), 1, Context.OTHER);
+703:           }
+704:         }
+705:         add("}");
+706:         if (needsParens) {
+707:           add(")");
+708:         }
+709:         break;
+710:       }
+711: 
+712:       case Token.SWITCH:
+713:         add("switch(");
+714:         add(first);
+715:         add(")");
+716:         cc.beginBlock();
+717:         addAllSiblings(first.getNext());
+718:         cc.endBlock(context == Context.STATEMENT);
+719:         break;
+720: 
+721:       case Token.CASE:
+722:         Preconditions.checkState(childCount == 2);
+723:         add("case ");
+724:         add(first);
+725:         addCaseBody(last);
+726:         break;
+727: 
+728:       case Token.DEFAULT_CASE:
+729:         Preconditions.checkState(childCount == 1);
+730:         add("default");
+731:         addCaseBody(first);
+732:         break;
+733: 
+734:       case Token.LABEL:
+735:         Preconditions.checkState(childCount == 2);
+736:         if (!first.isLabelName()) {
+737:           throw new Error("Unexpected token type. Should be LABEL_NAME.");
+738:         }
+739:         add(first);
+740:         add(":");
+741:         addNonEmptyStatement(
+742:             last, getContextForNonEmptyExpression(context), true);
+743:         break;
+744: 
+745:       case Token.CAST:
+746:         add("(");
+747:         add(first);
+748:         add(")");
+749:         break;
+750: 
+751:       default:
+752:         throw new Error("Unknown type " + type + "\n" + n.toStringTree());
+753:     }
+754: 
+755:     cc.endSourceMapping(n);
+756:   }
+
+[2] com.google.javascript.jscomp.CodePrinter#setCompilerOptions  (lines 565-572)
+565:     Builder setCompilerOptions(CompilerOptions options) {
+566:       try {
+567:         this.options = (CompilerOptions) options.clone();
+568:       } catch (CloneNotSupportedException e) {
+569:         throw Throwables.propagate(e);
+570:       }
+571:       return this;
+572:     }
+
+[3] com.google.javascript.jscomp.DiagnosticGroup#DiagnosticGroup  (lines 60-63)
+60:   private DiagnosticGroup(DiagnosticType type) {
+61:     this.name = null;
+62:     this.types = ImmutableSet.of(type);
+63:   }
+
+[4] com.google.javascript.jscomp.parsing.IRFactory#transformNumberAsString  (lines 408-416)
+408:   private Node transformNumberAsString(NumberLiteral literalNode) {
+409:     Node irNode = newStringNode(getStringValue(literalNode.getNumber()));
+410:     JSDocInfo jsDocInfo = handleJsDoc(literalNode, irNode);
+411:     if (jsDocInfo != null) {
+412:       irNode.setJSDocInfo(jsDocInfo);
+413:     }
+414:     setSourceInfo(irNode, literalNode);
+415:     return irNode;
+416:   }
+
+[5] com.google.javascript.jscomp.Compiler#parseTestCode  (lines 1603-1613)
+1603:   @Override
+1604:   Node parseTestCode(String js) {
+1605:     initCompilerOptionsIfTesting();
+1606:     CompilerInput input = new CompilerInput(
+1607:         SourceFile.fromCode("[testcode]", js));
+1608:     if (inputsById == null) {
+1609:       inputsById = Maps.newHashMap();
+1610:     }
+1611:     putCompilerInput(input.getInputId(), input);
+1612:     return input.getAstRoot(this);
+1613:   }
+
+[6] com.google.javascript.rhino.Node#getDouble  (lines 158-161)
+158:     @Override
+159:     public double getDouble() {
+160:       return this.number;
+161:     }
+
+[7] com.google.javascript.jscomp.CompilerOptions#setLineLengthThreshold  (lines 2009-2011)
+2009:   public void setLineLengthThreshold(int lineLengthThreshold) {
+2010:     this.lineLengthThreshold = lineLengthThreshold;
+2011:   }
+
+[8] com.google.javascript.jscomp.CodePrinter#maybeCutLine  (lines 490-507)
+490:     @Override
+491:     void maybeCutLine() {
+492:       if (lineLength > lineLengthThreshold) {
+493:         // Use the preferred position provided it will break the line.
+494:         if (preferredBreakPosition > lineStartPosition &&
+495:             preferredBreakPosition < lineStartPosition + lineLength) {
+496:           int position = preferredBreakPosition;
+497:           code.insert(position, '\n');
+498:           prevCutPosition = position;
+499:           reportLineCut(lineIndex, position - lineStartPosition, true);
+500:           lineIndex++;
+501:           lineLength -= (position - lineStartPosition);
+502:           lineStartPosition = position + 1;
+503:         } else {
+504:           startNewLine();
+505:         }
+506:       }
+507:     }
+
+[9] com.google.javascript.rhino.Node#addChildToFront  (lines 592-601)
+592:   public void addChildToFront(Node child) {
+593:     Preconditions.checkArgument(child.parent == null);
+594:     Preconditions.checkArgument(child.next == null);
+595:     child.parent = this;
+596:     child.next = first;
+597:     first = child;
+598:     if (last == null) {
+599:       last = child;
+600:     }
+601:   }
+
+[10] com.google.javascript.jscomp.CodeGenerator#getSimpleNumber  (lines 794-806)
+794:   static double getSimpleNumber(String s) {
+795:     if (isSimpleNumber(s)) {
+796:       try {
+797:         long l = Long.parseLong(s);
+798:         if (l < NodeUtil.MAX_POSITIVE_INTEGER_NUMBER) {
+799:           return l;
+800:         }
+801:       } catch (NumberFormatException e) {
+802:         // The number was too long to parse. Fall through to NaN.
+803:       }
+804:     }
+805:     return Double.NaN;
+806:   }
+
+[11] com.google.javascript.jscomp.parsing.IRFactory#newStringNode  (lines 1484-1486)
+1484:   private Node newStringNode(String value) {
+1485:     return IR.string(value).clonePropsFrom(templateNode);
+1486:   }
+
+[12] com.google.javascript.jscomp.ComposeWarningsGuard#disables  (lines 124-142)
+124:   @Override
+125:   public boolean disables(DiagnosticGroup group) {
+126:     nextSingleton:
+127:     for (DiagnosticType type : group.getTypes()) {
+128:       DiagnosticGroup singleton = DiagnosticGroup.forType(type);
+129: 
+130:       for (WarningsGuard guard : guards) {
+131:         if (guard.disables(singleton)) {
+132:           continue nextSingleton;
+133:         } else if (guard.enables(singleton)) {
+134:           return false;
+135:         }
+136:       }
+137: 
+138:       return false;
+139:     }
+140: 
+141:     return true;
+142:   }
+
+[13] com.google.javascript.rhino.Node#addChildToBack  (lines 603-614)
+603:   public void addChildToBack(Node child) {
+604:     Preconditions.checkArgument(child.parent == null);
+605:     Preconditions.checkArgument(child.next == null);
+606:     child.parent = this;
+607:     child.next = null;
+608:     if (last == null) {
+609:       first = last = child;
+610:       return;
+611:     }
+612:     last.next = child;
+613:     last = child;
+614:   }
+
+[14] com.google.javascript.jscomp.PrepareAst#normalizeObjectLiteralAnnotations  (lines 145-152)
+145:     private void normalizeObjectLiteralAnnotations(Node objlit) {
+146:       Preconditions.checkState(objlit.isObjectLit());
+147:       for (Node key = objlit.getFirstChild();
+148:            key != null; key = key.getNext()) {
+149:         Node value = key.getFirstChild();
+150:         normalizeObjectLiteralKeyAnnotations(objlit, key, value);
+151:       }
+152:     }
+
+[15] com.google.javascript.rhino.Node#isStringKey  (lines 2374-2376)
+2374:   public boolean isStringKey() {
+2375:     return this.getType() == Token.STRING_KEY;
+2376:   }
+
+[16] com.google.javascript.jscomp.CompilerOptions#disables  (lines 1133-1135)
+1133:   boolean disables(DiagnosticGroup type) {
+1134:     return warningsGuard.disables(type);
+1135:   }
+
+[17] com.google.javascript.jscomp.DiagnosticGroupWarningsGuard#disables  (lines 43-46)
+43:   @Override
+44:   public boolean disables(DiagnosticGroup otherGroup) {
+45:     return !level.isOn() && group.isSubGroup(otherGroup);
+46:   }
+
+[18] com.google.javascript.jscomp.CompilerOptions#setPrettyPrint  (lines 1977-1979)
+1977:   public void setPrettyPrint(boolean prettyPrint) {
+1978:     this.prettyPrint = prettyPrint;
+1979:   }
+
+[19] com.google.javascript.rhino.Node#NumberNode  (lines 148-151)
+148:     NumberNode(double number) {
+149:       super(Token.NUMBER);
+150:       this.number = number;
+151:     }
+
+[20] com.google.javascript.jscomp.CompilerOptions#setTrustedStrings  (lines 739-741)
+739:   public void setTrustedStrings(boolean yes) {
+740:     trustedStrings = yes;
+741:   }
+
+[21] com.google.javascript.jscomp.CodeConsumer#isNegativeZero  (lines 282-284)
+282:   static boolean isNegativeZero(double x) {
+283:     return x == 0.0 && Math.copySign(1, x) == -1.0;
+284:   }
+
+[22] com.google.javascript.rhino.Node#newString  (lines 507-509)
+507:   public static Node newString(String str) {
+508:     return new StringNode(Token.STRING, str);
+509:   }
+
+[23] com.google.javascript.jscomp.CodeGenerator#strEscape  (lines 1040-1163)
+1040:   private String strEscape(
+1041:       String s,
+1042:       char quote,
+1043:       String doublequoteEscape,
+1044:       String singlequoteEscape,
+1045:       String backslashEscape,
+1046:       CharsetEncoder outputCharsetEncoder,
+1047:       boolean useSlashV,
+1048:       boolean isRegexp) {
+1049:     StringBuilder sb = new StringBuilder(s.length() + 2);
+1050:     sb.append(quote);
+1051:     for (int i = 0; i < s.length(); i++) {
+1052:       char c = s.charAt(i);
+1053:       switch (c) {
+1054:         case '\0': sb.append("\\x00"); break;
+1055:         case '\u000B':
+1056:           if (useSlashV) {
+1057:             sb.append("\\v");
+1058:           } else {
+1059:             sb.append("\\x0B");
+1060:           }
+1061:           break;
+1062:         // From the SingleEscapeCharacter grammar production.
+1063:         case '\b': sb.append("\\b"); break;
+1064:         case '\f': sb.append("\\f"); break;
+1065:         case '\n': sb.append("\\n"); break;
+1066:         case '\r': sb.append("\\r"); break;
+1067:         case '\t': sb.append("\\t"); break;
+1068:         case '\\': sb.append(backslashEscape); break;
+1069:         case '\"': sb.append(doublequoteEscape); break;
+1070:         case '\'': sb.append(singlequoteEscape); break;
+1071: 
+1072:         // From LineTerminators (ES5 Section 7.3, Table 3)
+1073:         case '\u2028': sb.append("\\u2028"); break;
+1074:         case '\u2029': sb.append("\\u2029"); break;
+1075: 
+1076:         case '=':
+1077:           // '=' is a syntactically signficant regexp character.
+1078:           if (trustedStrings || isRegexp) {
+1079:             sb.append(c);
+1080:           } else {
+1081:             sb.append("\\x3d");
+1082:           }
+1083:           break;
+1084: 
+1085:         case '&':
+1086:           if (trustedStrings || isRegexp) {
+1087:             sb.append(c);
+1088:           } else {
+1089:             sb.append("\\x26");
+1090:           }
+1091:           break;
+1092: 
+1093:         case '>':
+1094:           if (!trustedStrings && !isRegexp) {
+1095:             sb.append(GT_ESCAPED);
+1096:             break;
+1097:           }
+1098: 
+1099:           // Break --> into --\> or ]]> into ]]\>
+1100:           //
+1101:           // This is just to prevent developers from shooting themselves in the
+1102:           // foot, and does not provide the level of security that you get
+1103:           // with trustedString == false.
+1104:           if (i >= 2 &&
+1105:               ((s.charAt(i - 1) == '-' && s.charAt(i - 2) == '-') ||
+1106:                (s.charAt(i - 1) == ']' && s.charAt(i - 2) == ']'))) {
+1107:             sb.append(GT_ESCAPED);
+1108:           } else {
+1109:             sb.append(c);
+1110:           }
+1111:           break;
+1112:         case '<':
+1113:           if (!trustedStrings && !isRegexp) {
+1114:             sb.append(LT_ESCAPED);
+1115:             break;
+1116:           }
+1117: 
+1118:           // Break </script into <\/script
+1119:           // As above, this is just to prevent developers from doing this
+1120:           // accidentally.
+1121:           final String END_SCRIPT = "/script";
+1122: 
+1123:           // Break <!-- into <\!--
+1124:           final String START_COMMENT = "!--";
+1125: 
+1126:           if (s.regionMatches(true, i + 1, END_SCRIPT, 0,
+1127:                               END_SCRIPT.length())) {
+1128:             sb.append(LT_ESCAPED);
+1129:           } else if (s.regionMatches(false, i + 1, START_COMMENT, 0,
+1130:                                      START_COMMENT.length())) {
+1131:             sb.append(LT_ESCAPED);
+1132:           } else {
+1133:             sb.append(c);
+1134:           }
+1135:           break;
+1136:         default:
+1137:           // If we're given an outputCharsetEncoder, then check if the
+1138:           //  character can be represented in this character set.
+1139:           if (outputCharsetEncoder != null) {
+1140:             if (outputCharsetEncoder.canEncode(c)) {
+1141:               sb.append(c);
+1142:             } else {
+1143:               // Unicode-escape the character.
+1144:               appendHexJavaScriptRepresentation(sb, c);
+1145:             }
+1146:           } else {
+1147:             // No charsetEncoder provided - pass straight Latin characters
+1148:             // through, and escape the rest.  Doing the explicit character
+1149:             // check is measurably faster than using the CharsetEncoder.
+1150:             if (c > 0x1f && c < 0x7f) {
+1151:               sb.append(c);
+1152:             } else {
+1153:               // Other characters can be misinterpreted by some JS parsers,
+1154:               // or perhaps mangled by proxies along the way,
+1155:               // so we play it safe and Unicode escape them.
+1156:               appendHexJavaScriptRepresentation(sb, c);
+1157:             }
+1158:           }
+1159:       }
+1160:     }
+1161:     sb.append(quote);
+1162:     return sb.toString();
+1163:   }
+
+[24] com.google.javascript.jscomp.CodeGenerator#addJsString  (lines 975-988)
+975:   private void addJsString(Node n) {
+976:     String s = n.getString();
+977:     boolean useSlashV = n.getBooleanProp(Node.SLASH_V);
+978:     if (useSlashV) {
+979:       add(jsString(n.getString(), useSlashV));
+980:     } else {
+981:       String cached = ESCAPED_JS_STRINGS.get(s);
+982:       if (cached == null) {
+983:         cached = jsString(n.getString(), useSlashV);
+984:         ESCAPED_JS_STRINGS.put(s, cached);
+985:       }
+986:       add(cached);
+987:     }
+988:   }
+
+[25] com.google.javascript.jscomp.CodeConsumer#add  (lines 181-204)
+181:   void add(String newcode) {
+182:     maybeEndStatement();
+183: 
+184:     if (newcode.length() == 0) {
+185:       return;
+186:     }
+187: 
+188:     char c = newcode.charAt(0);
+189:     if ((isWordChar(c) || c == '\\') &&
+190:         isWordChar(getLastChar())) {
+191:       // need space to separate. This is not pretty printing.
+192:       // For example: "return foo;"
+193:       append(" ");
+194:     } else if (c == '/' && getLastChar() == '/') {
+195:       // Do not allow a forward slash to appear after a DIV.
+196:       // For example,
+197:       // REGEXP DIV REGEXP
+198:       // is valid and should print like
+199:       // / // / /
+200:       append(" ");
+201:     }
+202: 
+203:     append(newcode);
+204:   }
+
+[26] com.google.javascript.rhino.IR#string  (lines 446-448)
+446:   public static Node string(String s) {
+447:     return Node.newString(s);
+448:   }
+
+[27] com.google.javascript.jscomp.CodeConsumer#addNumber  (lines 240-276)
+240:   void addNumber(double x) {
+241:     // This is not pretty printing. This is to prevent misparsing of x- -4 as
+242:     // x--4 (which is a syntax error).
+243:     char prev = getLastChar();
+244:     boolean negativeZero = isNegativeZero(x);
+245:     if ((x < 0 || negativeZero) && prev == '-') {
+246:       add(" ");
+247:     }
+248: 
+249:     if (negativeZero) {
+250:       addConstant("-0");
+251:     } else if ((long) x == x) {
+252:       long value = (long) x;
+253:       long mantissa = value;
+254:       int exp = 0;
+255:       if (Math.abs(x) >= 100) {
+256:         while (mantissa / 10 * Math.pow(10, exp + 1) == value) {
+257:           mantissa /= 10;
+258:           exp++;
+259:         }
+260:       }
+261:       if (exp > 2) {
+262:         addConstant(Long.toString(mantissa) + "E" + Integer.toString(exp));
+263:       } else {
+264:         long valueAbs = Math.abs(value);
+265:         if (Long.toHexString(valueAbs).length() + 2 <
+266:             Long.toString(valueAbs).length()) {
+267:           addConstant((value < 0 ? "-" : "") + "0x" +
+268:               Long.toHexString(valueAbs));
+269:         } else {
+270:           addConstant(Long.toString(value));
+271:         }
+272:       }
+273:     } else {
+274:       addConstant(String.valueOf(x).replace(".0E", "E"));
+275:     }
+276:   }
+
+[28] com.google.javascript.jscomp.DiagnosticGroupWarningsGuard#enables  (lines 48-59)
+48:   @Override
+49:   public boolean enables(DiagnosticGroup otherGroup) {
+50:     if (level.isOn()) {
+51:       for (DiagnosticType type : otherGroup.getTypes()) {
+52:         if (group.matches(type)) {
+53:           return true;
+54:         }
+55:       }
+56:     }
+57: 
+58:     return false;
+59:   }
+
+[29] com.google.javascript.jscomp.CodeGenerator#isSimpleNumber  (lines 783-792)
+783:   static boolean isSimpleNumber(String s) {
+784:     int len = s.length();
+785:     for (int index = 0; index < len; index++) {
+786:       char c = s.charAt(index);
+787:       if (c < '0' || c > '9') {
+788:         return false;
+789:       }
+790:     }
+791:     return len > 0 && s.charAt(0) != '0';
+792:   }
+
+[30] com.google.javascript.jscomp.PrepareAst#normalizeObjectLiteralKeyAnnotations  (lines 211-218)
+211:     private void normalizeObjectLiteralKeyAnnotations(
+212:         Node objlit, Node key, Node value) {
+213:       Preconditions.checkState(objlit.isObjectLit());
+214:       if (key.getJSDocInfo() != null &&
+215:           value.isFunction()) {
+216:         value.setJSDocInfo(key.getJSDocInfo());
+217:       }
+218:     }
+
+[31] com.google.javascript.jscomp.CodeGenerator#addList  (lines 926-937)
+926:   void addList(Node firstInList, boolean isArrayOrFunctionArgument,
+927:                Context lhsContext) {
+928:     for (Node n = firstInList; n != null; n = n.getNext()) {
+929:       boolean isFirst = n == firstInList;
+930:       if (isFirst) {
+931:         addExpr(n, isArrayOrFunctionArgument ? 1 : 0, lhsContext);
+932:       } else {
+933:         cc.listSeparator();
+934:         addExpr(n, isArrayOrFunctionArgument ? 1 : 0, Context.OTHER);
+935:       }
+936:     }
+937:   }
+
+[32] com.google.javascript.jscomp.Compiler#reconcileOptionsWithGuards  (lines 313-352)
+313:   protected void reconcileOptionsWithGuards() {
+314:     // DiagnosticGroups override the plain checkTypes option.
+315:     if (options.enables(DiagnosticGroups.CHECK_TYPES)) {
+316:       options.checkTypes = true;
+317:     } else if (options.disables(DiagnosticGroups.CHECK_TYPES)) {
+318:       options.checkTypes = false;
+319:     } else if (!options.checkTypes) {
+320:       // If DiagnosticGroups did not override the plain checkTypes
+321:       // option, and checkTypes is enabled, then turn off the
+322:       // parser type warnings.
+323:       options.setWarningLevel(
+324:           DiagnosticGroup.forType(
+325:               RhinoErrorReporter.TYPE_PARSE_ERROR),
+326:           CheckLevel.OFF);
+327:     }
+328: 
+329:     if (options.checkGlobalThisLevel.isOn() &&
+330:         !options.disables(DiagnosticGroups.GLOBAL_THIS)) {
+331:       options.setWarningLevel(
+332:           DiagnosticGroups.GLOBAL_THIS,
+333:           options.checkGlobalThisLevel);
+334:     }
+335: 
+336:     if (options.getLanguageIn() == LanguageMode.ECMASCRIPT5_STRICT) {
+337:       options.setWarningLevel(
+338:           DiagnosticGroups.ES5_STRICT,
+339:           CheckLevel.ERROR);
+340:     }
+341: 
+342:     // All passes must run the variable check. This synthesizes
+343:     // variables later so that the compiler doesn't crash. It also
+344:     // checks the externs file for validity. If you don't want to warn
+345:     // about missing variable declarations, we shut that specific
+346:     // error off.
+347:     if (!options.checkSymbols &&
+348:         !options.enables(DiagnosticGroups.CHECK_VARIABLES)) {
+349:       options.setWarningLevel(
+350:           DiagnosticGroups.CHECK_VARIABLES, CheckLevel.OFF);
+351:     }
+352:   }
+
+[33] com.google.javascript.rhino.Node#setType  (lines 527-529)
+527:   public void setType(int type) {
+528:     this.type = type;
+529:   }
+
+[34] com.google.javascript.jscomp.parsing.IRFactory#transformAsString  (lines 537-550)
+537:     private Node transformAsString(AstNode n) {
+538:       Node ret;
+539:       if (n instanceof Name) {
+540:         ret = transformNameAsString((Name)n);
+541:       } else if (n instanceof NumberLiteral) {
+542:         ret = transformNumberAsString((NumberLiteral)n);
+543:         ret.putBooleanProp(Node.QUOTED_PROP, true);
+544:       } else {
+545:         ret = transform(n);
+546:         ret.putBooleanProp(Node.QUOTED_PROP, true);
+547:       }
+548:       Preconditions.checkState(ret.isString());
+549:       return ret;
+550:     }
+
+[35] com.google.javascript.jscomp.CodeConsumer#addConstant  (lines 278-280)
+278:   void addConstant(String newcode) {
+279:     add(newcode);
+280:   }
+
+[36] com.google.javascript.rhino.Node#isSetterDef  (lines 2366-2368)
+2366:   public boolean isSetterDef() {
+2367:     return this.getType() == Token.SETTER_DEF;
+2368:   }
+
+[37] com.google.javascript.jscomp.PrepareAst#shouldTraverse  (lines 124-130)
+124:     @Override
+125:     public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
+126:       if (n.isObjectLit()) {
+127:         normalizeObjectLiteralAnnotations(n);
+128:       }
+129:       return true;
+130:     }
+
+[38] com.google.javascript.jscomp.CodeGenerator#jsString  (lines 990-1018)
+990:   private String jsString(String s, boolean useSlashV) {
+991:     int singleq = 0, doubleq = 0;
+992: 
+993:     // could count the quotes and pick the optimal quote character
+994:     for (int i = 0; i < s.length(); i++) {
+995:       switch (s.charAt(i)) {
+996:         case '"': doubleq++; break;
+997:         case '\'': singleq++; break;
+998:       }
+999:     }
+1000: 
+1001:     String doublequote, singlequote;
+1002:     char quote;
+1003:     if (preferSingleQuotes ?
+1004:         (singleq <= doubleq) : (singleq < doubleq)) {
+1005:       // more double quotes so enclose in single quotes.
+1006:       quote = '\'';
+1007:       doublequote = "\"";
+1008:       singlequote = "\\\'";
+1009:     } else {
+1010:       // more single quotes so escape the doubles
+1011:       quote = '\"';
+1012:       doublequote = "\\\"";
+1013:       singlequote = "\'";
+1014:     }
+1015: 
+1016:     return strEscape(s, quote, doublequote, singlequote, "\\\\",
+1017:         outputCharsetEncoder, useSlashV, false);
+1018:   }
+
+[39] com.google.javascript.jscomp.CodeConsumer#appendOp  (lines 206-208)
+206:   void appendOp(String op, boolean binOp) {
+207:     append(op);
+208:   }
+
+[40] com.google.javascript.rhino.Node#isGetterDef  (lines 2278-2280)
+2278:   public boolean isGetterDef() {
+2279:     return this.getType() == Token.GETTER_DEF;
+2280:   }
+
+[41] com.google.javascript.rhino.Node#isQuotedString  (lines 240-243)
+240:     @Override
+241:     public boolean isQuotedString() {
+242:       return getBooleanProp(QUOTED_PROP);
+243:     }
+
+[42] com.google.javascript.jscomp.parsing.TypeSafeDispatcher#process  (lines 120-285)
+120:   public T process(AstNode node) {
+121:     switch (node.getType()) {
+122:       case Token.ADD:
+123:       case Token.AND:
+124:       case Token.BITAND:
+125:       case Token.BITOR:
+126:       case Token.BITXOR:
+127:       case Token.COMMA:
+128:       case Token.DIV:
+129:       case Token.EQ:
+130:       case Token.GE:
+131:       case Token.GT:
+132:       case Token.IN:
+133:       case Token.INSTANCEOF:
+134:       case Token.LE:
+135:       case Token.LSH:
+136:       case Token.LT:
+137:       case Token.MOD:
+138:       case Token.MUL:
+139:       case Token.NE:
+140:       case Token.OR:
+141:       case Token.RSH:
+142:       case Token.SHEQ:
+143:       case Token.SHNE:
+144:       case Token.SUB:
+145:       case Token.URSH:
+146:         return processInfixExpression((InfixExpression) node);
+147:       case Token.ARRAYLIT:
+148:         return processArrayLiteral((ArrayLiteral) node);
+149:       case Token.ASSIGN:
+150:       case Token.ASSIGN_ADD:
+151:       case Token.ASSIGN_BITAND:
+152:       case Token.ASSIGN_BITOR:
+153:       case Token.ASSIGN_BITXOR:
+154:       case Token.ASSIGN_DIV:
+155:       case Token.ASSIGN_LSH:
+156:       case Token.ASSIGN_MOD:
+157:       case Token.ASSIGN_MUL:
+158:       case Token.ASSIGN_RSH:
+159:       case Token.ASSIGN_SUB:
+160:       case Token.ASSIGN_URSH:
+161:         return processAssignment((Assignment) node);
+162:       case Token.BITNOT:
+163:       case Token.DEC:
+164:       case Token.DELPROP:
+165:       case Token.INC:
+166:       case Token.NEG:
+167:       case Token.NOT:
+168:       case Token.POS:
+169:       case Token.TYPEOF:
+170:       case Token.VOID:
+171:         return processUnaryExpression((UnaryExpression) node);
+172:       case Token.BLOCK:
+173:         if (node instanceof Block) {
+174:           return processBlock((Block) node);
+175:         } else  if (node instanceof Scope) {
+176:           return processScope((Scope) node);
+177:         } else {
+178:           throw new IllegalStateException("Unexpected node type.  class: " +
+179:                                           node.getClass() +
+180:                                           " type: " +
+181:                                           Token.typeToName(node.getType()));
+182:         }
+183:       case Token.BREAK:
+184:         return processBreakStatement((BreakStatement) node);
+185:       case Token.CALL:
+186:         return processFunctionCall((FunctionCall) node);
+187:       case Token.CASE:
+188:       case Token.DEFAULT:
+189:         return processSwitchCase((SwitchCase) node);
+190:       case Token.CATCH:
+191:         return processCatchClause((CatchClause) node);
+192:       case Token.COLON:
+193:         return processObjectProperty((ObjectProperty) node);
+194:       case Token.CONTINUE:
+195:         return processContinueStatement((ContinueStatement) node);
+196:       case Token.DO:
+197:         return processDoLoop((DoLoop) node);
+198:       case Token.EMPTY:
+199:         return (node instanceof EmptyExpression) ?
+200:             processEmptyExpression((EmptyExpression) node) :
+201:             processEmptyStatement((EmptyStatement) node);
+202:       case Token.EXPR_RESULT:
+203:       case Token.EXPR_VOID:
+204:         if (node instanceof ExpressionStatement) {
+205:           return processExpressionStatement((ExpressionStatement) node);
+206:         } else  if (node instanceof LabeledStatement) {
+207:           return processLabeledStatement((LabeledStatement) node);
+208:         } else {
+209:           throw new IllegalStateException("Unexpected node type.  class: " +
+210:                                           node.getClass() +
+211:                                           " type: " +
+212:                                           Token.typeToName(node.getType()));
+213:         }
+214:       case Token.DEBUGGER:
+215:       case Token.FALSE:
+216:       case Token.NULL:
+217:       case Token.THIS:
+218:       case Token.TRUE:
+219:         return processKeywordLiteral((KeywordLiteral) node);
+220:       case Token.FOR:
+221:         if (node instanceof ForInLoop) {
+222:           return processForInLoop((ForInLoop) node);
+223:         } else  if (node instanceof ForLoop) {
+224:           return processForLoop((ForLoop) node);
+225:         } else {
+226:           throw new IllegalStateException("Unexpected node type.  class: " +
+227:                                           node.getClass() +
+228:                                           " type: " +
+229:                                           Token.typeToName(node.getType()));
+230:         }
+231:       case Token.FUNCTION:
+232:         return processFunctionNode((FunctionNode) node);
+233:       case Token.GETELEM:
+234:         return processElementGet((ElementGet) node);
+235:       case Token.GETPROP:
+236:         return processPropertyGet((PropertyGet) node);
+237:       case Token.HOOK:
+238:         return processConditionalExpression((ConditionalExpression) node);
+239:       case Token.IF:
+240:         return processIfStatement((IfStatement) node);
+241:       case Token.LABEL:
+242:         return processLabel((Label) node);
+243:       case Token.LP:
+244:         return processParenthesizedExpression((ParenthesizedExpression) node);
+245:       case Token.NAME:
+246:         return processName((Name) node);
+247:       case Token.NEW:
+248:         return processNewExpression((NewExpression) node);
+249:       case Token.NUMBER:
+250:         return processNumberLiteral((NumberLiteral) node);
+251:       case Token.OBJECTLIT:
+252:         return processObjectLiteral((ObjectLiteral) node);
+253:       case Token.REGEXP:
+254:         return processRegExpLiteral((RegExpLiteral) node);
+255:       case Token.RETURN:
+256:         return processReturnStatement((ReturnStatement) node);
+257:       case Token.SCRIPT:
+258:         return processAstRoot((AstRoot) node);
+259:       case Token.STRING:
+260:         return processStringLiteral((StringLiteral) node);
+261:       case Token.SWITCH:
+262:         return processSwitchStatement((SwitchStatement) node);
+263:       case Token.THROW:
+264:         return processThrowStatement((ThrowStatement) node);
+265:       case Token.TRY:
+266:         return processTryStatement((TryStatement) node);
+267:       case Token.CONST:
+268:       case Token.VAR:
+269:         if (node instanceof VariableDeclaration) {
+270:           return processVariableDeclaration((VariableDeclaration) node);
+271:         } else  if (node instanceof VariableInitializer) {
+272:           return processVariableInitializer((VariableInitializer) node);
+273:         } else {
+274:           throw new IllegalStateException("Unexpected node type.  class: " +
+275:                                           node.getClass() +
+276:                                           " type: " +
+277:                                           Token.typeToName(node.getType()));
+278:         }
+279:       case Token.WHILE:
+280:         return processWhileLoop((WhileLoop) node);
+281:       case Token.WITH:
+282:         return processWithStatement((WithStatement) node);
+283:     }
+284:     return processIllegalToken(node);
+285:   }
+
+[43] com.google.javascript.jscomp.DiagnosticGroup#isSubGroup  (lines 116-123)
+116:   boolean isSubGroup(DiagnosticGroup group) {
+117:     for (DiagnosticType type : group.types) {
+118:       if (!matches(type)) {
+119:         return false;
+120:       }
+121:     }
+122:     return true;
+123:   }
+
+[44] com.google.javascript.jscomp.ComposeWarningsGuard#enables  (lines 148-159)
+148:   @Override
+149:   public boolean enables(DiagnosticGroup group) {
+150:     for (WarningsGuard guard : guards) {
+151:       if (guard.enables(group)) {
+152:         return true;
+153:       } else if (guard.disables(group)) {
+154:         return false;
+155:       }
+156:     }
+157: 
+158:     return false;
+159:   }
+
+[45] com.google.javascript.jscomp.NodeTraversal#traverseBranch  (lines 511-537)
+511:   private void traverseBranch(Node n, Node parent) {
+512:     int type = n.getType();
+513:     if (type == Token.SCRIPT) {
+514:       inputId = n.getInputId();
+515:       sourceName = getSourceName(n);
+516:     }
+517: 
+518:     curNode = n;
+519:     if (!callback.shouldTraverse(this, n, parent)) {
+520:       return;
+521:     }
+522: 
+523:     if (type == Token.FUNCTION) {
+524:       traverseFunction(n, parent);
+525:     } else {
+526:       for (Node child = n.getFirstChild(); child != null; ) {
+527:         // child could be replaced, in which case our child node
+528:         // would no longer point to the true next
+529:         Node next = child.getNext();
+530:         traverseBranch(child, n);
+531:         child = next;
+532:       }
+533:     }
+534: 
+535:     curNode = n;
+536:     callback.visit(this, n, parent);
+537:   }
+
+[46] com.google.javascript.jscomp.CodeConsumer#addOp  (lines 210-238)
+210:   void addOp(String op, boolean binOp) {
+211:     maybeEndStatement();
+212: 
+213:     char first = op.charAt(0);
+214:     char prev = getLastChar();
+215: 
+216:     if ((first == '+' || first == '-') && prev == first) {
+217:       // This is not pretty printing. This is to prevent misparsing of
+218:       // things like "x + ++y" or "x++ + ++y"
+219:       append(" ");
+220:     } else if (Character.isLetter(first) &&
+221:                isWordChar(prev)) {
+222:       // Make sure there is a space after e.g. instanceof , typeof
+223:       append(" ");
+224:     } else if (prev == '-' && first == '>') {
+225:       // Make sure that we don't emit -->
+226:       append(" ");
+227:     }
+228: 
+229:     // Allow formatting around the operator.
+230:     appendOp(op, binOp);
+231: 
+232:     // Line breaking after an operator is always safe. Line breaking before an
+233:     // operator on the other hand is not. We only line break after a bin op
+234:     // because it looks strange.
+235:     if (binOp) {
+236:       maybeCutLine();
+237:     }
+238:   }
+
+[47] com.google.javascript.jscomp.parsing.IRFactory#processObjectLiteral  (lines 941-980)
+941:     @Override
+942:     Node processObjectLiteral(ObjectLiteral literalNode) {
+943:       if (literalNode.isDestructuring()) {
+944:         reportDestructuringAssign(literalNode);
+945:       }
+946: 
+947:       Node node = newNode(Token.OBJECTLIT);
+948:       for (ObjectProperty el : literalNode.getElements()) {
+949:         if (config.languageMode == LanguageMode.ECMASCRIPT3) {
+950:           if (el.isGetter()) {
+951:             reportGetter(el);
+952:             continue;
+953:           } else if (el.isSetter()) {
+954:             reportSetter(el);
+955:             continue;
+956:           }
+957:         }
+958: 
+959:         Node key = transformAsString(el.getLeft());
+960:         key.setType(Token.STRING_KEY);
+961: 
+962:         Node value = transform(el.getRight());
+963:         if (el.isGetter()) {
+964:           key.setType(Token.GETTER_DEF);
+965:           Preconditions.checkState(value.isFunction());
+966:           if (getFnParamNode(value).hasChildren()) {
+967:             reportGetterParam(el.getLeft());
+968:           }
+969:         } else if (el.isSetter()) {
+970:           key.setType(Token.SETTER_DEF);
+971:           Preconditions.checkState(value.isFunction());
+972:           if (!getFnParamNode(value).hasOneChild()) {
+973:             reportSetterParam(el.getLeft());
+974:           }
+975:         }
+976:         key.addChildToFront(value);
+977:         node.addChildToBack(key);
+978:       }
+979:       return node;
+980:     }
+
+[48] com.google.javascript.jscomp.CodeConsumer#isWordChar  (lines 286-290)
+286:   static boolean isWordChar(char ch) {
+287:     return (ch == '_' ||
+288:             ch == '$' ||
+289:             Character.isLetterOrDigit(ch));
+290:   }
+
+[49] com.google.javascript.jscomp.parsing.IRFactory#getStringValue  (lines 418-427)
+418:   private static String getStringValue(double value) {
+419:     long longValue = (long) value;
+420: 
+421:     // Return "1" instead of "1.0"
+422:     if (longValue == value) {
+423:       return Long.toString(longValue);
+424:     } else {
+425:       return Double.toString(value);
+426:     }
+427:   }
+
+[50] com.google.javascript.jscomp.DiagnosticGroup#forType  (lines 70-75)
+70:   public static DiagnosticGroup forType(DiagnosticType type) {
+71:     if (!singletons.containsKey(type)) {
+72:       singletons.put(type, new DiagnosticGroup(type));
+73:     }
+74:     return singletons.get(type);
+75:   }

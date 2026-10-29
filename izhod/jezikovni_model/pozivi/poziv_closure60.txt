@@ -1,0 +1,1552 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.CommandLineRunnerTest::testIssue504
+junit.framework.AssertionFailedError: 
+Expected: alert("hi")
+Result: 
+Node tree inequality:
+Tree1:
+BLOCK [synthetic: 1]
+	at com.google.javascript.jscomp.CommandLineRunnerTest.test(CommandLineRunnerTest.java:861)
+	at com.google.javascript.jscomp.CommandLineRunnerTest.test(CommandLineRunnerTest.java:875)
+	at com.google.javascript.jscomp.CommandLineRunnerTest.testIssue504(CommandLineRunnerTest.java:365)
+--- com.google.javascript.jscomp.NodeUtilTest::testGetBooleanValue
+junit.framework.AssertionFailedError: expected:<unknown> but was:<false>
+	at com.google.javascript.jscomp.NodeUtilTest.assertPureBooleanUnknown(NodeUtilTest.java:123)
+	at com.google.javascript.jscomp.NodeUtilTest.testGetBooleanValue(NodeUtilTest.java:104)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1634-1641)
+1634:     @Override
+1635:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1636:       return new CrossModuleMethodMotion(
+1637:           compiler, crossModuleIdGenerator,
+1638:           // Only move properties in externs if we're not treating
+1639:           // them as exports.
+1640:           options.removeUnusedPrototypePropertiesInExterns);
+1641:     }
+
+[2] com.google.javascript.rhino.Node#checkTreeEquals  (lines 1497-1507)
+1497:   public String checkTreeEquals(Node node2) {
+1498:       NodeMismatch diff = checkTreeEqualsImpl(node2);
+1499:       if (diff != null) {
+1500:         return "Node tree inequality:" +
+1501:             "\nTree1:\n" + toStringTree() +
+1502:             "\n\nTree2:\n" + node2.toStringTree() +
+1503:             "\n\nSubtree1: " + diff.nodeA.toStringTree() +
+1504:             "\n\nSubtree2: " + diff.nodeB.toStringTree();
+1505:       }
+1506:       return null;
+1507:   }
+
+[3] com.google.javascript.jscomp.PeepholeReplaceKnownMethods#tryFoldKnownNumericMethods  (lines 121-146)
+121:   private Node tryFoldKnownNumericMethods(Node subtree) {
+122:     Preconditions.checkArgument(subtree.getType() == Token.CALL);
+123: 
+124:     if (isASTNormalized()) {
+125:       // check if this is a call on a string method
+126:       // then dispatch to specific folding method.
+127:       Node callTarget = subtree.getFirstChild();
+128: 
+129:       if (!NodeUtil.isName(callTarget)) {
+130:         return subtree;
+131:       }
+132: 
+133:       String functionNameString = callTarget.getString();
+134:       Node firstArgument = callTarget.getNext();
+135:       if ((firstArgument != null) &&
+136:           (firstArgument.getType() == Token.STRING ||
+137:            firstArgument.getType() == Token.NUMBER)) {
+138:         if (functionNameString.equals("parseInt") ||
+139:             functionNameString.equals("parseFloat")) {
+140:           subtree = tryFoldParseNumber(subtree, functionNameString,
+141:               firstArgument);
+142:         }
+143:       }
+144:     }
+145:     return subtree;
+146:   }
+
+[4] com.google.javascript.jscomp.CheckRegExp#visit  (lines 56-82)
+56:   @Override
+57:   public void visit(NodeTraversal t, Node n, Node parent) {
+58:     if (NodeUtil.isReferenceName(n)) {
+59:       String name = n.getString();
+60:       if (name.equals("RegExp") && t.getScope().getVar(name) == null) {
+61:         int parentType = parent.getType();
+62:         boolean first = (n == parent.getFirstChild());
+63:         if (!((parentType == Token.NEW && first)
+64:                || (parentType == Token.CALL && first)
+65:                || (parentType == Token.INSTANCEOF && !first))) {
+66:           t.report(n, REGEXP_REFERENCE);
+67:           globalRegExpPropertiesUsed = true;
+68:         }
+69:       }
+70: 
+71:     // Check the syntax of regular expression patterns.
+72:     } else if (n.getType() == Token.REGEXP) {
+73:       String pattern = n.getFirstChild().getString();
+74:       String flags = n.getChildCount() == 2
+75:           ? n.getLastChild().getString() : "";
+76:       try {
+77:         RegExpTree.parseRegExp(pattern, flags);
+78:       } catch (IllegalArgumentException ex) {
+79:         t.report(n, MALFORMED_REGEXP, ex.getMessage());
+80:       }
+81:     }
+82:   }
+
+[5] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1521-1544)
+1521:     @Override
+1522:     protected CompilerPass createInternal(final AbstractCompiler compiler) {
+1523:       return new CompilerPass() {
+1524:         @Override
+1525:         public void process(Node externs, Node root) {
+1526:           NameAnalyzer na = new NameAnalyzer(compiler, false);
+1527:           na.process(externs, root);
+1528: 
+1529:           String reportPath = options.reportPath;
+1530:           if (reportPath != null) {
+1531:             try {
+1532:               Files.write(na.getHtmlReport(), new File(reportPath),
+1533:                   Charsets.UTF_8);
+1534:             } catch (IOException e) {
+1535:               compiler.report(JSError.make(REPORT_PATH_IO_ERROR, reportPath));
+1536:             }
+1537:           }
+1538: 
+1539:           if (options.smartNameRemoval) {
+1540:             na.removeUnreferenced();
+1541:           }
+1542:         }
+1543:       };
+1544:     }
+
+[6] com.google.javascript.jscomp.OptimizeParameters#canChangeSignature  (lines 84-146)
+84:   private boolean canChangeSignature(
+85:       DefinitionSite definitionSite, SimpleDefinitionFinder defFinder) {
+86:     Definition definition = definitionSite.definition;
+87: 
+88:     if (definitionSite.inExterns) {
+89:       return false;
+90:     }
+91: 
+92:     // Only functions may be rewritten.
+93:     // Functions that access "arguments" are not eligible since
+94:     // rewrite changes the structure of this object.
+95:     Node rValue = definition.getRValue();
+96:     if (rValue == null ||
+97:         !NodeUtil.isFunction(rValue) ||
+98:         NodeUtil.isVarArgsFunction(rValue)) {
+99:       return false;
+100:     }
+101: 
+102:     // TODO(johnlenz): support rewriting methods defined as part of
+103:     // object literals (they are generally problematic because they may be
+104:     // maps of functions use in for-in expressions, etc).
+105:     // Be conservative, don't try to optimize any declaration that isn't as
+106:     // simple function declaration or assignment.
+107:     if (!SimpleDefinitionFinder.isSimpleFunctionDeclaration(rValue)) {
+108:       return false;
+109:     }
+110: 
+111:     // Assume an exported method result is used.
+112:     if (!defFinder.canModifyDefinition(definition)) {
+113:       return false;
+114:     }
+115: 
+116:     Collection<UseSite> useSites = defFinder.getUseSites(definition);
+117: 
+118:     if (useSites.isEmpty()) {
+119:       return false;
+120:     }
+121: 
+122:     for (UseSite site : useSites) {
+123:       // Any non-call reference maybe introducing an alias. Don't try to
+124:       // change the function signature, if all the aliases can't also be
+125:       // changed.
+126:       // TODO(johnlenz): Support .call signature changes.
+127:       if (!SimpleDefinitionFinder.isCallOrNewSite(site)) {
+128:         return false;
+129:       }
+130: 
+131:       // TODO(johnlenz): support specialization
+132: 
+133:       // Multiple definitions prevent rewrite.
+134:       // TODO(johnlenz): Allow rewrite all definitions are valid.
+135:       Node nameNode = site.node;
+136:       Collection<Definition> singleSiteDefinitions =
+137:           defFinder.getDefinitionsReferencedAt(nameNode);
+138:       if (singleSiteDefinitions.size() > 1) {
+139:         return false;
+140:       }
+141:       Preconditions.checkState(!singleSiteDefinitions.isEmpty());
+142:       Preconditions.checkState(singleSiteDefinitions.contains(definition));
+143:     }
+144: 
+145:     return true;
+146:   }
+
+[7] com.google.javascript.jscomp.DefaultPassConfig#getMainOptimizationLoop  (lines 633-662)
+633:   private List<PassFactory> getMainOptimizationLoop() {
+634:     List<PassFactory> passes = Lists.newArrayList();
+635:     if (options.inlineGetters) {
+636:       passes.add(inlineSimpleMethods);
+637:     }
+638: 
+639:     passes.addAll(getCodeRemovingPasses());
+640: 
+641:     if (options.inlineFunctions || options.inlineLocalFunctions) {
+642:       passes.add(inlineFunctions);
+643:     }
+644: 
+645:     boolean runOptimizeCalls = options.optimizeCalls
+646:         || options.optimizeParameters
+647:         || options.optimizeReturns;
+648: 
+649:     if (options.removeUnusedVars || options.removeUnusedLocalVars) {
+650:       if (options.deadAssignmentElimination) {
+651:         passes.add(deadAssignmentsElimination);
+652:       }
+653:       if (!runOptimizeCalls) {
+654:         passes.add(removeUnusedVars);
+655:       }
+656:     }
+657:     if (runOptimizeCalls) {
+658:       passes.add(optimizeCallsAndRemoveUnusedVars);
+659:     }
+660:     assertAllLoopablePasses(passes);
+661:     return passes;
+662:   }
+
+[8] com.google.javascript.jscomp.CompilationLevel#setOptionsForCompilationLevel  (lines 51-65)
+51:   public void setOptionsForCompilationLevel(CompilerOptions options) {
+52:     switch (this) {
+53:       case WHITESPACE_ONLY:
+54:         applyBasicCompilationOptions(options);
+55:         break;
+56:       case SIMPLE_OPTIMIZATIONS:
+57:         applySafeCompilationOptions(options);
+58:         break;
+59:       case ADVANCED_OPTIMIZATIONS:
+60:         applyFullCompilationOptions(options);
+61:         break;
+62:       default:
+63:         throw new RuntimeException("Unknown compilation level.");
+64:     }
+65:   }
+
+[9] com.google.javascript.jscomp.DefaultPassConfig#runPropertyRenaming  (lines 1897-1926)
+1897:   private VariableMap runPropertyRenaming(
+1898:       AbstractCompiler compiler, VariableMap prevPropertyMap,
+1899:       Node externs, Node root) {
+1900:     char[] reservedChars =
+1901:         options.anonymousFunctionNaming.getReservedCharacters();
+1902:     switch (options.propertyRenaming) {
+1903:       case HEURISTIC:
+1904:         RenamePrototypes rproto = new RenamePrototypes(compiler, false,
+1905:             reservedChars, prevPropertyMap);
+1906:         rproto.process(externs, root);
+1907:         return rproto.getPropertyMap();
+1908: 
+1909:       case AGGRESSIVE_HEURISTIC:
+1910:         RenamePrototypes rproto2 = new RenamePrototypes(compiler, true,
+1911:             reservedChars, prevPropertyMap);
+1912:         rproto2.process(externs, root);
+1913:         return rproto2.getPropertyMap();
+1914: 
+1915:       case ALL_UNQUOTED:
+1916:         RenameProperties rprop = new RenameProperties(
+1917:             compiler, options.propertyAffinity, options.generatePseudoNames,
+1918:             prevPropertyMap, reservedChars);
+1919:         rprop.process(externs, root);
+1920:         return rprop.getPropertyMap();
+1921: 
+1922:       default:
+1923:         throw new IllegalStateException(
+1924:             "Unrecognized property renaming policy");
+1925:     }
+1926:   }
+
+[10] com.google.javascript.jscomp.DefaultPassConfig#getChecks  (lines 164-307)
+164:   @Override
+165:   protected List<PassFactory> getChecks() {
+166:     List<PassFactory> checks = Lists.newArrayList();
+167: 
+168:     if (options.closurePass) {
+169:       checks.add(closureGoogScopeAliases);
+170:     }
+171: 
+172:     if (options.nameAnonymousFunctionsOnly) {
+173:       if (options.anonymousFunctionNaming ==
+174:           AnonymousFunctionNamingPolicy.MAPPED) {
+175:         checks.add(nameMappedAnonymousFunctions);
+176:       } else if (options.anonymousFunctionNaming ==
+177:           AnonymousFunctionNamingPolicy.UNMAPPED) {
+178:         checks.add(nameUnmappedAnonymousFunctions);
+179:       }
+180:       return checks;
+181:     }
+182: 
+183:     if (options.checkSuspiciousCode ||
+184:         options.enables(DiagnosticGroups.GLOBAL_THIS)) {
+185:       checks.add(suspiciousCode);
+186:     }
+187: 
+188:     if (options.checkControlStructures)  {
+189:       checks.add(checkControlStructures);
+190:     }
+191: 
+192:     if (options.checkRequires.isOn()) {
+193:       checks.add(checkRequires);
+194:     }
+195: 
+196:     if (options.checkProvides.isOn()) {
+197:       checks.add(checkProvides);
+198:     }
+199: 
+200:     // The following passes are more like "preprocessor" passes.
+201:     // It's important that they run before most checking passes.
+202:     // Perhaps this method should be renamed?
+203:     if (options.generateExports) {
+204:       checks.add(generateExports);
+205:     }
+206: 
+207:     if (options.exportTestFunctions) {
+208:       checks.add(exportTestFunctions);
+209:     }
+210: 
+211:     if (options.closurePass) {
+212:       checks.add(closurePrimitives.makeOneTimePass());
+213:     }
+214: 
+215:     if (options.closurePass && options.checkMissingGetCssNameLevel.isOn()) {
+216:       checks.add(closureCheckGetCssName);
+217:     }
+218: 
+219:     if (options.syntheticBlockStartMarker != null) {
+220:       // This pass must run before the first fold constants pass.
+221:       checks.add(createSyntheticBlocks);
+222:     }
+223: 
+224:     checks.add(checkVars);
+225:     if (options.computeFunctionSideEffects) {
+226:       checks.add(checkRegExp);
+227:     }
+228: 
+229:     if (options.checkShadowVars.isOn()) {
+230:       checks.add(checkShadowVars);
+231:     }
+232: 
+233:     if (options.aggressiveVarCheck.isOn()) {
+234:       checks.add(checkVariableReferences);
+235:     }
+236: 
+237:     // This pass should run before types are assigned.
+238:     if (options.processObjectPropertyString) {
+239:       checks.add(objectPropertyStringPreprocess);
+240:     }
+241: 
+242:     if (options.checkTypes || options.inferTypes) {
+243:       checks.add(resolveTypes.makeOneTimePass());
+244:       checks.add(inferTypes.makeOneTimePass());
+245:       if (options.checkTypes) {
+246:         checks.add(checkTypes.makeOneTimePass());
+247:       } else {
+248:         checks.add(inferJsDocInfo.makeOneTimePass());
+249:       }
+250:     }
+251: 
+252:     if (options.checkUnreachableCode.isOn() ||
+253:         (options.checkTypes && options.checkMissingReturn.isOn())) {
+254:       checks.add(checkControlFlow);
+255:     }
+256: 
+257:     // CheckAccessControls only works if check types is on.
+258:     if (options.checkTypes &&
+259:         (options.enables(DiagnosticGroups.ACCESS_CONTROLS)
+260:          || options.enables(DiagnosticGroups.CONSTANT_PROPERTY))) {
+261:       checks.add(checkAccessControls);
+262:     }
+263: 
+264:     if (options.checkGlobalNamesLevel.isOn()) {
+265:       checks.add(checkGlobalNames);
+266:     }
+267: 
+268:     checks.add(checkStrictMode);
+269: 
+270:     // Replace 'goog.getCssName' before processing defines but after the
+271:     // other checks have been done.
+272:     if (options.closurePass) {
+273:       checks.add(closureReplaceGetCssName);
+274:     }
+275: 
+276:     // i18n
+277:     // If you want to customize the compiler to use a different i18n pass,
+278:     // you can create a PassConfig that calls replacePassFactory
+279:     // to replace this.
+280:     checks.add(options.messageBundle != null ?
+281:         replaceMessages : createEmptyPass("replaceMessages"));
+282: 
+283:     if (options.getTweakProcessing().isOn()) {
+284:       checks.add(processTweaks);
+285:     }
+286: 
+287:     // Defines in code always need to be processed.
+288:     checks.add(processDefines);
+289: 
+290:     if (options.instrumentationTemplate != null ||
+291:         options.recordFunctionInformation) {
+292:       checks.add(computeFunctionNames);
+293:     }
+294: 
+295:     if (options.nameReferenceGraphPath != null &&
+296:         !options.nameReferenceGraphPath.isEmpty()) {
+297:       checks.add(printNameReferenceGraph);
+298:     }
+299: 
+300:     if (options.nameReferenceReportPath != null &&
+301:         !options.nameReferenceReportPath.isEmpty()) {
+302:       checks.add(printNameReferenceReport);
+303:     }
+304: 
+305:     assertAllOneTimePasses(checks);
+306:     return checks;
+307:   }
+
+[11] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1381-1384)
+1381:     @Override
+1382:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1383:       return new DevirtualizePrototypeMethods(compiler);
+1384:     }
+
+[12] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1875-1894)
+1875:     @Override
+1876:     protected CompilerPass createInternal(final AbstractCompiler compiler) {
+1877:       VariableMap map = null;
+1878:       if (options.inputPropertyMapSerialized != null) {
+1879:         try {
+1880:           map = VariableMap.fromBytes(options.inputPropertyMapSerialized);
+1881:         } catch (ParseException e) {
+1882:           return new ErrorPass(compiler,
+1883:               JSError.make(INPUT_MAP_PROP_PARSE, e.getMessage()));
+1884:         }
+1885:       }
+1886: 
+1887:       final VariableMap prevPropertyMap = map;
+1888:       return new CompilerPass() {
+1889:         @Override public void process(Node externs, Node root) {
+1890:           propertyMap = runPropertyRenaming(
+1891:               compiler, prevPropertyMap, externs, root);
+1892:         }
+1893:       };
+1894:     }
+
+[13] com.google.javascript.jscomp.CheckRegExp#isGlobalRegExpPropertiesUsed  (lines 43-45)
+43:   public boolean isGlobalRegExpPropertiesUsed() {
+44:     return globalRegExpPropertiesUsed;
+45:   }
+
+[14] com.google.javascript.jscomp.PeepholeFoldConstants#tryReduceVoid  (lines 155-164)
+155:   private Node tryReduceVoid(Node n) {
+156:     Node child = n.getFirstChild();
+157:     if (child.getType() != Token.NUMBER || child.getDouble() != 0.0) {
+158:       if (!mayHaveSideEffects(n)) {
+159:         n.replaceChild(child, Node.newNumber(0));
+160:         reportCodeChange();
+161:       }
+162:     }
+163:     return n;
+164:   }
+
+[15] com.google.javascript.jscomp.DefaultPassConfig#process  (lines 1556-1561)
+1556:         @Override
+1557:         public void process(Node externs, Node root) {
+1558:           NameAnalyzer na = new NameAnalyzer(compiler, false);
+1559:           na.process(externs, root);
+1560:           na.removeUnreferenced();
+1561:         }
+
+[16] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1316-1321)
+1316:     @Override
+1317:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1318:       return new CollapseProperties(
+1319:           compiler, options.collapsePropertiesOnExternTypes,
+1320:           !isInliningForbidden());
+1321:     }
+
+[17] com.google.javascript.jscomp.CheckGlobalThis#shouldTraverse  (lines 79-151)
+79:   public boolean shouldTraverse(NodeTraversal t, Node n, Node parent) {
+80: 
+81:     if (n.getType() == Token.FUNCTION) {
+82:       // Don't traverse functions that are constructors or have the @this
+83:       // or @override annotation.
+84:       JSDocInfo jsDoc = getFunctionJsDocInfo(n);
+85:       if (jsDoc != null &&
+86:           (jsDoc.isConstructor() ||
+87:            jsDoc.isInterface() ||
+88:            jsDoc.hasThisType() ||
+89:            jsDoc.isOverride())) {
+90:         return false;
+91:       }
+92: 
+93:       // Don't traverse functions unless they would normally
+94:       // be able to have a @this annotation associated with them. e.g.,
+95:       // var a = function() { }; // or
+96:       // function a() {} // or
+97:       // a.x = function() {}; // or
+98:       // var a = {x: function() {}};
+99:       int pType = parent.getType();
+100:       if (!(pType == Token.BLOCK ||
+101:             pType == Token.SCRIPT ||
+102:             pType == Token.NAME ||
+103:             pType == Token.ASSIGN ||
+104: 
+105:             // object literal keys
+106:             pType == Token.STRING)) {
+107:         return false;
+108:       }
+109: 
+110:       // Don't traverse functions that are getting lent to a prototype.
+111:       Node gramps = parent.getParent();
+112:       if (NodeUtil.isObjectLitKey(parent, gramps)) {
+113:         JSDocInfo maybeLends = gramps.getJSDocInfo();
+114:         if (maybeLends != null &&
+115:             maybeLends.getLendsName() != null &&
+116:             maybeLends.getLendsName().endsWith(".prototype")) {
+117:           return false;
+118:         }
+119:       }
+120:     }
+121: 
+122:     if (parent != null && parent.getType() == Token.ASSIGN) {
+123:       Node lhs = parent.getFirstChild();
+124:       Node rhs = lhs.getNext();
+125: 
+126:       if (n == lhs) {
+127:         // Always traverse the left side of the assignment. To handle
+128:         // nested assignments properly (e.g., (a = this).property = c;),
+129:         // assignLhsChild should not be overridden.
+130:         if (assignLhsChild == null) {
+131:           assignLhsChild = lhs;
+132:         }
+133:       } else {
+134:         // Only traverse the right side if it's not an assignment to a prototype
+135:         // property or subproperty.
+136:         if (NodeUtil.isGet(lhs)) {
+137:           if (lhs.getType() == Token.GETPROP &&
+138:               lhs.getLastChild().getString().equals("prototype")) {
+139:             return false;
+140:           }
+141:           Node llhs = lhs.getFirstChild();
+142:           if (llhs.getType() == Token.GETPROP &&
+143:               llhs.getLastChild().getString().equals("prototype")) {
+144:             return false;
+145:           }
+146:         }
+147:       }
+148:     }
+149: 
+150:     return true;
+151:   }
+
+[18] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 801-816)
+801:     @Override
+802:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+803:       final GatherRawExports pass = new GatherRawExports(
+804:           compiler);
+805: 
+806:       return new CompilerPass() {
+807:         @Override
+808:         public void process(Node externs, Node root) {
+809:           pass.process(externs, root);
+810:           if (exportedNames == null) {
+811:             exportedNames = Sets.newHashSet();
+812:           }
+813:           exportedNames.addAll(pass.getExportedVariableNames());
+814:         }
+815:       };
+816:     }
+
+[19] com.google.javascript.jscomp.DefaultPassConfig#getOptimizations  (lines 309-630)
+309:   @Override
+310:   protected List<PassFactory> getOptimizations() {
+311:     List<PassFactory> passes = Lists.newArrayList();
+312: 
+313:     // TODO(nicksantos): The order of these passes makes no sense, and needs
+314:     // to be re-arranged.
+315: 
+316:     if (options.runtimeTypeCheck) {
+317:       passes.add(runtimeTypeCheck);
+318:     }
+319: 
+320:     passes.add(createEmptyPass("beforeStandardOptimizations"));
+321: 
+322:     if (!options.idGenerators.isEmpty()) {
+323:       passes.add(replaceIdGenerators);
+324:     }
+325: 
+326:     // Optimizes references to the arguments variable.
+327:     if (options.optimizeArgumentsArray) {
+328:       passes.add(optimizeArgumentsArray);
+329:     }
+330: 
+331:     // Abstract method removal works best on minimally modified code, and also
+332:     // only needs to run once.
+333:     if (options.closurePass &&
+334:         (options.removeAbstractMethods || options.removeClosureAsserts)) {
+335:       passes.add(closureCodeRemoval);
+336:     }
+337: 
+338:     // Collapsing properties can undo constant inlining, so we do this before
+339:     // the main optimization loop.
+340:     if (options.collapseProperties) {
+341:       passes.add(collapseProperties);
+342:     }
+343: 
+344:     // ReplaceStrings runs after CollapseProperties in order to simplify
+345:     // pulling in values of constants defined in enums structures.
+346:     if (!options.replaceStringsFunctionDescriptions.isEmpty()) {
+347:       passes.add(replaceStrings);
+348:     }
+349: 
+350:     // Tighten types based on actual usage.
+351:     if (options.tightenTypes) {
+352:       passes.add(tightenTypesBuilder);
+353:     }
+354: 
+355:     // Property disambiguation should only run once and needs to be done
+356:     // soon after type checking, both so that it can make use of type
+357:     // information and so that other passes can take advantage of the renamed
+358:     // properties.
+359:     if (options.disambiguateProperties) {
+360:       passes.add(disambiguateProperties);
+361:     }
+362: 
+363:     if (options.computeFunctionSideEffects) {
+364:       passes.add(markPureFunctions);
+365:     } else if (options.markNoSideEffectCalls) {
+366:       // TODO(user) The properties that this pass adds to CALL and NEW
+367:       // AST nodes increase the AST's in-memory size.  Given that we are
+368:       // already running close to our memory limits, we could run into
+369:       // trouble if we end up using the @nosideeffects annotation a lot
+370:       // or compute @nosideeffects annotations by looking at function
+371:       // bodies.  It should be easy to propagate @nosideeffects
+372:       // annotations as part of passes that depend on this property and
+373:       // store the result outside the AST (which would allow garbage
+374:       // collection once the pass is done).
+375:       passes.add(markNoSideEffectCalls);
+376:     }
+377: 
+378:     if (options.chainCalls) {
+379:       passes.add(chainCalls);
+380:     }
+381: 
+382:     // Constant checking must be done after property collapsing because
+383:     // property collapsing can introduce new constants (e.g. enum values).
+384:     if (options.inlineConstantVars) {
+385:       passes.add(checkConsts);
+386:     }
+387: 
+388:     // The Caja library adds properties to Object.prototype, which breaks
+389:     // most for-in loops.  This adds a check to each loop that skips
+390:     // any property matching /___$/.
+391:     if (options.ignoreCajaProperties) {
+392:       passes.add(ignoreCajaProperties);
+393:     }
+394: 
+395:     assertAllOneTimePasses(passes);
+396: 
+397:     if (options.smartNameRemoval || options.reportPath != null) {
+398:       passes.addAll(getCodeRemovingPasses());
+399:       passes.add(smartNamePass);
+400:     }
+401: 
+402:     // This needs to come after the inline constants pass, which is run within
+403:     // the code removing passes.
+404:     if (options.closurePass) {
+405:       passes.add(closureOptimizePrimitives);
+406:     }
+407: 
+408:     // TODO(user): This forces a first crack at crossModuleCodeMotion
+409:     // before devirtualization. Once certain functions are devirtualized,
+410:     // it confuses crossModuleCodeMotion ability to recognized that
+411:     // it is recursive.
+412: 
+413:     // TODO(user): This is meant for a temporary quick win.
+414:     // In the future, we might want to improve our analysis in
+415:     // CrossModuleCodeMotion so we don't need to do this.
+416:     if (options.crossModuleCodeMotion) {
+417:       passes.add(crossModuleCodeMotion);
+418:     }
+419: 
+420:     // Method devirtualization benefits from property disambiguiation so
+421:     // it should run after that pass but before passes that do
+422:     // optimizations based on global names (like cross module code motion
+423:     // and inline functions).  Smart Name Removal does better if run before
+424:     // this pass.
+425:     if (options.devirtualizePrototypeMethods) {
+426:       passes.add(devirtualizePrototypeMethods);
+427:     }
+428: 
+429:     if (options.customPasses != null) {
+430:       passes.add(getCustomPasses(
+431:           CustomPassExecutionTime.BEFORE_OPTIMIZATION_LOOP));
+432:     }
+433: 
+434:     passes.add(createEmptyPass("beforeMainOptimizations"));
+435: 
+436:     if (options.specializeInitialModule) {
+437:       // When specializing the initial module, we want our fixups to be
+438:       // as lean as possible, so we run the entire optimization loop to a
+439:       // fixed point before specializing, then specialize, and then run the
+440:       // main optimization loop again.
+441: 
+442:       passes.addAll(getMainOptimizationLoop());
+443: 
+444:       if (options.crossModuleCodeMotion) {
+445:         passes.add(crossModuleCodeMotion);
+446:       }
+447: 
+448:       if (options.crossModuleMethodMotion) {
+449:         passes.add(crossModuleMethodMotion);
+450:       }
+451: 
+452:       passes.add(specializeInitialModule.makeOneTimePass());
+453:     }
+454: 
+455:     passes.addAll(getMainOptimizationLoop());
+456: 
+457:     passes.add(createEmptyPass("beforeModuleMotion"));
+458: 
+459:     if (options.crossModuleCodeMotion) {
+460:       passes.add(crossModuleCodeMotion);
+461:     }
+462: 
+463:     if (options.crossModuleMethodMotion) {
+464:       passes.add(crossModuleMethodMotion);
+465:     }
+466: 
+467:     passes.add(createEmptyPass("afterModuleMotion"));
+468: 
+469:     // Some optimizations belong outside the loop because running them more
+470:     // than once would either have no benefit or be incorrect.
+471:     if (options.customPasses != null) {
+472:       passes.add(getCustomPasses(
+473:           CustomPassExecutionTime.AFTER_OPTIMIZATION_LOOP));
+474:     }
+475: 
+476:     if (options.flowSensitiveInlineVariables) {
+477:       passes.add(flowSensitiveInlineVariables);
+478: 
+479:       // After inlining some of the variable uses, some variables are unused.
+480:       // Re-run remove unused vars to clean it up.
+481:       if (options.removeUnusedVars) {
+482:         passes.add(removeUnusedVars);
+483:       }
+484:     }
+485: 
+486:     // Running this pass again is required to have goog.events compile down to
+487:     // nothing when compiled on its own.
+488:     if (options.smartNameRemoval) {
+489:       passes.add(smartNamePass2);
+490:     }
+491: 
+492:     if (options.collapseAnonymousFunctions) {
+493:       passes.add(collapseAnonymousFunctions);
+494:     }
+495: 
+496:     // Move functions before extracting prototype member declarations.
+497:     if (options.moveFunctionDeclarations) {
+498:       passes.add(moveFunctionDeclarations);
+499:     }
+500: 
+501:     if (options.anonymousFunctionNaming ==
+502:         AnonymousFunctionNamingPolicy.MAPPED) {
+503:       passes.add(nameMappedAnonymousFunctions);
+504:     }
+505: 
+506:     // The mapped name anonymous function pass makes use of information that
+507:     // the extract prototype member declarations pass removes so the former
+508:     // happens before the latter.
+509:     //
+510:     // Extracting prototype properties screws up the heuristic renaming
+511:     // policies, so never run it when those policies are requested.
+512:     if (options.extractPrototypeMemberDeclarations &&
+513:         (options.propertyRenaming != PropertyRenamingPolicy.HEURISTIC &&
+514:          options.propertyRenaming !=
+515:             PropertyRenamingPolicy.AGGRESSIVE_HEURISTIC)) {
+516:       passes.add(extractPrototypeMemberDeclarations);
+517:     }
+518: 
+519:     if (options.ambiguateProperties &&
+520:         (options.propertyRenaming == PropertyRenamingPolicy.ALL_UNQUOTED)) {
+521:       passes.add(ambiguateProperties);
+522:     }
+523: 
+524:     if (options.propertyRenaming != PropertyRenamingPolicy.OFF) {
+525:       passes.add(renameProperties);
+526:     }
+527: 
+528:     // Reserve global names added to the "windows" object.
+529:     if (options.reserveRawExports) {
+530:       passes.add(gatherRawExports);
+531:     }
+532: 
+533:     // This comes after property renaming because quoted property names must
+534:     // not be renamed.
+535:     if (options.convertToDottedProperties) {
+536:       passes.add(convertToDottedProperties);
+537:     }
+538: 
+539:     // Property renaming must happen before this pass runs since this
+540:     // pass may convert dotted properties into quoted properties.  It
+541:     // is beneficial to run before alias strings, alias keywords and
+542:     // variable renaming.
+543:     if (options.rewriteFunctionExpressions) {
+544:       passes.add(rewriteFunctionExpressions);
+545:     }
+546: 
+547:     // This comes after converting quoted property accesses to dotted property
+548:     // accesses in order to avoid aliasing property names.
+549:     if (!options.aliasableStrings.isEmpty() || options.aliasAllStrings) {
+550:       passes.add(aliasStrings);
+551:     }
+552: 
+553:     if (options.aliasExternals) {
+554:       passes.add(aliasExternals);
+555:     }
+556: 
+557:     if (options.aliasKeywords) {
+558:       passes.add(aliasKeywords);
+559:     }
+560: 
+561:     // Passes after this point can no longer depend on normalized AST
+562:     // assumptions.
+563:     passes.add(markUnnormalized);
+564: 
+565:     if (options.coalesceVariableNames) {
+566:       passes.add(coalesceVariableNames);
+567: 
+568:       // coalesceVariables creates identity assignments and more redundant code
+569:       // that can be removed, rerun the peephole optimizations to clean them
+570:       // up.
+571:       if (options.foldConstants) {
+572:         passes.add(peepholeOptimizations);
+573:       }
+574:     }
+575: 
+576:     if (options.collapseVariableDeclarations) {
+577:       passes.add(exploitAssign);
+578:       passes.add(collapseVariableDeclarations);
+579:     }
+580: 
+581:     // This pass works best after collapseVariableDeclarations.
+582:     passes.add(denormalize);
+583: 
+584:     if (options.instrumentationTemplate != null) {
+585:       passes.add(instrumentFunctions);
+586:     }
+587: 
+588:     if (options.variableRenaming != VariableRenamingPolicy.ALL) {
+589:       // If we're leaving some (or all) variables with their old names,
+590:       // then we need to undo any of the markers we added for distinguishing
+591:       // local variables ("$$1").
+592:       passes.add(invertContextualRenaming);
+593:     }
+594: 
+595:     if (options.variableRenaming != VariableRenamingPolicy.OFF) {
+596:       passes.add(renameVars);
+597:     }
+598: 
+599:     if (options.groupVariableDeclarations) {
+600:       passes.add(groupVariableDeclarations);
+601:     }
+602: 
+603:     // This pass should run after names stop changing.
+604:     if (options.processObjectPropertyString) {
+605:       passes.add(objectPropertyStringPostprocess);
+606:     }
+607: 
+608:     if (options.labelRenaming) {
+609:       passes.add(renameLabels);
+610:     }
+611: 
+612:     if (options.foldConstants) {
+613:       passes.add(latePeepholeOptimizations);
+614:     }
+615: 
+616:     if (options.anonymousFunctionNaming ==
+617:         AnonymousFunctionNamingPolicy.UNMAPPED) {
+618:       passes.add(nameUnmappedAnonymousFunctions);
+619:     }
+620: 
+621:     if (options.operaCompoundAssignFix) {
+622:       passes.add(operaCompoundAssignFix);
+623:     }
+624: 
+625:     // Safety checks
+626:     passes.add(sanityCheckAst);
+627:     passes.add(sanityCheckVars);
+628: 
+629:     return passes;
+630:   }
+
+[20] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1393-1417)
+1393:     @Override
+1394:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1395:       OptimizeCalls passes = new OptimizeCalls(compiler);
+1396:       if (options.optimizeReturns) {
+1397:         // Remove unused return values.
+1398:         passes.addPass(new OptimizeReturns(compiler));
+1399:       }
+1400: 
+1401:       if (options.optimizeParameters) {
+1402:         // Remove all parameters that are constants or unused.
+1403:         passes.addPass(new OptimizeParameters(compiler));
+1404:       }
+1405: 
+1406:       if (options.optimizeCalls) {
+1407:         boolean removeOnlyLocals = options.removeUnusedLocalVars
+1408:             && !options.removeUnusedVars;
+1409:         boolean preserveAnonymousFunctionNames =
+1410:             options.anonymousFunctionNaming !=
+1411:             AnonymousFunctionNamingPolicy.OFF;
+1412:         passes.addPass(
+1413:             new RemoveUnusedVars(compiler, !removeOnlyLocals,
+1414:                 preserveAnonymousFunctionNames, true));
+1415:       }
+1416:       return passes;
+1417:     }
+
+[21] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1448-1467)
+1448:     @Override
+1449:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1450:       if (isInliningForbidden()) {
+1451:         // In old renaming schemes, inlining a variable can change whether
+1452:         // or not a property is renamed. This is bad, and those old renaming
+1453:         // schemes need to die.
+1454:         return new ErrorPass(compiler, CANNOT_USE_PROTOTYPE_AND_VAR);
+1455:       } else {
+1456:         InlineVariables.Mode mode;
+1457:         if (options.inlineVariables) {
+1458:           mode = InlineVariables.Mode.ALL;
+1459:         } else if (options.inlineLocalVariables) {
+1460:           mode = InlineVariables.Mode.LOCALS_ONLY;
+1461:         } else {
+1462:           throw new IllegalStateException("No variable inlining option set.");
+1463:         }
+1464: 
+1465:         return new InlineVariables(compiler, mode, true);
+1466:       }
+1467:     }
+
+[22] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1715-1718)
+1715:     @Override
+1716:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1717:       return new ExtractPrototypeMemberDeclarations(compiler);
+1718:     }
+
+[23] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1507-1512)
+1507:     @Override
+1508:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1509:       return new RemoveUnusedPrototypeProperties(
+1510:           compiler, options.removeUnusedPrototypePropertiesInExterns,
+1511:           !options.removeUnusedVars);
+1512:     }
+
+[24] com.google.javascript.jscomp.CheckSideEffects#visit  (lines 47-118)
+47:   public void visit(NodeTraversal t, Node n, Node parent) {
+48:     // VOID nodes appear when there are extra semicolons at the BLOCK level.
+49:     // I've been unable to think of any cases where this indicates a bug,
+50:     // and apparently some people like keeping these semicolons around,
+51:     // so we'll allow it.
+52:     if (n.getType() == Token.EMPTY ||
+53:         n.getType() == Token.COMMA) {
+54:       return;
+55:     }
+56: 
+57:     if (parent == null)
+58:       return;
+59: 
+60:     int pt = parent.getType();
+61:     if (pt == Token.COMMA) {
+62:       Node gramps = parent.getParent();
+63:       if (gramps.getType() == Token.CALL &&
+64:           parent == gramps.getFirstChild()) {
+65:         // Semantically, a direct call to eval is different from an indirect
+66:         // call to an eval. See Ecma-262 S15.1.2.1. So it's ok for the first
+67:         // expression to a comma to be a no-op if it's used to indirect
+68:         // an eval.
+69:         if (n == parent.getFirstChild() &&
+70:             parent.getChildCount() == 2 &&
+71:             n.getNext().getType() == Token.NAME &&
+72:             "eval".equals(n.getNext().getString())) {
+73:           return;
+74:         }
+75:       }
+76: 
+77:       if (n == parent.getLastChild()) {
+78:         for (Node an : parent.getAncestors()) {
+79:           int ancestorType = an.getType();
+80:           if (ancestorType == Token.COMMA)
+81:             continue;
+82:           if (ancestorType != Token.EXPR_RESULT &&
+83:               ancestorType != Token.BLOCK)
+84:             return;
+85:           else
+86:             break;
+87:         }
+88:       }
+89:     } else if (pt != Token.EXPR_RESULT && pt != Token.BLOCK) {
+90:       if (pt == Token.FOR && parent.getChildCount() == 4 &&
+91:           (n == parent.getFirstChild() ||
+92:            n == parent.getFirstChild().getNext().getNext())) {
+93:         // Fall through and look for warnings for the 1st and 3rd child
+94:         // of a for.
+95:       } else {
+96:         return;  // it might be ok to not have a side-effect
+97:       }
+98:     }
+99:     if (NodeUtil.isSimpleOperatorType(n.getType()) ||
+100:         !NodeUtil.mayHaveSideEffects(n, t.getCompiler())) {
+101:       if (n.isQualifiedName() && n.getJSDocInfo() != null) {
+102:         // This no-op statement was there so that JSDoc information could
+103:         // be attached to the name. This check should not complain about it.
+104:         return;
+105:       } else if (NodeUtil.isExpressionNode(n)) {
+106:         // we already reported the problem when we visited the child.
+107:         return;
+108:       }
+109: 
+110:       String msg = "This code lacks side-effects. Is there a bug?";
+111:       if (n.getType() == Token.STRING) {
+112:         msg = "Is there a missing '+' on the previous line?";
+113:       }
+114: 
+115:       t.getCompiler().report(
+116:           t.makeError(n, level, USELESS_CODE_ERROR, msg));
+117:     }
+118:   }
+
+[25] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1623-1626)
+1623:     @Override
+1624:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1625:       return new CrossModuleCodeMotion(compiler, compiler.getModuleGraph());
+1626:     }
+
+[26] com.google.javascript.rhino.jstype.TernaryValue#toString  (lines 157-160)
+157:     @Override
+158:     public String toString() {
+159:       return "unknown";
+160:     }
+
+[27] com.google.javascript.jscomp.DefaultPassConfig#process  (lines 807-814)
+807:         @Override
+808:         public void process(Node externs, Node root) {
+809:           pass.process(externs, root);
+810:           if (exportedNames == null) {
+811:             exportedNames = Sets.newHashSet();
+812:           }
+813:           exportedNames.addAll(pass.getExportedVariableNames());
+814:         }
+
+[28] com.google.javascript.jscomp.InlineSimpleMethods#removeSignature  (lines 289-291)
+289:         @Override
+290:         public void removeSignature(String functionName) {
+291:         }
+
+[29] com.google.javascript.jscomp.CompilationLevel#applyFullCompilationOptions  (lines 125-182)
+125:   private static void applyFullCompilationOptions(CompilerOptions options) {
+126:     // Do not call applySafeCompilationOptions(options) because the call can
+127:     // create possible conflicts between multiple diagnostic groups.
+128: 
+129:     // All the safe optimizations.
+130:     options.closurePass = true;
+131:     options.foldConstants = true;
+132:     options.coalesceVariableNames = true;
+133:     options.deadAssignmentElimination = true;
+134:     options.extractPrototypeMemberDeclarations = true;
+135:     options.collapseVariableDeclarations = true;
+136:     options.convertToDottedProperties = true;
+137:     options.rewriteFunctionExpressions = true;
+138:     options.labelRenaming = true;
+139:     options.removeDeadCode = true;
+140:     options.optimizeArgumentsArray = true;
+141:     options.collapseObjectLiterals = true;
+142: 
+143:     // All the advance optimizations.
+144:     options.removeClosureAsserts = true;
+145:     options.aliasKeywords = true;
+146:     options.reserveRawExports = true;
+147:     options.variableRenaming = VariableRenamingPolicy.ALL;
+148:     options.shadowVariables = true;
+149:     options.propertyRenaming = PropertyRenamingPolicy.ALL_UNQUOTED;
+150:     options.removeUnusedPrototypeProperties = true;
+151:     options.removeUnusedPrototypePropertiesInExterns = true;
+152:     options.collapseAnonymousFunctions = true;
+153:     options.collapseProperties = true;
+154:     options.checkGlobalThisLevel = CheckLevel.WARNING;
+155:     options.rewriteFunctionExpressions = true;
+156:     options.smartNameRemoval = true;
+157:     options.inlineConstantVars = true;
+158:     options.inlineFunctions = true;
+159:     options.inlineLocalFunctions = true;
+160:     options.inlineGetters = true;
+161:     options.inlineVariables = true;
+162:     options.flowSensitiveInlineVariables = true;
+163:     options.computeFunctionSideEffects = true;
+164: 
+165:     // Remove unused vars also removes unused functions.
+166:     options.removeUnusedVars = true;
+167:     options.removeUnusedLocalVars = true;
+168: 
+169:     // Move code around based on the defined modules.
+170:     options.crossModuleCodeMotion = true;
+171:     options.crossModuleMethodMotion = true;
+172: 
+173:     // Call optimizations
+174:     options.devirtualizePrototypeMethods = true;
+175:     options.optimizeParameters = true;
+176:     options.optimizeReturns = true;
+177:     options.optimizeCalls = true;
+178: 
+179:     // Kindly tell the user that they have JsDocs that we don't understand.
+180:     options.setWarningLevel(DiagnosticGroups.NON_STANDARD_JSDOC,
+181:         CheckLevel.WARNING);
+182:   }
+
+[30] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1724-1727)
+1724:     @Override
+1725:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1726:       return new FunctionRewriter(compiler);
+1727:     }
+
+[31] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1426-1430)
+1426:     @Override
+1427:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1428:       return new PureFunctionIdentifier.Driver(
+1429:           compiler, options.debugFunctionSideEffectsPath, false);
+1430:     }
+
+[32] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1553-1563)
+1553:     @Override
+1554:     protected CompilerPass createInternal(final AbstractCompiler compiler) {
+1555:       return new CompilerPass() {
+1556:         @Override
+1557:         public void process(Node externs, Node root) {
+1558:           NameAnalyzer na = new NameAnalyzer(compiler, false);
+1559:           na.process(externs, root);
+1560:           na.removeUnreferenced();
+1561:         }
+1562:       };
+1563:     }
+
+[33] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1569-1572)
+1569:     @Override
+1570:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1571:       return new InlineSimpleMethods(compiler);
+1572:     }
+
+[34] com.google.javascript.jscomp.PureFunctionIdentifier#Driver  (lines 1080-1085)
+1080:     Driver(AbstractCompiler compiler, String reportPath,
+1081:         boolean useNameReferenceGraph) {
+1082:       this.compiler = compiler;
+1083:       this.reportPath = reportPath;
+1084:       this.useNameReferenceGraph = useNameReferenceGraph;
+1085:     }
+
+[35] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1733-1736)
+1733:     @Override
+1734:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1735:       return new CollapseAnonymousFunctions(compiler);
+1736:     }
+
+[36] com.google.javascript.jscomp.DefaultPassConfig#getCodeRemovingPasses  (lines 665-693)
+665:   private List<PassFactory> getCodeRemovingPasses() {
+666:     List<PassFactory> passes = Lists.newArrayList();
+667:     if (options.collapseObjectLiterals && !isInliningForbidden()) {
+668:       passes.add(collapseObjectLiterals);
+669:     }
+670: 
+671:     if (options.inlineVariables || options.inlineLocalVariables) {
+672:       passes.add(inlineVariables);
+673:     } else if (options.inlineConstantVars) {
+674:       passes.add(inlineConstants);
+675:     }
+676: 
+677:     if (options.foldConstants) {
+678:       // These used to be one pass.
+679:       passes.add(minimizeExitPoints);
+680:       passes.add(peepholeOptimizations);
+681:     }
+682: 
+683:     if (options.removeDeadCode) {
+684:       passes.add(removeUnreachableCode);
+685:     }
+686: 
+687:     if (options.removeUnusedPrototypeProperties) {
+688:       passes.add(removeUnusedPrototypeProperties);
+689:     }
+690: 
+691:     assertAllLoopablePasses(passes);
+692:     return passes;
+693:   }
+
+[37] com.google.javascript.jscomp.PureFunctionIdentifier#process  (lines 1087-1114)
+1087:     @Override
+1088:     public void process(Node externs, Node root) {
+1089:       DefinitionProvider definitionProvider = null;
+1090:       if (useNameReferenceGraph) {
+1091:         NameReferenceGraphConstruction graphBuilder =
+1092:             new NameReferenceGraphConstruction(compiler);
+1093:         graphBuilder.process(externs, root);
+1094:         definitionProvider = graphBuilder.getNameReferenceGraph();
+1095:       } else {
+1096:         SimpleDefinitionFinder defFinder = new SimpleDefinitionFinder(compiler);
+1097:         defFinder.process(externs, root);
+1098:         definitionProvider = defFinder;
+1099:       }
+1100: 
+1101:       PureFunctionIdentifier pureFunctionIdentifier =
+1102:           new PureFunctionIdentifier(compiler, definitionProvider);
+1103:       pureFunctionIdentifier.process(externs, root);
+1104: 
+1105:       if (reportPath != null) {
+1106:         try {
+1107:           Files.write(pureFunctionIdentifier.getDebugReport(),
+1108:               new File(reportPath),
+1109:               Charsets.UTF_8);
+1110:         } catch (IOException e) {
+1111:           throw new RuntimeException(e);
+1112:         }
+1113:       }
+1114:     }
+
+[38] com.google.javascript.jscomp.AliasKeywords#needsAliases  (lines 380-388)
+380:   private boolean needsAliases() {
+381:     for (AliasSpecification spec : aliasSpecifications) {
+382:       if (!spec.nodes.isEmpty()) {
+383:         return true;
+384:       }
+385:     }
+386: 
+387:     return false;
+388:   }
+
+[39] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1809-1812)
+1809:     @Override
+1810:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1811:       return new AliasKeywords(compiler);
+1812:     }
+
+[40] com.google.javascript.jscomp.DefaultPassConfig#process  (lines 970-975)
+970:         @Override
+971:         public void process(Node externs, Node root) {
+972:           pass.process(externs, root);
+973:           compiler.setHasRegExpGlobalReferences(
+974:               pass.isGlobalRegExpPropertiesUsed());
+975:         }
+
+[41] com.google.javascript.rhino.Node#NodeMismatch  (lines 2384-2387)
+2384:     NodeMismatch(Node nodeA, Node nodeB) {
+2385:       this.nodeA = nodeA;
+2386:       this.nodeB = nodeB;
+2387:     }
+
+[42] com.google.javascript.jscomp.NodeUtil#getPureBooleanValue  (lines 120-163)
+120:   static TernaryValue getPureBooleanValue(Node n) {
+121:     switch (n.getType()) {
+122:       case Token.STRING:
+123:         return TernaryValue.forBoolean(n.getString().length() > 0);
+124: 
+125:       case Token.NUMBER:
+126:         return TernaryValue.forBoolean(n.getDouble() != 0);
+127: 
+128:       case Token.NOT:
+129:         return getPureBooleanValue(n.getLastChild()).not();
+130: 
+131:       case Token.NULL:
+132:       case Token.FALSE:
+133:         return TernaryValue.FALSE;
+134: 
+135:       case Token.VOID:
+136:           return TernaryValue.FALSE;
+137: 
+138:       case Token.NAME:
+139:         String name = n.getString();
+140:         if ("undefined".equals(name)
+141:             || "NaN".equals(name)) {
+142:           // We assume here that programs don't change the value of the keyword
+143:           // undefined to something other than the value undefined.
+144:           return TernaryValue.FALSE;
+145:         } else if ("Infinity".equals(name)) {
+146:           return TernaryValue.TRUE;
+147:         }
+148:         break;
+149: 
+150:       case Token.TRUE:
+151:       case Token.REGEXP:
+152:         return TernaryValue.TRUE;
+153: 
+154:       case Token.ARRAYLIT:
+155:       case Token.OBJECTLIT:
+156:         if (!mayHaveSideEffects(n)) {
+157:           return TernaryValue.TRUE;
+158:         }
+159:         break;
+160:     }
+161: 
+162:     return TernaryValue.UNKNOWN;
+163:   }
+
+[43] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1216-1219)
+1216:     @Override
+1217:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1218:       return new ConstCheck(compiler);
+1219:     }
+
+[44] com.google.javascript.jscomp.DefaultPassConfig#process  (lines 1524-1542)
+1524:         @Override
+1525:         public void process(Node externs, Node root) {
+1526:           NameAnalyzer na = new NameAnalyzer(compiler, false);
+1527:           na.process(externs, root);
+1528: 
+1529:           String reportPath = options.reportPath;
+1530:           if (reportPath != null) {
+1531:             try {
+1532:               Files.write(na.getHtmlReport(), new File(reportPath),
+1533:                   Charsets.UTF_8);
+1534:             } catch (IOException e) {
+1535:               compiler.report(JSError.make(REPORT_PATH_IO_ERROR, reportPath));
+1536:             }
+1537:           }
+1538: 
+1539:           if (options.smartNameRemoval) {
+1540:             na.removeUnreferenced();
+1541:           }
+1542:         }
+
+[45] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 965-977)
+965:     @Override
+966:     protected CompilerPass createInternal(final AbstractCompiler compiler) {
+967:       final CheckRegExp pass = new CheckRegExp(compiler);
+968: 
+969:       return new CompilerPass() {
+970:         @Override
+971:         public void process(Node externs, Node root) {
+972:           pass.process(externs, root);
+973:           compiler.setHasRegExpGlobalReferences(
+974:               pass.isGlobalRegExpPropertiesUsed());
+975:         }
+976:       };
+977:     }
+
+[46] com.google.javascript.rhino.Node#propToString  (lines 179-246)
+179:   private static final String propToString(int propType) {
+180:       switch (propType) {
+181:         case LOCAL_BLOCK_PROP:   return "local_block";
+182:         case OBJECT_IDS_PROP:    return "object_ids_prop";
+183:         case CATCH_SCOPE_PROP:   return "catch_scope_prop";
+184:         case LABEL_ID_PROP:      return "label_id_prop";
+185:         case TARGET_PROP:        return "target";
+186:         case BRACELESS_TYPE:     return "braceless_type";
+187:         case BREAK_PROP:         return "break";
+188:         case CONTINUE_PROP:      return "continue";
+189:         case ENUM_PROP:          return "enum";
+190:         case FUNCTION_PROP:      return "function";
+191:         case TEMP_PROP:          return "temp";
+192:         case LOCAL_PROP:         return "local";
+193:         case CODEOFFSET_PROP:    return "codeoffset";
+194:         case FIXUPS_PROP:        return "fixups";
+195:         case VARS_PROP:          return "vars";
+196:         case VAR_ARGS_NAME:      return "var_args_name";
+197:         case USES_PROP:          return "uses";
+198:         case REGEXP_PROP:        return "regexp";
+199:         case CASES_PROP:         return "cases";
+200:         case DEFAULT_PROP:       return "default";
+201:         case CASEARRAY_PROP:     return "casearray";
+202:         case SOURCENAME_PROP:    return "sourcename";
+203:         case TYPE_PROP:          return "type";
+204:         case SPECIAL_PROP_PROP:  return "special_prop";
+205:         case LABEL_PROP:         return "label";
+206:         case FINALLY_PROP:       return "finally";
+207:         case LOCALCOUNT_PROP:    return "localcount";
+208: 
+209:         case TARGETBLOCK_PROP:   return "targetblock";
+210:         case VARIABLE_PROP:      return "variable";
+211:         case LASTUSE_PROP:       return "lastuse";
+212:         case ISNUMBER_PROP:      return "isnumber";
+213:         case DIRECTCALL_PROP:    return "directcall";
+214: 
+215:         case SPECIALCALL_PROP:   return "specialcall";
+216:         case DEBUGSOURCE_PROP:   return "debugsource";
+217: 
+218:         case JSDOC_INFO_PROP:    return "jsdoc_info";
+219: 
+220:         case SKIP_INDEXES_PROP:  return "skip_indexes";
+221:         case INCRDECR_PROP:      return "incrdecr";
+222:         case MEMBER_TYPE_PROP:   return "member_type";
+223:         case NAME_PROP:          return "name";
+224:         case PARENTHESIZED_PROP: return "parenthesized";
+225:         case QUOTED_PROP:        return "quoted";
+226:         case OPT_ARG_NAME:       return "opt_arg";
+227: 
+228:         case SYNTHETIC_BLOCK_PROP: return "synthetic";
+229:         case EMPTY_BLOCK:        return "empty_block";
+230:         case ORIGINALNAME_PROP:  return "originalname";
+231:         case SIDE_EFFECT_FLAGS:  return "side_effect_flags";
+232: 
+233:         case IS_CONSTANT_NAME:   return "is_constant_name";
+234:         case IS_OPTIONAL_PARAM:  return "is_optional_param";
+235:         case IS_VAR_ARGS_PARAM:  return "is_var_args_param";
+236:         case IS_NAMESPACE:       return "is_namespace";
+237:         case IS_DISPATCHER:      return "is_dispatcher";
+238:         case DIRECTIVES:         return "directives";
+239:         case DIRECT_EVAL:        return "direct_eval";
+240:         case FREE_CALL:          return "free_call";
+241:         case STATIC_SOURCE_FILE:    return "source_file";
+242:         default:
+243:           Kit.codeBug();
+244:       }
+245:       return null;
+246:   }
+
+[47] com.google.javascript.jscomp.DefaultPassConfig#process  (lines 1889-1892)
+1889:         @Override public void process(Node externs, Node root) {
+1890:           propertyMap = runPropertyRenaming(
+1891:               compiler, prevPropertyMap, externs, root);
+1892:         }
+
+[48] com.google.javascript.rhino.Node#checkTreeEqualsImpl  (lines 1527-1546)
+1527:   NodeMismatch checkTreeEqualsImpl(Node node2) {
+1528:     if (!isEquivalentTo(node2, false, false)) {
+1529:       return new NodeMismatch(this, node2);
+1530:     }
+1531: 
+1532:     NodeMismatch res = null;
+1533:     Node n, n2;
+1534:     for (n = first, n2 = node2.first;
+1535:          res == null && n != null;
+1536:          n = n.next, n2 = n2.next) {
+1537:       if (node2 == null) {
+1538:         throw new IllegalStateException();
+1539:       }
+1540:       res = n.checkTreeEqualsImpl(n2);
+1541:       if (res != null) {
+1542:         return res;
+1543:       }
+1544:     }
+1545:     return res;
+1546:   }
+
+[49] com.google.javascript.jscomp.PureFunctionIdentifier#getCallableDefinitions  (lines 189-244)
+189:   private static Collection<Definition> getCallableDefinitions(
+190:       DefinitionProvider definitionProvider, Node name) {
+191:     if (NodeUtil.isGetProp(name) || NodeUtil.isName(name)) {
+192:       List<Definition> result = Lists.newArrayList();
+193: 
+194:       Collection<Definition> decls =
+195:           definitionProvider.getDefinitionsReferencedAt(name);
+196:       if (decls == null) {
+197:         return null;
+198:       }
+199: 
+200:       for (Definition current : decls) {
+201:         Node rValue = current.getRValue();
+202:         if ((rValue != null) && NodeUtil.isFunction(rValue)) {
+203:           result.add(current);
+204:         } else {
+205:           return null;
+206:         }
+207:       }
+208: 
+209:       return result;
+210:     } else if (name.getType() == Token.OR || name.getType() == Token.HOOK) {
+211:       Node firstVal;
+212:       if (name.getType() == Token.HOOK) {
+213:         firstVal = name.getFirstChild().getNext();
+214:       } else {
+215:         firstVal = name.getFirstChild();
+216:       }
+217: 
+218:       Collection<Definition> defs1 = getCallableDefinitions(definitionProvider,
+219:                                                             firstVal);
+220:       Collection<Definition> defs2 = getCallableDefinitions(definitionProvider,
+221:                                                             firstVal.getNext());
+222:       if (defs1 != null && defs2 != null) {
+223:         defs1.addAll(defs2);
+224:         return defs1;
+225:       } else {
+226:         return null;
+227:       }
+228:     } else if (NodeUtil.isFunctionExpression(name)) {
+229:       // The anonymous function reference is also the definition.
+230:       // TODO(user) Change SimpleDefinitionFinder so it is possible to query for
+231:       // function expressions by function node.
+232: 
+233:       // isExtern is false in the call to the constructor for the
+234:       // FunctionExpressionDefinition below because we know that
+235:       // getCallableDefinitions() will only be called on the first
+236:       // child of a call and thus the function expression
+237:       // definition will never be an extern.
+238:       return Lists.newArrayList(
+239:           (Definition)
+240:               new DefinitionsRemover.FunctionExpressionDefinition(name, false));
+241:     } else {
+242:       return null;
+243:     }
+244:   }
+
+[50] com.google.javascript.jscomp.MethodCompilerPass#visit  (lines 127-172)
+127:     public void visit(NodeTraversal t, Node n, Node parent) {
+128:       switch (n.getType()) {
+129:         case Token.GETPROP:
+130:         case Token.GETELEM: {
+131:           Node dest = n.getFirstChild().getNext();
+132: 
+133:           if (dest.getType() != Token.STRING) {
+134:             return;
+135:           }
+136: 
+137:           String name = dest.getString();
+138: 
+139:           // We have a signature. Parse tree of the form:
+140:           // assign                       <- parent
+141:           //      getprop                 <- n
+142:           //          name methods
+143:           //          string setTimeout
+144:           //      function
+145:           if (parent.getType() == Token.ASSIGN &&
+146:               parent.getFirstChild() == n &&
+147:               n.getNext().getType() == Token.FUNCTION) {
+148:             addSignature(name, n.getNext(), t.getSourceName());
+149:           } else {
+150:             getSignatureStore().removeSignature(name);
+151:             externMethodsWithoutSignatures.add(name);
+152:           }
+153: 
+154:           externMethods.add(name);
+155:         } break;
+156: 
+157:         case Token.OBJECTLIT: {
+158:           for (Node key = n.getFirstChild(); key != null; key = key.getNext()) {
+159:             Node value = key.getFirstChild();
+160:             String name = key.getString();
+161:             if (key.getType() == Token.STRING
+162:                 && value.getType() == Token.FUNCTION) {
+163:               addSignature(name, value, t.getSourceName());
+164:             } else {
+165:               getSignatureStore().removeSignature(name);
+166:               externMethodsWithoutSignatures.add(name);
+167:             }
+168:             externMethods.add(name);
+169:           }
+170:         } break;
+171:       }
+172:     }

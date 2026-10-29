@@ -1,0 +1,1500 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.CommandLineRunnerTest::testES5StrictUseStrictMultipleInputs
+junit.framework.AssertionFailedError: expected:<17> but was:<-1>
+	at com.google.javascript.jscomp.CommandLineRunnerTest.testES5StrictUseStrictMultipleInputs(CommandLineRunnerTest.java:803)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.CompilationLevel#setOptionsForCompilationLevel  (lines 51-65)
+51:   public void setOptionsForCompilationLevel(CompilerOptions options) {
+52:     switch (this) {
+53:       case WHITESPACE_ONLY:
+54:         applyBasicCompilationOptions(options);
+55:         break;
+56:       case SIMPLE_OPTIMIZATIONS:
+57:         applySafeCompilationOptions(options);
+58:         break;
+59:       case ADVANCED_OPTIMIZATIONS:
+60:         applyFullCompilationOptions(options);
+61:         break;
+62:       default:
+63:         throw new RuntimeException("Unknown compilation level.");
+64:     }
+65:   }
+
+[2] com.google.javascript.jscomp.StrictModeCheck#checkProperty  (lines 245-251)
+245:     private void checkProperty(NodeTraversal t, Node n) {
+246:       if (n.getLastChild().getString().endsWith("__")) {
+247:         if (!noCajaChecks) {
+248:           t.report(n.getLastChild(), ILLEGAL_NAME);
+249:         }
+250:       }
+251:     }
+
+[3] com.google.javascript.jscomp.AbstractCommandLineRunner#createSourceInputs  (lines 379-392)
+379:   private List<JSSourceFile> createSourceInputs(List<String> files)
+380:       throws FlagUsageException, IOException {
+381:     if (isInTestMode()) {
+382:       return inputsSupplierForTesting.get();
+383:     }
+384:     if (files.isEmpty()) {
+385:       files = Collections.singletonList("-");
+386:     }
+387:     try {
+388:       return createInputs(files, true);
+389:     } catch (FlagUsageException e) {
+390:       throw new FlagUsageException("Bad --js flag. " + e.getMessage());
+391:     }
+392:   }
+
+[4] com.google.javascript.jscomp.Compiler#append  (lines 1499-1518)
+1499:     CodeBuilder append(String str) {
+1500:       sb.append(str);
+1501: 
+1502:       // Adjust the line and column information for the new text.
+1503:       int index = -1;
+1504:       int lastIndex = index;
+1505:       while ((index = str.indexOf('\n', index + 1)) >= 0) {
+1506:         ++lineCount;
+1507:         lastIndex = index;
+1508:       }
+1509: 
+1510:       if (lastIndex == -1) {
+1511:         // No new lines, append the new characters added.
+1512:         colCount += str.length();
+1513:       } else {
+1514:         colCount = str.length() - (lastIndex + 1);
+1515:       }
+1516: 
+1517:       return this;
+1518:     }
+
+[5] com.google.javascript.jscomp.AbstractCommandLineRunner#setLanguageIn  (lines 1651-1654)
+1651:     CommandLineConfig setLanguageIn(String languageIn) {
+1652:       this.languageIn = languageIn;
+1653:       return this;
+1654:     }
+
+[6] com.google.javascript.jscomp.AbstractCommandLineRunner#run  (lines 283-321)
+283:   final public void run() {
+284:     int result = 0;
+285:     int runs = 1;
+286:     if (config.computePhaseOrdering) {
+287:       runs = NUM_RUNS_TO_DETERMINE_OPTIMAL_ORDER;
+288:       PhaseOptimizer.randomizeLoops();
+289:     }
+290:     try {
+291:       for (int i = 0; i < runs && result == 0; i++) {
+292:         runTimeStats.recordStartRun();
+293:         result = doRun();
+294:         runTimeStats.recordEndRun();
+295:       }
+296:     } catch (AbstractCommandLineRunner.FlagUsageException e) {
+297:       System.err.println(e.getMessage());
+298:       result = -1;
+299:     } catch (Throwable t) {
+300:       t.printStackTrace();
+301:       result = -2;
+302:     }
+303: 
+304:     if (config.computePhaseOrdering) {
+305:       runTimeStats.outputBestPhaseOrdering();
+306:     }
+307: 
+308:     try {
+309:       if (jsOutput instanceof Closeable) {
+310:         ((Closeable) jsOutput).close();
+311:       }
+312:     } catch (IOException e) {
+313:       throw Throwables.propagate(e);
+314:     }
+315: 
+316:     if (testMode) {
+317:       exitCodeReceiverForTesting.apply(result);
+318:     } else {
+319:       System.exit(result);
+320:     }
+321:   }
+
+[7] com.google.javascript.jscomp.PeepholeFoldConstants#tryFoldGetProp  (lines 1267-1302)
+1267:   private Node tryFoldGetProp(Node n, Node left, Node right) {
+1268:     Preconditions.checkArgument(n.getType() == Token.GETPROP);
+1269: 
+1270:     if (left.getType() == Token.OBJECTLIT) {
+1271:       return tryFoldObjectPropAccess(n, left, right);
+1272:     }
+1273: 
+1274:     if (right.getType() == Token.STRING &&
+1275:         right.getString().equals("length")) {
+1276:       int knownLength = -1;
+1277:       switch (left.getType()) {
+1278:         case Token.ARRAYLIT:
+1279:           if (mayHaveSideEffects(left)) {
+1280:             // Nope, can't fold this, without handling the side-effects.
+1281:             return n;
+1282:           }
+1283:           knownLength = left.getChildCount();
+1284:           break;
+1285:         case Token.STRING:
+1286:           knownLength = left.getString().length();
+1287:           break;
+1288:         default:
+1289:           // Not a foldable case, forget it.
+1290:           return n;
+1291:       }
+1292: 
+1293:       Preconditions.checkState(knownLength != -1);
+1294:       Node lengthNode = Node.newNumber(knownLength);
+1295:       n.getParent().replaceChild(n, lengthNode);
+1296:       reportCodeChange();
+1297: 
+1298:       return lengthNode;
+1299:     }
+1300: 
+1301:     return n;
+1302:   }
+
+[8] com.google.javascript.jscomp.CompilerOptions#getLanguageOut  (lines 1185-1187)
+1185:   public LanguageMode getLanguageOut() {
+1186:     return languageOut;
+1187:   }
+
+[9] com.google.javascript.jscomp.Compiler#initBasedOnOptions  (lines 356-361)
+356:   private void initBasedOnOptions() {
+357:     // Create the source map if necessary.
+358:     if (options.sourceMapOutputPath != null) {
+359:       sourceMap = options.sourceMapFormat.getInstance();
+360:     }
+361:   }
+
+[10] com.google.javascript.jscomp.CommandLineRunner#initConfigFromFlags  (lines 540-606)
+540:   private void initConfigFromFlags(String[] args, PrintStream err) {
+541: 
+542:     List<String> processedArgs = processArgs(args);
+543: 
+544:     CmdLineParser parser = new CmdLineParser(flags);
+545:     Flags.warningGuardSpec.clear();
+546:     isConfigValid = true;
+547:     try {
+548:       parser.parseArgument(processedArgs.toArray(new String[] {}));
+549:       // For contains --flagfile flag
+550:       if (!flags.flag_file.equals("")) {
+551:         processFlagFile(err);
+552:       }
+553:     } catch (CmdLineException e) {
+554:       err.println(e.getMessage());
+555:       isConfigValid = false;
+556:     } catch (IOException ioErr) {
+557:       err.println("ERROR - " + flags.flag_file + " read error.");
+558:       isConfigValid = false;
+559:     }
+560: 
+561:     if (flags.version) {
+562:       ResourceBundle config = ResourceBundle.getBundle(configResource);
+563:       err.println(
+564:           "Closure Compiler (http://code.google.com/closure/compiler)\n" +
+565:           "Version: " + config.getString("compiler.version") + "\n" +
+566:           "Built on: " + config.getString("compiler.date"));
+567:       err.flush();
+568:     }
+569: 
+570:     if (!isConfigValid || flags.display_help) {
+571:       isConfigValid = false;
+572:       parser.printUsage(err);
+573:     } else {
+574:       getCommandLineConfig()
+575:           .setPrintTree(flags.print_tree)
+576:           .setPrintAst(flags.print_ast)
+577:           .setPrintPassGraph(flags.print_pass_graph)
+578:           .setJscompDevMode(flags.jscomp_dev_mode)
+579:           .setLoggingLevel(flags.logging_level)
+580:           .setExterns(flags.externs)
+581:           .setJs(flags.js)
+582:           .setJsOutputFile(flags.js_output_file)
+583:           .setModule(flags.module)
+584:           .setVariableMapInputFile(flags.variable_map_input_file)
+585:           .setPropertyMapInputFile(flags.property_map_input_file)
+586:           .setVariableMapOutputFile(flags.variable_map_output_file)
+587:           .setCreateNameMapFiles(flags.create_name_map_files)
+588:           .setPropertyMapOutputFile(flags.property_map_output_file)
+589:           .setCodingConvention(flags.third_party ?
+590:                new DefaultCodingConvention() :
+591:                new ClosureCodingConvention())
+592:           .setSummaryDetailLevel(flags.summary_detail_level)
+593:           .setOutputWrapper(flags.output_wrapper)
+594:           .setModuleWrapper(flags.module_wrapper)
+595:           .setModuleOutputPathPrefix(flags.module_output_path_prefix)
+596:           .setCreateSourceMap(flags.create_source_map)
+597:           .setWarningGuardSpec(Flags.warningGuardSpec)
+598:           .setDefine(flags.define)
+599:           .setCharset(flags.charset)
+600:           .setManageClosureDependencies(flags.manage_closure_dependencies)
+601:           .setClosureEntryPoints(flags.closure_entry_point)
+602:           .setOutputManifest(ImmutableList.of(flags.output_manifest))
+603:           .setAcceptConstKeyword(flags.accept_const_keyword)
+604:           .setLanguageIn(flags.language_in);
+605:     }
+606:   }
+
+[11] com.google.javascript.jscomp.JSSourceFile#fromCode  (lines 54-56)
+54:   public static JSSourceFile fromCode(String fileName, String code) {
+55:     return new JSSourceFile(SourceFile.fromCode(fileName, code));
+56:   }
+
+[12] com.google.javascript.jscomp.DefaultPassConfig#getOptimizations  (lines 313-634)
+313:   @Override
+314:   protected List<PassFactory> getOptimizations() {
+315:     List<PassFactory> passes = Lists.newArrayList();
+316: 
+317:     // TODO(nicksantos): The order of these passes makes no sense, and needs
+318:     // to be re-arranged.
+319: 
+320:     if (options.runtimeTypeCheck) {
+321:       passes.add(runtimeTypeCheck);
+322:     }
+323: 
+324:     passes.add(createEmptyPass("beforeStandardOptimizations"));
+325: 
+326:     if (!options.idGenerators.isEmpty()) {
+327:       passes.add(replaceIdGenerators);
+328:     }
+329: 
+330:     // Optimizes references to the arguments variable.
+331:     if (options.optimizeArgumentsArray) {
+332:       passes.add(optimizeArgumentsArray);
+333:     }
+334: 
+335:     // Abstract method removal works best on minimally modified code, and also
+336:     // only needs to run once.
+337:     if (options.closurePass &&
+338:         (options.removeAbstractMethods || options.removeClosureAsserts)) {
+339:       passes.add(closureCodeRemoval);
+340:     }
+341: 
+342:     // Collapsing properties can undo constant inlining, so we do this before
+343:     // the main optimization loop.
+344:     if (options.collapseProperties) {
+345:       passes.add(collapseProperties);
+346:     }
+347: 
+348:     // ReplaceStrings runs after CollapseProperties in order to simplify
+349:     // pulling in values of constants defined in enums structures.
+350:     if (!options.replaceStringsFunctionDescriptions.isEmpty()) {
+351:       passes.add(replaceStrings);
+352:     }
+353: 
+354:     // Tighten types based on actual usage.
+355:     if (options.tightenTypes) {
+356:       passes.add(tightenTypesBuilder);
+357:     }
+358: 
+359:     // Property disambiguation should only run once and needs to be done
+360:     // soon after type checking, both so that it can make use of type
+361:     // information and so that other passes can take advantage of the renamed
+362:     // properties.
+363:     if (options.disambiguateProperties) {
+364:       passes.add(disambiguateProperties);
+365:     }
+366: 
+367:     if (options.computeFunctionSideEffects) {
+368:       passes.add(markPureFunctions);
+369:     } else if (options.markNoSideEffectCalls) {
+370:       // TODO(user) The properties that this pass adds to CALL and NEW
+371:       // AST nodes increase the AST's in-memory size.  Given that we are
+372:       // already running close to our memory limits, we could run into
+373:       // trouble if we end up using the @nosideeffects annotation a lot
+374:       // or compute @nosideeffects annotations by looking at function
+375:       // bodies.  It should be easy to propagate @nosideeffects
+376:       // annotations as part of passes that depend on this property and
+377:       // store the result outside the AST (which would allow garbage
+378:       // collection once the pass is done).
+379:       passes.add(markNoSideEffectCalls);
+380:     }
+381: 
+382:     if (options.chainCalls) {
+383:       passes.add(chainCalls);
+384:     }
+385: 
+386:     // Constant checking must be done after property collapsing because
+387:     // property collapsing can introduce new constants (e.g. enum values).
+388:     if (options.inlineConstantVars) {
+389:       passes.add(checkConsts);
+390:     }
+391: 
+392:     // The Caja library adds properties to Object.prototype, which breaks
+393:     // most for-in loops.  This adds a check to each loop that skips
+394:     // any property matching /___$/.
+395:     if (options.ignoreCajaProperties) {
+396:       passes.add(ignoreCajaProperties);
+397:     }
+398: 
+399:     assertAllOneTimePasses(passes);
+400: 
+401:     if (options.smartNameRemoval || options.reportPath != null) {
+402:       passes.addAll(getCodeRemovingPasses());
+403:       passes.add(smartNamePass);
+404:     }
+405: 
+406:     // This needs to come after the inline constants pass, which is run within
+407:     // the code removing passes.
+408:     if (options.closurePass) {
+409:       passes.add(closureOptimizePrimitives);
+410:     }
+411: 
+412:     // TODO(user): This forces a first crack at crossModuleCodeMotion
+413:     // before devirtualization. Once certain functions are devirtualized,
+414:     // it confuses crossModuleCodeMotion ability to recognized that
+415:     // it is recursive.
+416: 
+417:     // TODO(user): This is meant for a temporary quick win.
+418:     // In the future, we might want to improve our analysis in
+419:     // CrossModuleCodeMotion so we don't need to do this.
+420:     if (options.crossModuleCodeMotion) {
+421:       passes.add(crossModuleCodeMotion);
+422:     }
+423: 
+424:     // Method devirtualization benefits from property disambiguiation so
+425:     // it should run after that pass but before passes that do
+426:     // optimizations based on global names (like cross module code motion
+427:     // and inline functions).  Smart Name Removal does better if run before
+428:     // this pass.
+429:     if (options.devirtualizePrototypeMethods) {
+430:       passes.add(devirtualizePrototypeMethods);
+431:     }
+432: 
+433:     if (options.customPasses != null) {
+434:       passes.add(getCustomPasses(
+435:           CustomPassExecutionTime.BEFORE_OPTIMIZATION_LOOP));
+436:     }
+437: 
+438:     passes.add(createEmptyPass("beforeMainOptimizations"));
+439: 
+440:     if (options.specializeInitialModule) {
+441:       // When specializing the initial module, we want our fixups to be
+442:       // as lean as possible, so we run the entire optimization loop to a
+443:       // fixed point before specializing, then specialize, and then run the
+444:       // main optimization loop again.
+445: 
+446:       passes.addAll(getMainOptimizationLoop());
+447: 
+448:       if (options.crossModuleCodeMotion) {
+449:         passes.add(crossModuleCodeMotion);
+450:       }
+451: 
+452:       if (options.crossModuleMethodMotion) {
+453:         passes.add(crossModuleMethodMotion);
+454:       }
+455: 
+456:       passes.add(specializeInitialModule.makeOneTimePass());
+457:     }
+458: 
+459:     passes.addAll(getMainOptimizationLoop());
+460: 
+461:     passes.add(createEmptyPass("beforeModuleMotion"));
+462: 
+463:     if (options.crossModuleCodeMotion) {
+464:       passes.add(crossModuleCodeMotion);
+465:     }
+466: 
+467:     if (options.crossModuleMethodMotion) {
+468:       passes.add(crossModuleMethodMotion);
+469:     }
+470: 
+471:     passes.add(createEmptyPass("afterModuleMotion"));
+472: 
+473:     // Some optimizations belong outside the loop because running them more
+474:     // than once would either have no benefit or be incorrect.
+475:     if (options.customPasses != null) {
+476:       passes.add(getCustomPasses(
+477:           CustomPassExecutionTime.AFTER_OPTIMIZATION_LOOP));
+478:     }
+479: 
+480:     if (options.flowSensitiveInlineVariables) {
+481:       passes.add(flowSensitiveInlineVariables);
+482: 
+483:       // After inlining some of the variable uses, some variables are unused.
+484:       // Re-run remove unused vars to clean it up.
+485:       if (options.removeUnusedVars) {
+486:         passes.add(removeUnusedVars);
+487:       }
+488:     }
+489: 
+490:     // Running this pass again is required to have goog.events compile down to
+491:     // nothing when compiled on its own.
+492:     if (options.smartNameRemoval) {
+493:       passes.add(smartNamePass2);
+494:     }
+495: 
+496:     if (options.collapseAnonymousFunctions) {
+497:       passes.add(collapseAnonymousFunctions);
+498:     }
+499: 
+500:     // Move functions before extracting prototype member declarations.
+501:     if (options.moveFunctionDeclarations) {
+502:       passes.add(moveFunctionDeclarations);
+503:     }
+504: 
+505:     if (options.anonymousFunctionNaming ==
+506:         AnonymousFunctionNamingPolicy.MAPPED) {
+507:       passes.add(nameMappedAnonymousFunctions);
+508:     }
+509: 
+510:     // The mapped name anonymous function pass makes use of information that
+511:     // the extract prototype member declarations pass removes so the former
+512:     // happens before the latter.
+513:     //
+514:     // Extracting prototype properties screws up the heuristic renaming
+515:     // policies, so never run it when those policies are requested.
+516:     if (options.extractPrototypeMemberDeclarations &&
+517:         (options.propertyRenaming != PropertyRenamingPolicy.HEURISTIC &&
+518:          options.propertyRenaming !=
+519:             PropertyRenamingPolicy.AGGRESSIVE_HEURISTIC)) {
+520:       passes.add(extractPrototypeMemberDeclarations);
+521:     }
+522: 
+523:     if (options.ambiguateProperties &&
+524:         (options.propertyRenaming == PropertyRenamingPolicy.ALL_UNQUOTED)) {
+525:       passes.add(ambiguateProperties);
+526:     }
+527: 
+528:     if (options.propertyRenaming != PropertyRenamingPolicy.OFF) {
+529:       passes.add(renameProperties);
+530:     }
+531: 
+532:     // Reserve global names added to the "windows" object.
+533:     if (options.reserveRawExports) {
+534:       passes.add(gatherRawExports);
+535:     }
+536: 
+537:     // This comes after property renaming because quoted property names must
+538:     // not be renamed.
+539:     if (options.convertToDottedProperties) {
+540:       passes.add(convertToDottedProperties);
+541:     }
+542: 
+543:     // Property renaming must happen before this pass runs since this
+544:     // pass may convert dotted properties into quoted properties.  It
+545:     // is beneficial to run before alias strings, alias keywords and
+546:     // variable renaming.
+547:     if (options.rewriteFunctionExpressions) {
+548:       passes.add(rewriteFunctionExpressions);
+549:     }
+550: 
+551:     // This comes after converting quoted property accesses to dotted property
+552:     // accesses in order to avoid aliasing property names.
+553:     if (!options.aliasableStrings.isEmpty() || options.aliasAllStrings) {
+554:       passes.add(aliasStrings);
+555:     }
+556: 
+557:     if (options.aliasExternals) {
+558:       passes.add(aliasExternals);
+559:     }
+560: 
+561:     if (options.aliasKeywords) {
+562:       passes.add(aliasKeywords);
+563:     }
+564: 
+565:     // Passes after this point can no longer depend on normalized AST
+566:     // assumptions.
+567:     passes.add(markUnnormalized);
+568: 
+569:     if (options.coalesceVariableNames) {
+570:       passes.add(coalesceVariableNames);
+571: 
+572:       // coalesceVariables creates identity assignments and more redundant code
+573:       // that can be removed, rerun the peephole optimizations to clean them
+574:       // up.
+575:       if (options.foldConstants) {
+576:         passes.add(peepholeOptimizations);
+577:       }
+578:     }
+579: 
+580:     if (options.collapseVariableDeclarations) {
+581:       passes.add(exploitAssign);
+582:       passes.add(collapseVariableDeclarations);
+583:     }
+584: 
+585:     // This pass works best after collapseVariableDeclarations.
+586:     passes.add(denormalize);
+587: 
+588:     if (options.instrumentationTemplate != null) {
+589:       passes.add(instrumentFunctions);
+590:     }
+591: 
+592:     if (options.variableRenaming != VariableRenamingPolicy.ALL) {
+593:       // If we're leaving some (or all) variables with their old names,
+594:       // then we need to undo any of the markers we added for distinguishing
+595:       // local variables ("$$1").
+596:       passes.add(invertContextualRenaming);
+597:     }
+598: 
+599:     if (options.variableRenaming != VariableRenamingPolicy.OFF) {
+600:       passes.add(renameVars);
+601:     }
+602: 
+603:     if (options.groupVariableDeclarations) {
+604:       passes.add(groupVariableDeclarations);
+605:     }
+606: 
+607:     // This pass should run after names stop changing.
+608:     if (options.processObjectPropertyString) {
+609:       passes.add(objectPropertyStringPostprocess);
+610:     }
+611: 
+612:     if (options.labelRenaming) {
+613:       passes.add(renameLabels);
+614:     }
+615: 
+616:     if (options.foldConstants) {
+617:       passes.add(latePeepholeOptimizations);
+618:     }
+619: 
+620:     if (options.anonymousFunctionNaming ==
+621:         AnonymousFunctionNamingPolicy.UNMAPPED) {
+622:       passes.add(nameUnmappedAnonymousFunctions);
+623:     }
+624: 
+625:     if (options.operaCompoundAssignFix) {
+626:       passes.add(operaCompoundAssignFix);
+627:     }
+628: 
+629:     // Safety checks
+630:     passes.add(sanityCheckAst);
+631:     passes.add(sanityCheckVars);
+632: 
+633:     return passes;
+634:   }
+
+[13] com.google.javascript.jscomp.Compiler#call  (lines 1397-1450)
+1397:       public Void call() throws Exception {
+1398:         if (options.printInputDelimiter) {
+1399:           if ((cb.getLength() > 0) && !cb.endsWith("\n")) {
+1400:             cb.append("\n");  // Make sure that the label starts on a new line
+1401:           }
+1402:           Preconditions.checkState(root.getType() == Token.SCRIPT);
+1403: 
+1404:           String delimiter = options.inputDelimiter;
+1405: 
+1406:           String sourceName = (String)root.getProp(Node.SOURCENAME_PROP);
+1407:           Preconditions.checkState(sourceName != null);
+1408:           Preconditions.checkState(!sourceName.isEmpty());
+1409: 
+1410:           delimiter = delimiter.replaceAll("%name%", sourceName)
+1411:             .replaceAll("%num%", String.valueOf(inputSeqNum));
+1412: 
+1413:           cb.append(delimiter)
+1414:             .append("\n");
+1415:         }
+1416:         if (root.getJSDocInfo() != null &&
+1417:             root.getJSDocInfo().getLicense() != null) {
+1418:           cb.append("/*\n")
+1419:             .append(root.getJSDocInfo().getLicense())
+1420:             .append("*/\n");
+1421:         }
+1422: 
+1423:         // If there is a valid source map, then indicate to it that the current
+1424:         // root node's mappings are offset by the given string builder buffer.
+1425:         if (options.sourceMapOutputPath != null) {
+1426:           sourceMap.setStartingPosition(
+1427:               cb.getLineIndex(), cb.getColumnIndex());
+1428:         }
+1429: 
+1430:         // if LanguageMode is ECMASCRIPT5_STRICT, only print 'use strict'
+1431:         // for the first input file
+1432:         String code = toSource(root, sourceMap);
+1433:         if (!code.isEmpty()) {
+1434:           cb.append(code);
+1435: 
+1436:           // In order to avoid parse ambiguity when files are concatenated
+1437:           // together, all files should end in a semi-colon. Do a quick
+1438:           // heuristic check if there's an obvious semi-colon already there.
+1439:           int length = code.length();
+1440:           char lastChar = code.charAt(length - 1);
+1441:           char secondLastChar = length >= 2 ?
+1442:               code.charAt(length - 2) : '\0';
+1443:           boolean hasSemiColon = lastChar == ';' ||
+1444:               (lastChar == '\n' && secondLastChar == ';');
+1445:           if (!hasSemiColon) {
+1446:             cb.append(";");
+1447:           }
+1448:         }
+1449:         return null;
+1450:       }
+
+[14] com.google.javascript.jscomp.AbstractCommandLineRunner#getOutputCharset  (lines 817-826)
+817:   private String getOutputCharset() throws FlagUsageException {
+818:     if (!config.charset.isEmpty()) {
+819:       if (!Charset.isSupported(config.charset)) {
+820:         throw new FlagUsageException(config.charset +
+821:             " is not a valid charset name.");
+822:       }
+823:       return config.charset;
+824:     }
+825:     return "US-ASCII";
+826:   }
+
+[15] com.google.javascript.jscomp.ExploitAssigns#optimizeSubtree  (lines 31-41)
+31:   @Override
+32:   Node optimizeSubtree(Node subtree) {
+33:     for (Node child = subtree.getFirstChild(); child != null;) {
+34:       Node next = child.getNext();
+35:       if (NodeUtil.isExprAssign(child)) {
+36:         collapseAssign(child.getFirstChild(), child, subtree);
+37:       }
+38:       child = next;
+39:     }
+40:     return subtree;
+41:   }
+
+[16] com.google.javascript.jscomp.CodeGenerator#tagAsStrict  (lines 70-72)
+70:   public void tagAsStrict() {
+71:     add("'use strict';");
+72:   }
+
+[17] com.google.javascript.jscomp.PeepholeSubstituteAlternateSyntax#tryReplaceUndefined  (lines 232-243)
+232:   private Node tryReplaceUndefined(Node n) {
+233:     // TODO(johnlenz): consider doing this as a normalization.
+234:     if (isASTNormalized()
+235:         && NodeUtil.isUndefined(n)
+236:         && !NodeUtil.isLValue(n)) {
+237:       Node replacement = NodeUtil.newUndefinedNode(n);
+238:       n.getParent().replaceChild(n, replacement);
+239:       reportCodeChange();
+240:       return replacement;
+241:     }
+242:     return n;
+243:   }
+
+[18] com.google.javascript.jscomp.AbstractCommandLineRunner#enableTestMode  (lines 133-146)
+133:   @VisibleForTesting
+134:   void enableTestMode(
+135:       Supplier<List<JSSourceFile>> externsSupplier,
+136:       Supplier<List<JSSourceFile>> inputsSupplier,
+137:       Supplier<List<JSModule>> modulesSupplier,
+138:       Function<Integer, Boolean> exitCodeReceiver) {
+139:     Preconditions.checkArgument(
+140:         inputsSupplier == null ^ modulesSupplier == null);
+141:     testMode = true;
+142:     this.externsSupplierForTesting = externsSupplier;
+143:     this.inputsSupplierForTesting = inputsSupplier;
+144:     this.modulesSupplierForTesting = modulesSupplier;
+145:     this.exitCodeReceiverForTesting = exitCodeReceiver;
+146:   }
+
+[19] com.google.javascript.jscomp.AbstractCommandLineRunner#setRunOptions  (lines 195-273)
+195:   protected void setRunOptions(CompilerOptions options)
+196:       throws FlagUsageException, IOException {
+197:     DiagnosticGroups diagnosticGroups = getDiagnosticGroups();
+198: 
+199:     if (config.warningGuards != null) {
+200:       for (WarningGuardSpec.Entry entry : config.warningGuards.entries) {
+201:         diagnosticGroups.setWarningLevel(options, entry.groupName, entry.level);
+202:       }
+203:     }
+204: 
+205:     createDefineOrTweakReplacements(config.define, options, false);
+206: 
+207:     options.setTweakProcessing(config.tweakProcessing);
+208:     createDefineOrTweakReplacements(config.tweak, options, true);
+209: 
+210:     options.manageClosureDependencies = config.manageClosureDependencies;
+211:     if (config.closureEntryPoints.size() > 0) {
+212:       options.setManageClosureDependencies(config.closureEntryPoints);
+213:     }
+214:     options.devMode = config.jscompDevMode;
+215:     options.setCodingConvention(config.codingConvention);
+216:     options.setSummaryDetailLevel(config.summaryDetailLevel);
+217: 
+218:     outputCharset = options.outputCharset = getOutputCharset();
+219:     inputCharset = getInputCharset();
+220: 
+221:     if (config.jsOutputFile.length() > 0) {
+222:       if (config.skipNormalOutputs) {
+223:         throw new FlagUsageException("skip_normal_outputs and js_output_file"
+224:             + " cannot be used together.");
+225:       } else {
+226:         options.jsOutputFile = config.jsOutputFile;
+227:       }
+228:     }
+229: 
+230:     if (config.skipNormalOutputs && config.printAst) {
+231:       throw new FlagUsageException("skip_normal_outputs and print_ast cannot"
+232:           + " be used together.");
+233:     }
+234: 
+235:     if (config.skipNormalOutputs && config.printTree) {
+236:       throw new FlagUsageException("skip_normal_outputs and print_tree cannot"
+237:           + " be used together.");
+238:     }
+239: 
+240:     if (config.createSourceMap.length() > 0) {
+241:       options.sourceMapOutputPath = config.createSourceMap;
+242:     }
+243:     options.sourceMapDetailLevel = config.sourceMapDetailLevel;
+244:     options.sourceMapFormat = config.sourceMapFormat;
+245: 
+246:     if (!config.variableMapInputFile.equals("")) {
+247:       options.inputVariableMapSerialized =
+248:           VariableMap.load(config.variableMapInputFile).toBytes();
+249:     }
+250: 
+251:     if (!config.propertyMapInputFile.equals("")) {
+252:       options.inputPropertyMapSerialized =
+253:           VariableMap.load(config.propertyMapInputFile).toBytes();
+254:     }
+255: 
+256:     if (config.languageIn.length() > 0) {
+257:       if (config.languageIn.equals("ECMASCRIPT5_STRICT") ||
+258:           config.languageIn.equals("ES5_STRICT")) {
+259:         options.setLanguageIn(CompilerOptions.LanguageMode.ECMASCRIPT5_STRICT);
+260:       } else if (config.languageIn.equals("ECMASCRIPT5") ||
+261:           config.languageIn.equals("ES5")) {
+262:         options.setLanguageIn(CompilerOptions.LanguageMode.ECMASCRIPT5);
+263:       } else if (config.languageIn.equals("ECMASCRIPT3") ||
+264:                  config.languageIn.equals("ES3")) {
+265:         options.setLanguageIn(CompilerOptions.LanguageMode.ECMASCRIPT3);
+266:       } else {
+267:         throw new FlagUsageException("Unknown language `" + config.languageIn +
+268:                                      "' specified.");
+269:       }
+270:     }
+271: 
+272:     options.acceptConstKeyword = config.acceptConstKeyword;
+273:   }
+
+[20] com.google.javascript.jscomp.AbstractCommandLineRunner#setAcceptConstKeyword  (lines 1640-1643)
+1640:     CommandLineConfig setAcceptConstKeyword(boolean acceptConstKeyword) {
+1641:       this.acceptConstKeyword = acceptConstKeyword;
+1642:       return this;
+1643:     }
+
+[21] com.google.javascript.jscomp.ControlStructureCheck#check  (lines 56-78)
+56:   private void check(Node node) {
+57:     switch (node.getType()) {
+58:       case Token.WITH:
+59:         JSDocInfo info = node.getJSDocInfo();
+60:         boolean allowWith =
+61:             info != null && info.getSuppressions().contains("with");
+62:         if (!allowWith) {
+63:           report(node, USE_OF_WITH);
+64:         }
+65:         break;
+66: 
+67:       case Token.SCRIPT:
+68:         // Remember the source file name in case we need to report an error.
+69:         sourceName = (String) node.getProp(Node.SOURCENAME_PROP);
+70:         break;
+71:     }
+72: 
+73:     for (Node bChild = node.getFirstChild(); bChild != null;) {
+74:       Node next = bChild.getNext();
+75:       check(bChild);
+76:       bChild = next;
+77:     }
+78:   }
+
+[22] com.google.javascript.jscomp.Compiler#toSource  (lines 1467-1482)
+1467:   private String toSource(Node n, SourceMap sourceMap) {
+1468:     CodePrinter.Builder builder = new CodePrinter.Builder(n);
+1469:     builder.setPrettyPrint(options.prettyPrint);
+1470:     builder.setLineBreak(options.lineBreak);
+1471:     builder.setSourceMap(sourceMap);
+1472:     builder.setSourceMapDetailLevel(options.sourceMapDetailLevel);
+1473:     builder.setTagAsStrict(
+1474:         options.getLanguageOut() == LanguageMode.ECMASCRIPT5_STRICT);
+1475:     builder.setLineLengthThreshold(options.lineLengthThreshold);
+1476: 
+1477:     Charset charset = options.outputCharset != null ?
+1478:         Charset.forName(options.outputCharset) : null;
+1479:     builder.setOutputCharset(charset);
+1480: 
+1481:     return builder.build();
+1482:   }
+
+[23] com.google.javascript.jscomp.SourceFile#getName  (lines 138-140)
+138:   public String getName() {
+139:     return fileName;
+140:   }
+
+[24] com.google.javascript.jscomp.StrictModeCheck#visit  (lines 101-117)
+101:   @Override public void visit(NodeTraversal t, Node n, Node parent) {
+102:     if (n.getType() == Token.WITH) {
+103:       t.report(n, WITH_DISALLOWED);
+104:     } else if (n.getType() == Token.NAME) {
+105:       if (!isDeclaration(n)) {
+106:         checkNameUse(t, n);
+107:       }
+108:     } else if (n.getType() == Token.ASSIGN) {
+109:       checkAssignment(t, n);
+110:     } else if (n.getType() == Token.DELPROP) {
+111:       checkDelete(t, n);
+112:     } else if (n.getType() == Token.OBJECTLIT) {
+113:       checkObjectLiteral(t, n);
+114:     } else if (n.getType() == Token.LABEL) {
+115:       checkLabel(t, n);
+116:     }
+117:   }
+
+[25] com.google.javascript.jscomp.StrictModeCheck#visit  (lines 223-229)
+223:     @Override public void visit(NodeTraversal t, Node n, Node parent) {
+224:       if ((n.getType() == Token.NAME) && isDeclaration(n)) {
+225:         checkDeclaration(t, n);
+226:       } else if (n.getType() == Token.GETPROP) {
+227:         checkProperty(t, n);
+228:       }
+229:     }
+
+[26] com.google.javascript.jscomp.AbstractCommandLineRunner#setCharset  (lines 1597-1600)
+1597:     CommandLineConfig setCharset(String charset) {
+1598:       this.charset = charset;
+1599:       return this;
+1600:     }
+
+[27] com.google.javascript.jscomp.DefaultPassConfig#createInternal  (lines 1171-1176)
+1171:     @Override
+1172:     protected CompilerPass createInternal(AbstractCompiler compiler) {
+1173:       return new StrictModeCheck(compiler,
+1174:           !options.checkSymbols,  // don't check variables twice
+1175:           !options.checkCaja);    // disable eval check if not Caja
+1176:     }
+
+[28] com.google.javascript.jscomp.CodePrinter#toSource  (lines 609-644)
+609:   private static String toSource(Node root, Format outputFormat,
+610:                                  boolean lineBreak,  int lineLengthThreshold,
+611:                                  SourceMap sourceMap,
+612:                                  SourceMap.DetailLevel sourceMapDetailLevel,
+613:                                  Charset outputCharset,
+614:                                  boolean tagAsStrict) {
+615:     Preconditions.checkState(sourceMapDetailLevel != null);
+616: 
+617:     boolean createSourceMap = (sourceMap != null);
+618:     MappedCodePrinter mcp =
+619:         outputFormat == Format.COMPACT
+620:         ? new CompactCodePrinter(
+621:             lineBreak, lineLengthThreshold,
+622:             createSourceMap, sourceMapDetailLevel)
+623:         : new PrettyCodePrinter(
+624:             lineLengthThreshold, createSourceMap, sourceMapDetailLevel);
+625:     CodeGenerator cg =
+626:         outputFormat == Format.TYPED
+627:         ? new TypedCodeGenerator(mcp, outputCharset)
+628:         : new CodeGenerator(mcp, outputCharset);
+629: 
+630:     if (tagAsStrict) {
+631:       cg.tagAsStrict();
+632:     }
+633: 
+634:     cg.add(root);
+635:     mcp.endFile();
+636: 
+637:     String code = mcp.getCode();
+638: 
+639:     if (createSourceMap) {
+640:       mcp.generateSourceMap(sourceMap);
+641:     }
+642: 
+643:     return code;
+644:   }
+
+[29] com.google.javascript.jscomp.CommandLineRunner#processArgs  (lines 486-512)
+486:   private List<String> processArgs(String[] args) {
+487:     // Args4j has a different format that the old command-line parser.
+488:     // So we use some voodoo to get the args into the format that args4j
+489:     // expects.
+490:     Pattern argPattern = Pattern.compile("(--[a-zA-Z_]+)=(.*)");
+491:     Pattern quotesPattern = Pattern.compile("^['\"](.*)['\"]$");
+492:     List<String> processedArgs = Lists.newArrayList();
+493: 
+494:     for (String arg : args) {
+495:       Matcher matcher = argPattern.matcher(arg);
+496:       if (matcher.matches()) {
+497:         processedArgs.add(matcher.group(1));
+498: 
+499:         String value = matcher.group(2);
+500:         Matcher quotesMatcher = quotesPattern.matcher(value);
+501:         if (quotesMatcher.matches()) {
+502:           processedArgs.add(quotesMatcher.group(1));
+503:         } else {
+504:           processedArgs.add(value);
+505:         }
+506:       } else {
+507:         processedArgs.add(arg);
+508:       }
+509:     }
+510: 
+511:     return processedArgs;
+512:   }
+
+[30] com.google.javascript.jscomp.UnreachableCodeElimination#visit  (lines 90-110)
+90:   @Override
+91:   public void visit(NodeTraversal t, Node n, Node parent) {
+92:     if (parent == null) {
+93:       return;
+94:     }
+95:     if (n.getType() == Token.FUNCTION || n.getType() == Token.SCRIPT) {
+96:       return;
+97:     }
+98: 
+99:     DiGraphNode<Node, Branch> gNode = curCfg.getDirectedGraphNode(n);
+100:     if (gNode == null) { // Not in CFG.
+101:       return;
+102:     }
+103:     if (gNode.getAnnotation() != GraphReachability.REACHABLE ||
+104:         (removeNoOpStatements && !NodeUtil.mayHaveSideEffects(n))) {
+105:       removeDeadExprStatementSafely(n);
+106:       return;
+107:     }
+108: 
+109:     tryRemoveUnconditionalBranching(n);
+110:   }
+
+[31] com.google.javascript.jscomp.Compiler#init  (lines 296-304)
+296:   public void init(List<JSSourceFile> externs, List<JSSourceFile> inputs,
+297:       CompilerOptions options) {
+298:     JSModule module = new JSModule("[singleton]");
+299:     for (JSSourceFile input : inputs) {
+300:       module.add(input);
+301:     }
+302: 
+303:     initModules(externs, Lists.newArrayList(module), options);
+304:   }
+
+[32] com.google.javascript.rhino.Node#getNext  (lines 556-558)
+556:   public Node getNext() {
+557:     return next;
+558:   }
+
+[33] com.google.javascript.jscomp.AbstractCommandLineRunner#getInputCharset  (lines 794-803)
+794:   private Charset getInputCharset() throws FlagUsageException {
+795:     if (!config.charset.isEmpty()) {
+796:       if (!Charset.isSupported(config.charset)) {
+797:         throw new FlagUsageException(config.charset +
+798:             " is not a valid charset name.");
+799:       }
+800:       return Charset.forName(config.charset);
+801:     }
+802:     return Charsets.UTF_8;
+803:   }
+
+[34] com.google.javascript.jscomp.StatementFusion#canFuseIntoOneStatement  (lines 46-83)
+46:   private static boolean canFuseIntoOneStatement(Node block) {
+47:     // Fold only statement block. NOT scripts block.
+48:     if (block.getType() != Token.BLOCK) {
+49:       return false;
+50:     }
+51: 
+52:     // Nothing to do here.
+53:     if (!block.hasChildren() || block.hasOneChild()) {
+54:       return false;
+55:     }
+56: 
+57:     Node last = block.getLastChild();
+58: 
+59:     for (Node c = block.getFirstChild(); c != null; c = c.getNext()) {
+60:       if (!NodeUtil.isExpressionNode(c) && c != last) {
+61:         return false;
+62:       }
+63:     }
+64: 
+65:     // TODO(user): Support more control statement for fusion.
+66:     // FOR
+67:     switch(last.getType()) {
+68:       case Token.IF:
+69:       case Token.THROW:
+70:       case Token.SWITCH:
+71:       case Token.EXPR_RESULT:
+72:         return true;
+73:       case Token.RETURN:
+74:         // We don't want to add a new return value.
+75:         return last.hasChildren();
+76:       case Token.FOR:
+77:         return NodeUtil.isForIn(last) &&
+78:             // Avoid cases where we have for(var x = foo() in a) { ....
+79:             !NodeUtil.mayHaveSideEffects(last.getFirstChild());
+80:     }
+81: 
+82:     return false;
+83:   }
+
+[35] com.google.javascript.rhino.Node#addChildToBack  (lines 602-613)
+602:   public void addChildToBack(Node child) {
+603:     Preconditions.checkArgument(child.parent == null);
+604:     Preconditions.checkArgument(child.next == null);
+605:     child.parent = this;
+606:     child.next = null;
+607:     if (last == null) {
+608:       first = last = child;
+609:       return;
+610:     }
+611:     last.next = child;
+612:     last = child;
+613:   }
+
+[36] com.google.javascript.jscomp.SourceFile#fromCode  (lines 259-261)
+259:   public static SourceFile fromCode(String fileName, String code) {
+260:     return new Preloaded(fileName, code);
+261:   }
+
+[37] com.google.javascript.jscomp.Compiler#toSource  (lines 1393-1452)
+1393:   public void toSource(final CodeBuilder cb,
+1394:                        final int inputSeqNum,
+1395:                        final Node root) {
+1396:     runInCompilerThread(new Callable<Void>() {
+1397:       public Void call() throws Exception {
+1398:         if (options.printInputDelimiter) {
+1399:           if ((cb.getLength() > 0) && !cb.endsWith("\n")) {
+1400:             cb.append("\n");  // Make sure that the label starts on a new line
+1401:           }
+1402:           Preconditions.checkState(root.getType() == Token.SCRIPT);
+1403: 
+1404:           String delimiter = options.inputDelimiter;
+1405: 
+1406:           String sourceName = (String)root.getProp(Node.SOURCENAME_PROP);
+1407:           Preconditions.checkState(sourceName != null);
+1408:           Preconditions.checkState(!sourceName.isEmpty());
+1409: 
+1410:           delimiter = delimiter.replaceAll("%name%", sourceName)
+1411:             .replaceAll("%num%", String.valueOf(inputSeqNum));
+1412: 
+1413:           cb.append(delimiter)
+1414:             .append("\n");
+1415:         }
+1416:         if (root.getJSDocInfo() != null &&
+1417:             root.getJSDocInfo().getLicense() != null) {
+1418:           cb.append("/*\n")
+1419:             .append(root.getJSDocInfo().getLicense())
+1420:             .append("*/\n");
+1421:         }
+1422: 
+1423:         // If there is a valid source map, then indicate to it that the current
+1424:         // root node's mappings are offset by the given string builder buffer.
+1425:         if (options.sourceMapOutputPath != null) {
+1426:           sourceMap.setStartingPosition(
+1427:               cb.getLineIndex(), cb.getColumnIndex());
+1428:         }
+1429: 
+1430:         // if LanguageMode is ECMASCRIPT5_STRICT, only print 'use strict'
+1431:         // for the first input file
+1432:         String code = toSource(root, sourceMap);
+1433:         if (!code.isEmpty()) {
+1434:           cb.append(code);
+1435: 
+1436:           // In order to avoid parse ambiguity when files are concatenated
+1437:           // together, all files should end in a semi-colon. Do a quick
+1438:           // heuristic check if there's an obvious semi-colon already there.
+1439:           int length = code.length();
+1440:           char lastChar = code.charAt(length - 1);
+1441:           char secondLastChar = length >= 2 ?
+1442:               code.charAt(length - 2) : '\0';
+1443:           boolean hasSemiColon = lastChar == ';' ||
+1444:               (lastChar == '\n' && secondLastChar == ';');
+1445:           if (!hasSemiColon) {
+1446:             cb.append(";");
+1447:           }
+1448:         }
+1449:         return null;
+1450:       }
+1451:     });
+1452:   }
+
+[38] com.google.javascript.jscomp.AbstractCommandLineRunner#setClosureEntryPoints  (lines 1619-1623)
+1619:     CommandLineConfig setClosureEntryPoints(List<String> entryPoints) {
+1620:       Preconditions.checkNotNull(entryPoints);
+1621:       this.closureEntryPoints = entryPoints;
+1622:       return this;
+1623:     }
+
+[39] com.google.javascript.jscomp.AbstractCommandLineRunner#doRun  (lines 618-664)
+618:   protected int doRun() throws FlagUsageException, IOException {
+619:     Compiler.setLoggingLevel(Level.parse(config.loggingLevel));
+620: 
+621:     List<JSSourceFile> externs = createExterns();
+622: 
+623:     compiler = createCompiler();
+624:     B options = createOptions();
+625: 
+626:     List<JSModule> modules = null;
+627:     Result result = null;
+628: 
+629:     setRunOptions(options);
+630: 
+631:     boolean writeOutputToFile = !options.jsOutputFile.isEmpty();
+632:     if (writeOutputToFile) {
+633:       jsOutput = fileNameToOutputWriter(options.jsOutputFile);
+634:     } else if (jsOutput instanceof OutputStream) {
+635:       jsOutput = streamToOutputWriter((OutputStream) jsOutput);
+636:     }
+637: 
+638:     List<String> jsFiles = config.js;
+639:     List<String> moduleSpecs = config.module;
+640:     if (!moduleSpecs.isEmpty()) {
+641:       modules = createJsModules(moduleSpecs, jsFiles);
+642:       if (config.skipNormalOutputs) {
+643:         compiler.initModules(externs, modules, options);
+644:       } else {
+645:         result = compiler.compileModules(externs, modules, options);
+646:       }
+647:     } else {
+648:       List<JSSourceFile> inputs = createSourceInputs(jsFiles);
+649:       if (config.skipNormalOutputs) {
+650:         compiler.init(externs, inputs, options);
+651:       } else {
+652:         result = compiler.compile(externs, inputs, options);
+653:       }
+654:     }
+655: 
+656:     int errCode = processResults(result, modules, options);
+657:     // Flush the output if we are writing to a file.
+658:     // We can't close yet, because we may need to write phase ordering
+659:     // info to it later.
+660:     if (jsOutput instanceof Flushable) {
+661:       ((Flushable) jsOutput).flush();
+662:     }
+663:     return errCode;
+664:   }
+
+[40] com.google.javascript.jscomp.Compiler#getParserConfig  (lines 1693-1717)
+1693:   @Override
+1694:   Config getParserConfig() {
+1695:     if (parserConfig == null) {
+1696:       Config.LanguageMode mode;
+1697:       switch (options.getLanguageIn()) {
+1698:         case ECMASCRIPT3:
+1699:           mode = Config.LanguageMode.ECMASCRIPT3;
+1700:           break;
+1701:         case ECMASCRIPT5:
+1702:           mode = Config.LanguageMode.ECMASCRIPT5;
+1703:           break;
+1704:         case ECMASCRIPT5_STRICT:
+1705:           mode = Config.LanguageMode.ECMASCRIPT5_STRICT;
+1706:           break;
+1707:         default:
+1708:           throw new IllegalStateException("unexpected language mode");
+1709:       }
+1710: 
+1711:       parserConfig = ParserRunner.createConfig(
+1712:         isIdeMode(),
+1713:         mode,
+1714:         acceptConstKeyword());
+1715:     }
+1716:     return parserConfig;
+1717:   }
+
+[41] com.google.javascript.jscomp.Compiler#call  (lines 1285-1301)
+1285:       public String call() throws Exception {
+1286:         Tracer tracer = newTracer("toSource");
+1287:         try {
+1288:           CodeBuilder cb = new CodeBuilder();
+1289:           if (jsRoot != null) {
+1290:             int i = 0;
+1291:             for (Node scriptNode = jsRoot.getFirstChild();
+1292:                  scriptNode != null;
+1293:                  scriptNode = scriptNode.getNext()) {
+1294:               toSource(cb, i++, scriptNode);
+1295:             }
+1296:           }
+1297:           return cb.toString();
+1298:         } finally {
+1299:           stopTracer(tracer, "toSource");
+1300:         }
+1301:       }
+
+[42] com.google.javascript.jscomp.StrictModeCheck#checkAssignment  (lines 159-171)
+159:   private void checkAssignment(NodeTraversal t, Node n) {
+160:     if (n.getFirstChild().getType() == Token.NAME) {
+161:       if ("arguments".equals(n.getFirstChild().getString())) {
+162:         t.report(n, ARGUMENTS_ASSIGNMENT);
+163:       } else if ("eval".equals(n.getFirstChild().getString())) {
+164:         // Note that assignment to eval is already illegal because any use of
+165:         // that name is illegal.
+166:         if (noCajaChecks) {
+167:           t.report(n, EVAL_ASSIGNMENT);
+168:         }
+169:       }
+170:     }
+171:   }
+
+[43] com.google.javascript.jscomp.Compiler#toString  (lines 1521-1524)
+1521:     @Override
+1522:     public String toString() {
+1523:       return sb.toString();
+1524:     }
+
+[44] com.google.javascript.jscomp.DefaultPassConfig#getChecks  (lines 164-311)
+164:   @Override
+165:   protected List<PassFactory> getChecks() {
+166:     List<PassFactory> checks = Lists.newArrayList();
+167: 
+168:     if (options.closurePass) {
+169:       checks.add(closureGoogScopeAliases);
+170:     }
+171: 
+172:     if (options.nameAnonymousFunctionsOnly) {
+173:       if (options.anonymousFunctionNaming ==
+174:           AnonymousFunctionNamingPolicy.MAPPED) {
+175:         checks.add(nameMappedAnonymousFunctions);
+176:       } else if (options.anonymousFunctionNaming ==
+177:           AnonymousFunctionNamingPolicy.UNMAPPED) {
+178:         checks.add(nameUnmappedAnonymousFunctions);
+179:       }
+180:       return checks;
+181:     }
+182: 
+183:     if (options.checkSuspiciousCode ||
+184:         options.enables(DiagnosticGroups.GLOBAL_THIS)) {
+185:       checks.add(suspiciousCode);
+186:     }
+187: 
+188:     if (options.checkControlStructures)  {
+189:       checks.add(checkControlStructures);
+190:     }
+191: 
+192:     if (options.checkRequires.isOn()) {
+193:       checks.add(checkRequires);
+194:     }
+195: 
+196:     if (options.checkProvides.isOn()) {
+197:       checks.add(checkProvides);
+198:     }
+199: 
+200:     // The following passes are more like "preprocessor" passes.
+201:     // It's important that they run before most checking passes.
+202:     // Perhaps this method should be renamed?
+203:     if (options.generateExports) {
+204:       checks.add(generateExports);
+205:     }
+206: 
+207:     if (options.exportTestFunctions) {
+208:       checks.add(exportTestFunctions);
+209:     }
+210: 
+211:     if (options.closurePass) {
+212:       checks.add(closurePrimitives.makeOneTimePass());
+213:     }
+214: 
+215:     if (options.closurePass && options.checkMissingGetCssNameLevel.isOn()) {
+216:       checks.add(closureCheckGetCssName);
+217:     }
+218: 
+219:     if (options.syntheticBlockStartMarker != null) {
+220:       // This pass must run before the first fold constants pass.
+221:       checks.add(createSyntheticBlocks);
+222:     }
+223: 
+224:     checks.add(checkVars);
+225:     if (options.computeFunctionSideEffects) {
+226:       checks.add(checkRegExp);
+227:     }
+228: 
+229:     if (options.checkShadowVars.isOn()) {
+230:       checks.add(checkShadowVars);
+231:     }
+232: 
+233:     if (options.aggressiveVarCheck.isOn()) {
+234:       checks.add(checkVariableReferences);
+235:     }
+236: 
+237:     // This pass should run before types are assigned.
+238:     if (options.processObjectPropertyString) {
+239:       checks.add(objectPropertyStringPreprocess);
+240:     }
+241: 
+242:     if (options.checkTypes || options.inferTypes) {
+243:       checks.add(resolveTypes.makeOneTimePass());
+244:       checks.add(inferTypes.makeOneTimePass());
+245:       if (options.checkTypes) {
+246:         checks.add(checkTypes.makeOneTimePass());
+247:       } else {
+248:         checks.add(inferJsDocInfo.makeOneTimePass());
+249:       }
+250:     }
+251: 
+252:     if (options.checkUnreachableCode.isOn() ||
+253:         (options.checkTypes && options.checkMissingReturn.isOn())) {
+254:       checks.add(checkControlFlow);
+255:     }
+256: 
+257:     // CheckAccessControls only works if check types is on.
+258:     if (options.checkTypes &&
+259:         (options.enables(DiagnosticGroups.ACCESS_CONTROLS)
+260:          || options.enables(DiagnosticGroups.CONSTANT_PROPERTY))) {
+261:       checks.add(checkAccessControls);
+262:     }
+263: 
+264:     if (options.checkGlobalNamesLevel.isOn()) {
+265:       checks.add(checkGlobalNames);
+266:     }
+267: 
+268:     if (options.getLanguageIn() == LanguageMode.ECMASCRIPT5_STRICT
+269:         || options.checkCaja
+270:         || options.checkEs5Strict) {
+271:       checks.add(checkStrictMode);
+272:     }
+273: 
+274:     // Replace 'goog.getCssName' before processing defines but after the
+275:     // other checks have been done.
+276:     if (options.closurePass) {
+277:       checks.add(closureReplaceGetCssName);
+278:     }
+279: 
+280:     // i18n
+281:     // If you want to customize the compiler to use a different i18n pass,
+282:     // you can create a PassConfig that calls replacePassFactory
+283:     // to replace this.
+284:     checks.add(options.messageBundle != null ?
+285:         replaceMessages : createEmptyPass("replaceMessages"));
+286: 
+287:     if (options.getTweakProcessing().isOn()) {
+288:       checks.add(processTweaks);
+289:     }
+290: 
+291:     // Defines in code always need to be processed.
+292:     checks.add(processDefines);
+293: 
+294:     if (options.instrumentationTemplate != null ||
+295:         options.recordFunctionInformation) {
+296:       checks.add(computeFunctionNames);
+297:     }
+298: 
+299:     if (options.nameReferenceGraphPath != null &&
+300:         !options.nameReferenceGraphPath.isEmpty()) {
+301:       checks.add(printNameReferenceGraph);
+302:     }
+303: 
+304:     if (options.nameReferenceReportPath != null &&
+305:         !options.nameReferenceReportPath.isEmpty()) {
+306:       checks.add(printNameReferenceReport);
+307:     }
+308: 
+309:     assertAllOneTimePasses(checks);
+310:     return checks;
+311:   }
+
+[45] com.google.javascript.jscomp.SourceFile#SourceFile  (lines 79-87)
+79:   SourceFile(String fileName) {
+80:     if (fileName == null || fileName.isEmpty()) {
+81:       throw new IllegalArgumentException("a source must have a name");
+82:     }
+83:     this.fileName = fileName;
+84:     // Starting point: offset 0 is at line 1.
+85:     this.lastOffset = 0;
+86:     this.lastLine = 1;
+87:   }
+
+[46] com.google.javascript.jscomp.ComposeWarningsGuard#disables  (lines 115-133)
+115:   @Override
+116:   public boolean disables(DiagnosticGroup group) {
+117:     nextSingleton:
+118:     for (DiagnosticType type : group.getTypes()) {
+119:       DiagnosticGroup singleton = DiagnosticGroup.forType(type);
+120: 
+121:       for (WarningsGuard guard : guards) {
+122:         if (guard.disables(singleton)) {
+123:           continue nextSingleton;
+124:         } else if (guard.enables(singleton)) {
+125:           return false;
+126:         }
+127:       }
+128: 
+129:       return false;
+130:     }
+131: 
+132:     return true;
+133:   }
+
+[47] com.google.javascript.jscomp.StrictModeCheck#checkNameUse  (lines 139-156)
+139:   private void checkNameUse(NodeTraversal t, Node n) {
+140:     Var v = t.getScope().getVar(n.getString());
+141:     if (v == null) {
+142:       // In particular, this prevents creating a global variable by assigning
+143:       // to it without a declaration.
+144:       if (!noVarCheck) {
+145:         t.report(n, UNKNOWN_VARIABLE, n.getString());
+146:       }
+147:     }
+148: 
+149:     if (!noCajaChecks) {
+150:       if ("eval".equals(n.getString())) {
+151:         t.report(n, EVAL_USE);
+152:       } else if (n.getString().endsWith("__")) {
+153:         t.report(n, ILLEGAL_NAME);
+154:       }
+155:     }
+156:   }
+
+[48] com.google.javascript.jscomp.parsing.IRFactory#IRFactory  (lines 119-145)
+119:   private IRFactory(String sourceString,
+120:                     String sourceName,
+121:                     Config config,
+122:                     ErrorReporter errorReporter) {
+123:     this.sourceString = sourceString;
+124:     this.sourceName = sourceName;
+125:     this.config = config;
+126:     this.errorReporter = errorReporter;
+127:     this.transformDispatcher = new TransformDispatcher();
+128:     // The template node properties are applied to all nodes in this transform.
+129:     this.templateNode = createTemplateNode();
+130: 
+131:     switch (config.languageMode) {
+132:       case ECMASCRIPT3:
+133:         // Reserved words are handled by the Rhino parser.
+134:         reservedKeywords = null;
+135:         break;
+136:       case ECMASCRIPT5:
+137:         reservedKeywords = ES5_RESERVED_KEYWORDS;
+138:         break;
+139:       case ECMASCRIPT5_STRICT:
+140:         reservedKeywords = ES5_STRICT_RESERVED_KEYWORDS;
+141:         break;
+142:       default:
+143:         throw new IllegalStateException("unknown language mode");
+144:     }
+145:   }
+
+[49] com.google.javascript.jscomp.CompilationLevel#applySafeCompilationOptions  (lines 93-117)
+93:   private static void applySafeCompilationOptions(CompilerOptions options) {
+94:     // Does not call applyBasicCompilationOptions(options) because the call to
+95:     // skipAllCompilerPasses() cannot be easily undone.
+96:     options.closurePass = true;
+97:     options.variableRenaming = VariableRenamingPolicy.LOCAL;
+98:     options.shadowVariables = true;
+99:     options.inlineLocalVariables = true;
+100:     options.flowSensitiveInlineVariables = true;
+101:     options.inlineLocalFunctions = true;
+102:     options.checkGlobalThisLevel = CheckLevel.OFF;
+103:     options.foldConstants = true;
+104:     options.coalesceVariableNames = true;
+105:     options.deadAssignmentElimination = true;
+106:     options.collapseVariableDeclarations = true;
+107:     options.convertToDottedProperties = true;
+108:     options.labelRenaming = true;
+109:     options.removeDeadCode = true;
+110:     options.optimizeArgumentsArray = true;
+111:     options.removeUnusedVars = false;
+112:     options.removeUnusedLocalVars = true;
+113: 
+114:     // Allows annotations that are not standard.
+115:     options.setWarningLevel(DiagnosticGroups.NON_STANDARD_JSDOC,
+116:         CheckLevel.OFF);
+117:   }
+
+[50] com.google.javascript.jscomp.StrictModeCheck#isDeclaration  (lines 123-136)
+123:   private static boolean isDeclaration(Node n) {
+124:     switch (n.getParent().getType()) {
+125:       case Token.VAR:
+126:       case Token.FUNCTION:
+127:       case Token.CATCH:
+128:         return true;
+129: 
+130:       case Token.LP:
+131:         return n.getParent().getParent().getType() == Token.FUNCTION;
+132: 
+133:       default:
+134:         return false;
+135:     }
+136:   }

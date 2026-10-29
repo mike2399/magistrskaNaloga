@@ -1,0 +1,224 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- org.apache.commons.math3.geometry.euclidean.threed.LineTest::testRevert
+junit.framework.AssertionFailedError: arrays first differed at element [0]; expected:<0.028581782127907646> but was:<0.028581782243293483>
+	at org.apache.commons.math3.geometry.euclidean.threed.LineTest.testRevert(LineTest.java:144)
+
+=== CANDIDATE METHODS ===
+
+[1] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#Vector3D  (lines 151-155)
+151:     public Vector3D(double a1, Vector3D u1, double a2, Vector3D u2) {
+152:         this.x = MathArrays.linearCombination(a1, u1.x, a2, u2.x);
+153:         this.y = MathArrays.linearCombination(a1, u1.y, a2, u2.y);
+154:         this.z = MathArrays.linearCombination(a1, u1.z, a2, u2.z);
+155:     }
+
+[2] org.apache.commons.math3.geometry.euclidean.threed.Line#getDirection  (lines 94-96)
+94:     public Vector3D getDirection() {
+95:         return direction;
+96:     }
+
+[3] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#Vector3D  (lines 137-141)
+137:     public Vector3D(double a, Vector3D u) {
+138:         this.x = a * u.x;
+139:         this.y = a * u.y;
+140:         this.z = a * u.z;
+141:     }
+
+[4] org.apache.commons.math3.util.MathArrays#linearCombination  (lines 930-1002)
+930:     public static double linearCombination(final double a1, final double b1,
+931:                                            final double a2, final double b2,
+932:                                            final double a3, final double b3) {
+933: 
+934:         // the code below is split in many additions/subtractions that may
+935:         // appear redundant. However, they should NOT be simplified, as they
+936:         // do use IEEE754 floating point arithmetic rounding properties.
+937:         // as an example, the expression "ca1 - (ca1 - a1)" is NOT the same as "a1"
+938:         // The variables naming conventions are that xyzHigh contains the most significant
+939:         // bits of xyz and xyzLow contains its least significant bits. So theoretically
+940:         // xyz is the sum xyzHigh + xyzLow, but in many cases below, this sum cannot
+941:         // be represented in only one double precision number so we preserve two numbers
+942:         // to hold it as long as we can, combining the high and low order bits together
+943:         // only at the end, after cancellation may have occurred on high order bits
+944: 
+945:         // split a1 and b1 as two 26 bits numbers
+946:         final double ca1        = SPLIT_FACTOR * a1;
+947:         final double a1High     = ca1 - (ca1 - a1);
+948:         final double a1Low      = a1 - a1High;
+949:         final double cb1        = SPLIT_FACTOR * b1;
+950:         final double b1High     = cb1 - (cb1 - b1);
+951:         final double b1Low      = b1 - b1High;
+952: 
+953:         // accurate multiplication a1 * b1
+954:         final double prod1High  = a1 * b1;
+955:         final double prod1Low   = a1Low * b1Low - (((prod1High - a1High * b1High) - a1Low * b1High) - a1High * b1Low);
+956: 
+957:         // split a2 and b2 as two 26 bits numbers
+958:         final double ca2        = SPLIT_FACTOR * a2;
+959:         final double a2High     = ca2 - (ca2 - a2);
+960:         final double a2Low      = a2 - a2High;
+961:         final double cb2        = SPLIT_FACTOR * b2;
+962:         final double b2High     = cb2 - (cb2 - b2);
+963:         final double b2Low      = b2 - b2High;
+964: 
+965:         // accurate multiplication a2 * b2
+966:         final double prod2High  = a2 * b2;
+967:         final double prod2Low   = a2Low * b2Low - (((prod2High - a2High * b2High) - a2Low * b2High) - a2High * b2Low);
+968: 
+969:         // split a3 and b3 as two 26 bits numbers
+970:         final double ca3        = SPLIT_FACTOR * a3;
+971:         final double a3High     = ca3 - (ca3 - a3);
+972:         final double a3Low      = a3 - a3High;
+973:         final double cb3        = SPLIT_FACTOR * b3;
+974:         final double b3High     = cb3 - (cb3 - b3);
+975:         final double b3Low      = b3 - b3High;
+976: 
+977:         // accurate multiplication a3 * b3
+978:         final double prod3High  = a3 * b3;
+979:         final double prod3Low   = a3Low * b3Low - (((prod3High - a3High * b3High) - a3Low * b3High) - a3High * b3Low);
+980: 
+981:         // accurate addition a1 * b1 + a2 * b2
+982:         final double s12High    = prod1High + prod2High;
+983:         final double s12Prime   = s12High - prod2High;
+984:         final double s12Low     = (prod2High - (s12High - s12Prime)) + (prod1High - s12Prime);
+985: 
+986:         // accurate addition a1 * b1 + a2 * b2 + a3 * b3
+987:         final double s123High   = s12High + prod3High;
+988:         final double s123Prime  = s123High - prod3High;
+989:         final double s123Low    = (prod3High - (s123High - s123Prime)) + (s12High - s123Prime);
+990: 
+991:         // final rounding, s123 may have suffered many cancellations, we try
+992:         // to recover some bits from the extra words we have saved up to now
+993:         double result = s123High + (prod1Low + prod2Low + prod3Low + s12Low + s123Low);
+994: 
+995:         if (Double.isNaN(result)) {
+996:             // either we have split infinite numbers or some coefficients were NaNs,
+997:             // just rely on the naive implementation and let IEEE754 handle this
+998:             result = a1 * b1 + a2 * b2 + a3 * b3;
+999:         }
+1000: 
+1001:         return result;
+1002:     }
+
+[5] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#dotProduct  (lines 452-455)
+452:     public double dotProduct(final Vector<Euclidean3D> v) {
+453:         final Vector3D v3 = (Vector3D) v;
+454:         return MathArrays.linearCombination(x, v3.x, y, v3.y, z, v3.z);
+455:     }
+
+[6] org.apache.commons.math3.geometry.euclidean.threed.Line#Line  (lines 54-56)
+54:     public Line(final Vector3D p1, final Vector3D p2) throws MathIllegalArgumentException {
+55:         reset(p1, p2);
+56:     }
+
+[7] org.apache.commons.math3.util.FastMath#sqrt  (lines 378-380)
+378:     public static double sqrt(final double a) {
+379:         return Math.sqrt(a);
+380:     }
+
+[8] org.apache.commons.math3.geometry.euclidean.threed.Line#revert  (lines 86-89)
+86:     public Line revert() {
+87:         final Line reverted = new Line(zero, zero.subtract(direction));
+88:         return reverted;
+89:     }
+
+[9] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#negate  (lines 373-375)
+373:     public Vector3D negate() {
+374:         return new Vector3D(-x, -y, -z);
+375:     }
+
+[10] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#toArray  (lines 221-223)
+221:     public double[] toArray() {
+222:         return new double[] { x, y, z };
+223:     }
+
+[11] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#Vector3D  (lines 95-99)
+95:     public Vector3D(double x, double y, double z) {
+96:         this.x = x;
+97:         this.y = y;
+98:         this.z = z;
+99:     }
+
+[12] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#subtract  (lines 285-288)
+285:     public Vector3D subtract(final Vector<Euclidean3D> v) {
+286:         final Vector3D v3 = (Vector3D) v;
+287:         return new Vector3D(x - v3.x, y - v3.y, z - v3.z);
+288:     }
+
+[13] org.apache.commons.math3.util.MathArrays#linearCombination  (lines 851-905)
+851:     public static double linearCombination(final double a1, final double b1,
+852:                                            final double a2, final double b2) {
+853: 
+854:         // the code below is split in many additions/subtractions that may
+855:         // appear redundant. However, they should NOT be simplified, as they
+856:         // use IEEE754 floating point arithmetic rounding properties.
+857:         // as an example, the expression "ca1 - (ca1 - a1)" is NOT the same as "a1"
+858:         // The variable naming conventions are that xyzHigh contains the most significant
+859:         // bits of xyz and xyzLow contains its least significant bits. So theoretically
+860:         // xyz is the sum xyzHigh + xyzLow, but in many cases below, this sum cannot
+861:         // be represented in only one double precision number so we preserve two numbers
+862:         // to hold it as long as we can, combining the high and low order bits together
+863:         // only at the end, after cancellation may have occurred on high order bits
+864: 
+865:         // split a1 and b1 as two 26 bits numbers
+866:         final double ca1        = SPLIT_FACTOR * a1;
+867:         final double a1High     = ca1 - (ca1 - a1);
+868:         final double a1Low      = a1 - a1High;
+869:         final double cb1        = SPLIT_FACTOR * b1;
+870:         final double b1High     = cb1 - (cb1 - b1);
+871:         final double b1Low      = b1 - b1High;
+872: 
+873:         // accurate multiplication a1 * b1
+874:         final double prod1High  = a1 * b1;
+875:         final double prod1Low   = a1Low * b1Low - (((prod1High - a1High * b1High) - a1Low * b1High) - a1High * b1Low);
+876: 
+877:         // split a2 and b2 as two 26 bits numbers
+878:         final double ca2        = SPLIT_FACTOR * a2;
+879:         final double a2High     = ca2 - (ca2 - a2);
+880:         final double a2Low      = a2 - a2High;
+881:         final double cb2        = SPLIT_FACTOR * b2;
+882:         final double b2High     = cb2 - (cb2 - b2);
+883:         final double b2Low      = b2 - b2High;
+884: 
+885:         // accurate multiplication a2 * b2
+886:         final double prod2High  = a2 * b2;
+887:         final double prod2Low   = a2Low * b2Low - (((prod2High - a2High * b2High) - a2Low * b2High) - a2High * b2Low);
+888: 
+889:         // accurate addition a1 * b1 + a2 * b2
+890:         final double s12High    = prod1High + prod2High;
+891:         final double s12Prime   = s12High - prod2High;
+892:         final double s12Low     = (prod2High - (s12High - s12Prime)) + (prod1High - s12Prime);
+893: 
+894:         // final rounding, s12 may have suffered many cancellations, we try
+895:         // to recover some bits from the extra words we have saved up to now
+896:         double result = s12High + (prod1Low + prod2Low + s12Low);
+897: 
+898:         if (Double.isNaN(result)) {
+899:             // either we have split infinite numbers or some coefficients were NaNs,
+900:             // just rely on the naive implementation and let IEEE754 handle this
+901:             result = a1 * b1 + a2 * b2;
+902:         }
+903: 
+904:         return result;
+905:     }
+
+[14] org.apache.commons.math3.geometry.euclidean.threed.Line#reset  (lines 73-81)
+73:     public void reset(final Vector3D p1, final Vector3D p2) throws MathIllegalArgumentException {
+74:         final Vector3D delta = p2.subtract(p1);
+75:         final double norm2 = delta.getNormSq();
+76:         if (norm2 == 0.0) {
+77:             throw new MathIllegalArgumentException(LocalizedFormats.ZERO_NORM);
+78:         }
+79:         this.direction = new Vector3D(1.0 / FastMath.sqrt(norm2), delta);
+80:         zero = new Vector3D(1.0, p1, -p1.dotProduct(delta) / norm2, delta);
+81:     }
+
+[15] org.apache.commons.math3.geometry.euclidean.threed.Vector3D#getNormSq  (lines 247-250)
+247:     public double getNormSq() {
+248:         // there are no cancellation problems here, so we use the straightforward formula
+249:         return x * x + y * y + z * z;
+250:     }

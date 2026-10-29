@@ -1,0 +1,2092 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.TypeCheckTest::testBadInterfaceExtendsNonExistentInterfaces
+java.lang.NullPointerException
+	at com.google.javascript.jscomp.TypeCheck.checkInterfaceConflictProperties(TypeCheck.java:1574)
+	at com.google.javascript.jscomp.TypeCheck.visitFunction(TypeCheck.java:1664)
+	at com.google.javascript.jscomp.TypeCheck.visit(TypeCheck.java:778)
+	at com.google.javascript.jscomp.NodeTraversal.traverseBranch(NodeTraversal.java:505)
+	at com.google.javascript.jscomp.NodeTraversal.traverseBranch(NodeTraversal.java:498)
+	at com.google.javascript.jscomp.NodeTraversal.traverseWithScope(NodeTraversal.java:343)
+	at com.google.javascript.jscomp.TypeCheck.check(TypeCheck.java:404)
+	at com.google.javascript.jscomp.TypeCheck.process(TypeCheck.java:375)
+	at com.google.javascript.jscomp.TypeCheck.processForTesting(TypeCheck.java:393)
+	at com.google.javascript.jscomp.TypeCheckTest.testTypes(TypeCheckTest.java:11530)
+	at com.google.javascript.jscomp.TypeCheckTest.testBadInterfaceExtendsNonExistentInterfaces(TypeCheckTest.java:3780)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.rhino.jstype.FunctionType#forInterface  (lines 177-180)
+177:   static FunctionType forInterface(
+178:       JSTypeRegistry registry, String name, Node source) {
+179:     return new FunctionType(registry, name, source);
+180:   }
+
+[2] com.google.javascript.jscomp.FunctionTypeBuilder#inferInheritance  (lines 309-370)
+309:   FunctionTypeBuilder inferInheritance(@Nullable JSDocInfo info) {
+310:     if (info != null) {
+311:       isConstructor = info.isConstructor();
+312:       makesStructs = info.makesStructs();
+313:       makesDicts = info.makesDicts();
+314:       isInterface = info.isInterface();
+315: 
+316:       if (makesStructs && !isConstructor) {
+317:         reportWarning(CONSTRUCTOR_REQUIRED, "@struct", fnName);
+318:       } else if (makesDicts && !isConstructor) {
+319:         reportWarning(CONSTRUCTOR_REQUIRED, "@dict", fnName);
+320:       }
+321: 
+322:       // base type
+323:       if (info.hasBaseType()) {
+324:         if (isConstructor) {
+325:           JSType maybeBaseType =
+326:               info.getBaseType().evaluate(scope, typeRegistry);
+327:           if (maybeBaseType != null &&
+328:               maybeBaseType.setValidator(new ExtendedTypeValidator())) {
+329:             baseType = (ObjectType) maybeBaseType;
+330:           }
+331:         } else {
+332:           reportWarning(EXTENDS_WITHOUT_TYPEDEF, fnName);
+333:         }
+334:       }
+335: 
+336:       // Implemented interfaces (for constructors only).
+337:       if (info.getImplementedInterfaceCount() > 0) {
+338:         if (isConstructor) {
+339:           implementedInterfaces = Lists.newArrayList();
+340:           for (JSTypeExpression t : info.getImplementedInterfaces()) {
+341:             JSType maybeInterType = t.evaluate(scope, typeRegistry);
+342:             if (maybeInterType != null &&
+343:                 maybeInterType.setValidator(new ImplementedTypeValidator())) {
+344:               implementedInterfaces.add((ObjectType) maybeInterType);
+345:             }
+346:           }
+347:         } else if (isInterface) {
+348:           reportWarning(
+349:               TypeCheck.CONFLICTING_IMPLEMENTED_TYPE, fnName);
+350:         } else {
+351:           reportWarning(CONSTRUCTOR_REQUIRED, "@implements", fnName);
+352:         }
+353:       }
+354: 
+355:       // extended interfaces (for interfaces only)
+356:       // We've already emitted a warning if this is not an interface.
+357:       if (isInterface) {
+358:         extendedInterfaces = Lists.newArrayList();
+359:         for (JSTypeExpression t : info.getExtendedInterfaces()) {
+360:           JSType maybeInterfaceType = t.evaluate(scope, typeRegistry);
+361:           if (maybeInterfaceType != null &&
+362:               maybeInterfaceType.setValidator(new ExtendedTypeValidator())) {
+363:             extendedInterfaces.add((ObjectType) maybeInterfaceType);
+364:           }
+365:         }
+366:       }
+367:     }
+368: 
+369:     return this;
+370:   }
+
+[3] com.google.javascript.rhino.jstype.InstanceObjectType#InstanceObjectType  (lines 56-58)
+56:   InstanceObjectType(JSTypeRegistry registry, FunctionType constructor) {
+57:     this(registry, constructor, false, null);
+58:   }
+
+[4] com.google.javascript.jscomp.FunctionTypeBuilder#buildAndRegister  (lines 582-644)
+582:   FunctionType buildAndRegister() {
+583:     if (returnType == null) {
+584:       // Infer return types.
+585:       // We need to be extremely conservative about this, because of two
+586:       // competing needs.
+587:       // 1) If we infer the return type of f too widely, then we won't be able
+588:       //    to assign f to other functions.
+589:       // 2) If we infer the return type of f too narrowly, then we won't be
+590:       //    able to override f in subclasses.
+591:       // So we only infer in cases where the user doesn't expect to write
+592:       // @return annotations--when it's very obvious that the function returns
+593:       // nothing.
+594:       if (!contents.mayHaveNonEmptyReturns() &&
+595:           !contents.mayHaveSingleThrow() &&
+596:           !contents.mayBeFromExterns()) {
+597:         returnType = typeRegistry.getNativeType(VOID_TYPE);
+598:         returnTypeInferred = true;
+599:       }
+600:     }
+601: 
+602:     if (returnType == null) {
+603:       returnType = typeRegistry.getNativeType(UNKNOWN_TYPE);
+604:     }
+605: 
+606:     if (parametersNode == null) {
+607:       throw new IllegalStateException(
+608:           "All Function types must have params and a return type");
+609:     }
+610: 
+611:     FunctionType fnType;
+612:     if (isConstructor) {
+613:       fnType = getOrCreateConstructor();
+614:     } else if (isInterface) {
+615:       fnType = typeRegistry.createInterfaceType(
+616:           fnName, contents.getSourceNode());
+617:       if (getScopeDeclaredIn().isGlobal() && !fnName.isEmpty()) {
+618:         typeRegistry.declareType(fnName, fnType.getInstanceType());
+619:       }
+620:       maybeSetBaseType(fnType);
+621:     } else {
+622:       fnType = new FunctionBuilder(typeRegistry)
+623:           .withName(fnName)
+624:           .withSourceNode(contents.getSourceNode())
+625:           .withParamsNode(parametersNode)
+626:           .withReturnType(returnType, returnTypeInferred)
+627:           .withTypeOfThis(thisType)
+628:           .withTemplateKeys(templateTypeNames)
+629:           .build();
+630:       maybeSetBaseType(fnType);
+631:     }
+632: 
+633:     if (implementedInterfaces != null) {
+634:       fnType.setImplementedInterfaces(implementedInterfaces);
+635:     }
+636: 
+637:     if (extendedInterfaces != null) {
+638:       fnType.setExtendedInterfaces(extendedInterfaces);
+639:     }
+640: 
+641:     typeRegistry.clearTemplateTypeNames();
+642: 
+643:     return fnType;
+644:   }
+
+[5] com.google.javascript.jscomp.RhinoErrorReporter#makeError  (lines 124-138)
+124:   private JSError makeError(String message, String sourceName, int line,
+125:       int lineOffset, CheckLevel defaultLevel) {
+126: 
+127:     // Try to see if the message is one of the rhino errors we want to
+128:     // expose as DiagnosticType by matching it with the regex key.
+129:     for (Entry<Pattern, DiagnosticType> entry : typeMap.entrySet()) {
+130:       if (entry.getKey().matcher(message).matches()) {
+131:         return JSError.make(
+132:             sourceName, line, lineOffset, entry.getValue(), message);
+133:       }
+134:     }
+135: 
+136:     return JSError.make(sourceName, line, lineOffset, defaultLevel,
+137:         PARSE_ERROR, message);
+138:   }
+
+[6] com.google.javascript.jscomp.TypeCheck#visit  (lines 477-854)
+477:   @Override
+478:   public void visit(NodeTraversal t, Node n, Node parent) {
+479:     JSType childType;
+480:     JSType leftType, rightType;
+481:     Node left, right;
+482:     // To be explicitly set to false if the node is not typeable.
+483:     boolean typeable = true;
+484: 
+485:     switch (n.getType()) {
+486:       case Token.CAST:
+487:         Node expr = n.getFirstChild();
+488:         ensureTyped(t, n, getJSType(expr));
+489: 
+490:         // If the cast, tightens the type apply it, so it is available post
+491:         // normalization.
+492:         JSType castType = getJSType(n);
+493:         JSType exprType = getJSType(expr);
+494:         if (castType.isSubtype(exprType)) {
+495:           expr.setJSType(castType);
+496:         }
+497:         break;
+498: 
+499:       case Token.NAME:
+500:         typeable = visitName(t, n, parent);
+501:         break;
+502: 
+503:       case Token.PARAM_LIST:
+504:         typeable = false;
+505:         break;
+506: 
+507:       case Token.COMMA:
+508:         ensureTyped(t, n, getJSType(n.getLastChild()));
+509:         break;
+510: 
+511:       case Token.TRUE:
+512:       case Token.FALSE:
+513:         ensureTyped(t, n, BOOLEAN_TYPE);
+514:         break;
+515: 
+516:       case Token.THIS:
+517:         ensureTyped(t, n, t.getScope().getTypeOfThis());
+518:         break;
+519: 
+520:       case Token.NULL:
+521:         ensureTyped(t, n, NULL_TYPE);
+522:         break;
+523: 
+524:       case Token.NUMBER:
+525:         ensureTyped(t, n, NUMBER_TYPE);
+526:         break;
+527: 
+528:       case Token.STRING:
+529:         ensureTyped(t, n, STRING_TYPE);
+530:         break;
+531: 
+532:       case Token.STRING_KEY:
+533:         typeable = false;
+534:         break;
+535: 
+536:       case Token.GETTER_DEF:
+537:       case Token.SETTER_DEF:
+538:         // Object literal keys are handled with OBJECTLIT
+539:         break;
+540: 
+541:       case Token.ARRAYLIT:
+542:         ensureTyped(t, n, ARRAY_TYPE);
+543:         break;
+544: 
+545:       case Token.REGEXP:
+546:         ensureTyped(t, n, REGEXP_TYPE);
+547:         break;
+548: 
+549:       case Token.GETPROP:
+550:         visitGetProp(t, n, parent);
+551:         typeable = !(parent.isAssign() &&
+552:                      parent.getFirstChild() == n);
+553:         break;
+554: 
+555:       case Token.GETELEM:
+556:         visitGetElem(t, n);
+557:         // The type of GETELEM is always unknown, so no point counting that.
+558:         // If that unknown leaks elsewhere (say by an assignment to another
+559:         // variable), then it will be counted.
+560:         typeable = false;
+561:         break;
+562: 
+563:       case Token.VAR:
+564:         visitVar(t, n);
+565:         typeable = false;
+566:         break;
+567: 
+568:       case Token.NEW:
+569:         visitNew(t, n);
+570:         break;
+571: 
+572:       case Token.CALL:
+573:         visitCall(t, n);
+574:         typeable = !parent.isExprResult();
+575:         break;
+576: 
+577:       case Token.RETURN:
+578:         visitReturn(t, n);
+579:         typeable = false;
+580:         break;
+581: 
+582:       case Token.DEC:
+583:       case Token.INC:
+584:         left = n.getFirstChild();
+585:         checkPropCreation(t, left);
+586:         validator.expectNumber(t, left, getJSType(left), "increment/decrement");
+587:         ensureTyped(t, n, NUMBER_TYPE);
+588:         break;
+589: 
+590:       case Token.NOT:
+591:         ensureTyped(t, n, BOOLEAN_TYPE);
+592:         break;
+593: 
+594:       case Token.VOID:
+595:         ensureTyped(t, n, VOID_TYPE);
+596:         break;
+597: 
+598:       case Token.TYPEOF:
+599:         ensureTyped(t, n, STRING_TYPE);
+600:         break;
+601: 
+602:       case Token.BITNOT:
+603:         childType = getJSType(n.getFirstChild());
+604:         if (!childType.matchesInt32Context()) {
+605:           report(t, n, BIT_OPERATION, NodeUtil.opToStr(n.getType()),
+606:               childType.toString());
+607:         }
+608:         ensureTyped(t, n, NUMBER_TYPE);
+609:         break;
+610: 
+611:       case Token.POS:
+612:       case Token.NEG:
+613:         left = n.getFirstChild();
+614:         validator.expectNumber(t, left, getJSType(left), "sign operator");
+615:         ensureTyped(t, n, NUMBER_TYPE);
+616:         break;
+617: 
+618:       case Token.EQ:
+619:       case Token.NE:
+620:       case Token.SHEQ:
+621:       case Token.SHNE: {
+622:         left = n.getFirstChild();
+623:         right = n.getLastChild();
+624: 
+625:         if (left.isTypeOf()) {
+626:           if (right.isString()) {
+627:             checkTypeofString(t, right, right.getString());
+628:           }
+629:         } else if (right.isTypeOf() && left.isString()) {
+630:           checkTypeofString(t, left, left.getString());
+631:         }
+632: 
+633:         leftType = getJSType(left);
+634:         rightType = getJSType(right);
+635: 
+636:         // We do not want to warn about explicit comparisons to VOID. People
+637:         // often do this if they think their type annotations screwed up.
+638:         //
+639:         // We do want to warn about cases where people compare things like
+640:         // (Array|null) == (Function|null)
+641:         // because it probably means they screwed up.
+642:         //
+643:         // This heuristic here is not perfect, but should catch cases we
+644:         // care about without too many false negatives.
+645:         JSType leftTypeRestricted = leftType.restrictByNotNullOrUndefined();
+646:         JSType rightTypeRestricted = rightType.restrictByNotNullOrUndefined();
+647: 
+648:         TernaryValue result = TernaryValue.UNKNOWN;
+649:         if (n.getType() == Token.EQ || n.getType() == Token.NE) {
+650:           result = leftTypeRestricted.testForEquality(rightTypeRestricted);
+651:           if (n.isNE()) {
+652:             result = result.not();
+653:           }
+654:         } else {
+655:           // SHEQ or SHNE
+656:           if (!leftTypeRestricted.canTestForShallowEqualityWith(
+657:                   rightTypeRestricted)) {
+658:             result = n.getType() == Token.SHEQ ?
+659:                 TernaryValue.FALSE : TernaryValue.TRUE;
+660:           }
+661:         }
+662: 
+663:         if (result != TernaryValue.UNKNOWN) {
+664:           report(t, n, DETERMINISTIC_TEST, leftType.toString(),
+665:               rightType.toString(), result.toString());
+666:         }
+667:         ensureTyped(t, n, BOOLEAN_TYPE);
+668:         break;
+669:       }
+670: 
+671:       case Token.LT:
+672:       case Token.LE:
+673:       case Token.GT:
+674:       case Token.GE:
+675:         leftType = getJSType(n.getFirstChild());
+676:         rightType = getJSType(n.getLastChild());
+677:         if (rightType.isNumber()) {
+678:           validator.expectNumber(
+679:               t, n, leftType, "left side of numeric comparison");
+680:         } else if (leftType.isNumber()) {
+681:           validator.expectNumber(
+682:               t, n, rightType, "right side of numeric comparison");
+683:         } else if (leftType.matchesNumberContext() &&
+684:                    rightType.matchesNumberContext()) {
+685:           // OK.
+686:         } else {
+687:           // Whether the comparison is numeric will be determined at runtime
+688:           // each time the expression is evaluated. Regardless, both operands
+689:           // should match a string context.
+690:           String message = "left side of comparison";
+691:           validator.expectString(t, n, leftType, message);
+692:           validator.expectNotNullOrUndefined(
+693:               t, n, leftType, message, getNativeType(STRING_TYPE));
+694:           message = "right side of comparison";
+695:           validator.expectString(t, n, rightType, message);
+696:           validator.expectNotNullOrUndefined(
+697:               t, n, rightType, message, getNativeType(STRING_TYPE));
+698:         }
+699:         ensureTyped(t, n, BOOLEAN_TYPE);
+700:         break;
+701: 
+702:       case Token.IN:
+703:         left = n.getFirstChild();
+704:         right = n.getLastChild();
+705:         rightType = getJSType(right);
+706:         validator.expectString(t, left, getJSType(left), "left side of 'in'");
+707:         validator.expectObject(t, n, rightType, "'in' requires an object");
+708:         if (rightType.isStruct()) {
+709:           report(t, right, IN_USED_WITH_STRUCT);
+710:         }
+711:         ensureTyped(t, n, BOOLEAN_TYPE);
+712:         break;
+713: 
+714:       case Token.INSTANCEOF:
+715:         left = n.getFirstChild();
+716:         right = n.getLastChild();
+717:         rightType = getJSType(right).restrictByNotNullOrUndefined();
+718:         validator.expectAnyObject(
+719:             t, left, getJSType(left), "deterministic instanceof yields false");
+720:         validator.expectActualObject(
+721:             t, right, rightType, "instanceof requires an object");
+722:         ensureTyped(t, n, BOOLEAN_TYPE);
+723:         break;
+724: 
+725:       case Token.ASSIGN:
+726:         visitAssign(t, n);
+727:         typeable = false;
+728:         break;
+729: 
+730:       case Token.ASSIGN_LSH:
+731:       case Token.ASSIGN_RSH:
+732:       case Token.ASSIGN_URSH:
+733:       case Token.ASSIGN_DIV:
+734:       case Token.ASSIGN_MOD:
+735:       case Token.ASSIGN_BITOR:
+736:       case Token.ASSIGN_BITXOR:
+737:       case Token.ASSIGN_BITAND:
+738:       case Token.ASSIGN_SUB:
+739:       case Token.ASSIGN_ADD:
+740:       case Token.ASSIGN_MUL:
+741:         checkPropCreation(t, n.getFirstChild());
+742:         // fall through
+743: 
+744:       case Token.LSH:
+745:       case Token.RSH:
+746:       case Token.URSH:
+747:       case Token.DIV:
+748:       case Token.MOD:
+749:       case Token.BITOR:
+750:       case Token.BITXOR:
+751:       case Token.BITAND:
+752:       case Token.SUB:
+753:       case Token.ADD:
+754:       case Token.MUL:
+755:         visitBinaryOperator(n.getType(), t, n);
+756:         break;
+757: 
+758:       case Token.DELPROP:
+759:         ensureTyped(t, n, BOOLEAN_TYPE);
+760:         break;
+761: 
+762:       case Token.CASE:
+763:         JSType switchType = getJSType(parent.getFirstChild());
+764:         JSType caseType = getJSType(n.getFirstChild());
+765:         validator.expectSwitchMatchesCase(t, n, switchType, caseType);
+766:         typeable = false;
+767:         break;
+768: 
+769:       case Token.WITH: {
+770:         Node child = n.getFirstChild();
+771:         childType = getJSType(child);
+772:         validator.expectObject(t, child, childType, "with requires an object");
+773:         typeable = false;
+774:         break;
+775:       }
+776: 
+777:       case Token.FUNCTION:
+778:         visitFunction(t, n);
+779:         break;
+780: 
+781:       // These nodes have no interesting type behavior.
+782:       case Token.LABEL:
+783:       case Token.LABEL_NAME:
+784:       case Token.SWITCH:
+785:       case Token.BREAK:
+786:       case Token.CATCH:
+787:       case Token.TRY:
+788:       case Token.SCRIPT:
+789:       case Token.EXPR_RESULT:
+790:       case Token.BLOCK:
+791:       case Token.EMPTY:
+792:       case Token.DEFAULT_CASE:
+793:       case Token.CONTINUE:
+794:       case Token.DEBUGGER:
+795:       case Token.THROW:
+796:         typeable = false;
+797:         break;
+798: 
+799:       // These nodes require data flow analysis.
+800:       case Token.DO:
+801:       case Token.IF:
+802:       case Token.WHILE:
+803:         typeable = false;
+804:         break;
+805: 
+806:       case Token.FOR:
+807:         if (NodeUtil.isForIn(n)) {
+808:           Node obj = n.getChildAtIndex(1);
+809:           if (getJSType(obj).isStruct()) {
+810:             report(t, obj, IN_USED_WITH_STRUCT);
+811:           }
+812:         }
+813:         typeable = false;
+814:         break;
+815: 
+816:       // These nodes are typed during the type inference.
+817:       case Token.AND:
+818:       case Token.HOOK:
+819:       case Token.OBJECTLIT:
+820:       case Token.OR:
+821:         if (n.getJSType() != null) { // If we didn't run type inference.
+822:           ensureTyped(t, n);
+823:         } else {
+824:           // If this is an enum, then give that type to the objectlit as well.
+825:           if ((n.isObjectLit())
+826:               && (parent.getJSType() instanceof EnumType)) {
+827:             ensureTyped(t, n, parent.getJSType());
+828:           } else {
+829:             ensureTyped(t, n);
+830:           }
+831:         }
+832:         if (n.isObjectLit()) {
+833:           JSType typ = getJSType(n);
+834:           for (Node key : n.children()) {
+835:             visitObjLitKey(t, key, n, typ);
+836:           }
+837:         }
+838:         break;
+839: 
+840:       default:
+841:         report(t, n, UNEXPECTED_TOKEN, Token.name(n.getType()));
+842:         ensureTyped(t, n);
+843:         break;
+844:     }
+845: 
+846:     // Don't count externs since the user's code may not even use that part.
+847:     typeable = typeable && !inExterns;
+848: 
+849:     if (typeable) {
+850:       doPercentTypedAccounting(t, n);
+851:     }
+852: 
+853:     checkNoTypeCheckSection(n, false);
+854:   }
+
+[7] com.google.javascript.rhino.jstype.NamedType#lookupViaProperties  (lines 266-300)
+266:   private JSType lookupViaProperties( ErrorReporter t,
+267:       StaticScope<JSType> enclosing) {
+268:     String[] componentNames = reference.split("\\.", -1);
+269:     if (componentNames[0].length() == 0) {
+270:       return null;
+271:     }
+272:     StaticSlot<JSType> slot = enclosing.getSlot(componentNames[0]);
+273:     if (slot == null) {
+274:       return null;
+275:     }
+276:     // If the first component has a type of 'Unknown', then any type
+277:     // names using it should be regarded as silently 'Unknown' rather than be
+278:     // noisy about it.
+279:     JSType slotType = slot.getType();
+280:     if (slotType == null || slotType.isAllType() || slotType.isNoType()) {
+281:       return null;
+282:     }
+283:     JSType value = getTypedefType(t, slot, componentNames[0]);
+284:     if (value == null) {
+285:       return null;
+286:     }
+287: 
+288:     // resolving component by component
+289:     for (int i = 1; i < componentNames.length; i++) {
+290:       ObjectType parentClass = ObjectType.cast(value);
+291:       if (parentClass == null) {
+292:         return null;
+293:       }
+294:       if (componentNames[i].length() == 0) {
+295:         return null;
+296:       }
+297:       value = parentClass.getPropertyType(componentNames[i]);
+298:     }
+299:     return value;
+300:   }
+
+[8] com.google.javascript.rhino.jstype.ObjectType#detectInheritanceCycle  (lines 204-212)
+204:   final boolean detectInheritanceCycle() {
+205:     // TODO(user): This should get moved to preventing cycles in FunctionTypeBuilder
+206:     // rather than removing them here after they have been created.
+207:     // Also, this doesn't do the right thing for extended interfaces, though that is
+208:     // masked by another bug.
+209:     return detectImplicitPrototypeCycle()
+210:         || Iterables.contains(this.getCtorImplementedInterfaces(), this)
+211:         || Iterables.contains(this.getCtorExtendedInterfaces(), this);
+212:   }
+
+[9] com.google.javascript.rhino.JSDocInfoBuilder#recordExtendedInterface  (lines 986-993)
+986:   public boolean recordExtendedInterface(JSTypeExpression interfaceType) {
+987:     if (currentInfo.addExtendedInterface(interfaceType)) {
+988:       populated = true;
+989:       return true;
+990:     } else {
+991:       return false;
+992:     }
+993:   }
+
+[10] com.google.javascript.jscomp.NodeTraversal#traverseWithScope  (lines 336-345)
+336:   void traverseWithScope(Node root, Scope s) {
+337:     Preconditions.checkState(s.isGlobal());
+338: 
+339:     inputId = null;
+340:     sourceName = "";
+341:     curNode = root;
+342:     pushScope(s);
+343:     traverseBranch(root, null);
+344:     popScope();
+345:   }
+
+[11] com.google.javascript.jscomp.TypeCheck#checkInterfaceConflictProperties  (lines 1566-1592)
+1566:   private void checkInterfaceConflictProperties(NodeTraversal t, Node n,
+1567:       String functionName, HashMap<String, ObjectType> properties,
+1568:       HashMap<String, ObjectType> currentProperties,
+1569:       ObjectType interfaceType) {
+1570:     ObjectType implicitProto = interfaceType.getImplicitPrototype();
+1571:     Set<String> currentPropertyNames;
+1572:       // This can be the case if interfaceType is proxy to a non-existent
+1573:       // object (which is a bad type annotation, but shouldn't crash).
+1574:       currentPropertyNames = implicitProto.getOwnPropertyNames();
+1575:     for (String name : currentPropertyNames) {
+1576:       ObjectType oType = properties.get(name);
+1577:       if (oType != null) {
+1578:         if (!interfaceType.getPropertyType(name).isEquivalentTo(
+1579:             oType.getPropertyType(name))) {
+1580:           compiler.report(
+1581:               t.makeError(n, INCOMPATIBLE_EXTENDED_PROPERTY_TYPE,
+1582:                   functionName, name, oType.toString(),
+1583:                   interfaceType.toString()));
+1584:         }
+1585:       }
+1586:       currentProperties.put(name, interfaceType);
+1587:     }
+1588:     for (ObjectType iType : interfaceType.getCtorExtendedInterfaces()) {
+1589:       checkInterfaceConflictProperties(t, n, functionName, properties,
+1590:           currentProperties, iType);
+1591:     }
+1592:   }
+
+[12] com.google.javascript.jscomp.NodeTraversal#traverseBranch  (lines 477-506)
+477:   @SuppressWarnings("fallthrough")
+478:   private void traverseBranch(Node n, Node parent) {
+479:     int type = n.getType();
+480:     if (type == Token.SCRIPT) {
+481:       inputId = n.getInputId();
+482:       sourceName = getSourceName(n);
+483:     }
+484: 
+485:     curNode = n;
+486:     if (!callback.shouldTraverse(this, n, parent)) return;
+487: 
+488:     switch (type) {
+489:       case Token.FUNCTION:
+490:         traverseFunction(n, parent);
+491:         break;
+492: 
+493:       default:
+494:         for (Node child = n.getFirstChild(); child != null; ) {
+495:           // child could be replaced, in which case our child node
+496:           // would no longer point to the true next
+497:           Node next = child.getNext();
+498:           traverseBranch(child, n);
+499:           child = next;
+500:         }
+501:         break;
+502:     }
+503: 
+504:     curNode = n;
+505:     callback.visit(this, n, parent);
+506:   }
+
+[13] com.google.javascript.rhino.jstype.NamedType#handleUnresolvedType  (lines 338-361)
+338:   private void handleUnresolvedType(
+339:       ErrorReporter t, boolean ignoreForwardReferencedTypes) {
+340:     if (registry.isLastGeneration()) {
+341:       boolean isForwardDeclared =
+342:           ignoreForwardReferencedTypes &&
+343:           registry.isForwardDeclaredType(reference);
+344:       if (!isForwardDeclared && registry.isLastGeneration()) {
+345:         t.warning("Bad type annotation. Unknown type " + reference,
+346:             sourceName, lineno, charno);
+347:       } else {
+348:         setReferencedType(
+349:             registry.getNativeObjectType(
+350:                 JSTypeNative.NO_RESOLVED_TYPE));
+351: 
+352:         if (registry.isLastGeneration() && validator != null) {
+353:           validator.apply(getReferencedType());
+354:         }
+355:       }
+356: 
+357:       setResolvedTypeInternal(getReferencedType());
+358:     } else {
+359:       setResolvedTypeInternal(this);
+360:     }
+361:   }
+
+[14] com.google.javascript.jscomp.parsing.JsDocInfoParser#checkExtendedTypes  (lines 993-1008)
+993:   private void checkExtendedTypes(List<ExtendedTypeInfo> extendedTypes) {
+994:     for (ExtendedTypeInfo typeInfo : extendedTypes) {
+995:       // If interface, record the multiple extended interfaces
+996:       if (jsdocBuilder.isInterfaceRecorded()) {
+997:         if (!jsdocBuilder.recordExtendedInterface(typeInfo.type)) {
+998:           parser.addParserWarning("msg.jsdoc.extends.duplicate",
+999:               typeInfo.lineno, typeInfo.charno);
+1000:         }
+1001:       } else {
+1002:         if (!jsdocBuilder.recordBaseType(typeInfo.type)) {
+1003:           parser.addTypeWarning("msg.jsdoc.incompat.type",
+1004:               typeInfo.lineno, typeInfo.charno);
+1005:         }
+1006:       }
+1007:     }
+1008:   }
+
+[15] com.google.javascript.rhino.jstype.ProxyObjectType#getReferencedObjTypeInternal  (lines 76-78)
+76:   ObjectType getReferencedObjTypeInternal() {
+77:     return referencedObjType;
+78:   }
+
+[16] com.google.javascript.rhino.JSDocInfo#getExtendedInterfaces  (lines 1323-1328)
+1323:   public List<JSTypeExpression> getExtendedInterfaces() {
+1324:     if (info == null || info.extendedInterfaces == null) {
+1325:       return ImmutableList.of();
+1326:     }
+1327:     return Collections.unmodifiableList(info.extendedInterfaces);
+1328:   }
+
+[17] com.google.javascript.rhino.jstype.NamedType#getReferencedType  (lines 146-148)
+146:   public JSType getReferencedType() {
+147:     return getReferencedTypeInternal();
+148:   }
+
+[18] com.google.javascript.rhino.jstype.JSTypeRegistry#getType  (lines 914-926)
+914:   public JSType getType(StaticScope<JSType> scope, String jsTypeName,
+915:       String sourceName, int lineno, int charno) {
+916:     JSType type = getType(jsTypeName);
+917:     if (type == null) {
+918:       // TODO(user): Each instance should support named type creation using
+919:       // interning.
+920:       NamedType namedType =
+921:           new NamedType(this, jsTypeName, sourceName, lineno, charno);
+922:       unresolvedNamedTypes.put(scope, namedType);
+923:       type = namedType;
+924:     }
+925:     return type;
+926:   }
+
+[19] com.google.javascript.rhino.jstype.NamedType#resolveInternal  (lines 183-212)
+183:   @Override
+184:   JSType resolveInternal(ErrorReporter t, StaticScope<JSType> enclosing) {
+185:     // TODO(user): Investigate whether it is really necessary to keep two
+186:     // different mechanisms for resolving named types, and if so, which order
+187:     // makes more sense. Now, resolution via registry is first in order to
+188:     // avoid triggering the warnings built into the resolution via properties.
+189:     boolean resolved = resolveViaRegistry(t, enclosing);
+190:     if (detectInheritanceCycle()) {
+191:       handleTypeCycle(t);
+192:     }
+193: 
+194:     if (resolved) {
+195:       super.resolveInternal(t, enclosing);
+196:       finishPropertyContinuations();
+197:       return registry.isLastGeneration() ?
+198:           getReferencedType() : this;
+199:     }
+200: 
+201:     resolveViaProperties(t, enclosing);
+202:     if (detectInheritanceCycle()) {
+203:       handleTypeCycle(t);
+204:     }
+205: 
+206:     super.resolveInternal(t, enclosing);
+207:     if (isResolved()) {
+208:       finishPropertyContinuations();
+209:     }
+210:     return registry.isLastGeneration() ?
+211:         getReferencedType() : this;
+212:   }
+
+[20] com.google.javascript.rhino.jstype.JSTypeRegistry#resolveTypesInScope  (lines 941-965)
+941:   public void resolveTypesInScope(StaticScope<JSType> scope) {
+942:     for (NamedType type : unresolvedNamedTypes.get(scope)) {
+943:       type.resolve(reporter, scope);
+944:     }
+945: 
+946:     resolvedNamedTypes.putAll(scope, unresolvedNamedTypes.removeAll(scope));
+947: 
+948:     if (scope != null && scope.getParentScope() == null) {
+949:       // By default, the global "this" type is just an anonymous object.
+950:       // If the user has defined a Window type, make the Window the
+951:       // implicit prototype of "this".
+952:       PrototypeObjectType globalThis = (PrototypeObjectType) getNativeType(
+953:           JSTypeNative.GLOBAL_THIS);
+954:       JSType windowType = getType("Window");
+955:       if (globalThis.isUnknownType()) {
+956:         ObjectType windowObjType = ObjectType.cast(windowType);
+957:         if (windowObjType != null) {
+958:           globalThis.setImplicitPrototype(windowObjType);
+959:         } else {
+960:           globalThis.setImplicitPrototype(
+961:               getNativeObjectType(JSTypeNative.OBJECT_TYPE));
+962:         }
+963:       }
+964:     }
+965:   }
+
+[21] com.google.javascript.jscomp.parsing.JsDocInfoParser#parse  (lines 182-991)
+182:   boolean parse() {
+183:     int lineno;
+184:     int charno;
+185: 
+186:     // JSTypes are represented as Rhino AST nodes, and then resolved later.
+187:     JSTypeExpression type;
+188: 
+189:     state = State.SEARCHING_ANNOTATION;
+190:     skipEOLs();
+191: 
+192:     JsDocToken token = next();
+193: 
+194:     List<ExtendedTypeInfo> extendedTypes = Lists.newArrayList();
+195: 
+196:     // Always record that we have a comment.
+197:     if (jsdocBuilder.shouldParseDocumentation()) {
+198:       ExtractionInfo blockInfo = extractBlockComment(token);
+199:       token = blockInfo.token;
+200:       if (!blockInfo.string.isEmpty()) {
+201:         jsdocBuilder.recordBlockDescription(blockInfo.string);
+202:       }
+203:     } else {
+204:       if (token != JsDocToken.ANNOTATION &&
+205:           token != JsDocToken.EOC) {
+206:         // Mark that there was a description, but don't bother marking
+207:         // what it was.
+208:         jsdocBuilder.recordBlockDescription("");
+209:       }
+210:     }
+211: 
+212:     // Parse the actual JsDoc.
+213:     retry: for (;;) {
+214:       switch (token) {
+215:         case ANNOTATION:
+216:           if (state == State.SEARCHING_ANNOTATION) {
+217:             state = State.SEARCHING_NEWLINE;
+218:             lineno = stream.getLineno();
+219:             charno = stream.getCharno();
+220: 
+221:             String annotationName = stream.getString();
+222:             Annotation annotation = annotationNames.get(annotationName);
+223:             if (annotation == null) {
+224:               parser.addParserWarning("msg.bad.jsdoc.tag", annotationName,
+225:                   stream.getLineno(), stream.getCharno());
+226:             } else {
+227:               // Mark the beginning of the annotation.
+228:               jsdocBuilder.markAnnotation(annotationName, lineno, charno);
+229: 
+230:               switch (annotation) {
+231:                 case AUTHOR:
+232:                   if (jsdocBuilder.shouldParseDocumentation()) {
+233:                     ExtractionInfo authorInfo = extractSingleLineBlock();
+234:                     String author = authorInfo.string;
+235: 
+236:                     if (author.length() == 0) {
+237:                       parser.addParserWarning("msg.jsdoc.authormissing",
+238:                           stream.getLineno(), stream.getCharno());
+239:                     } else {
+240:                       jsdocBuilder.addAuthor(author);
+241:                     }
+242:                     token = authorInfo.token;
+243:                   } else {
+244:                     token = eatTokensUntilEOL(token);
+245:                   }
+246:                   continue retry;
+247: 
+248:                 case CONSISTENTIDGENERATOR:
+249:                   if (!jsdocBuilder.recordConsistentIdGenerator()) {
+250:                     parser.addParserWarning("msg.jsdoc.consistidgen",
+251:                       stream.getLineno(), stream.getCharno());
+252:                   }
+253:                   token = eatTokensUntilEOL();
+254:                   continue retry;
+255: 
+256:                 case STRUCT:
+257:                   if (!jsdocBuilder.recordStruct()) {
+258:                     parser.addTypeWarning("msg.jsdoc.incompat.type",
+259:                                           stream.getLineno(),
+260:                                           stream.getCharno());
+261:                   }
+262:                   token = eatTokensUntilEOL();
+263:                   continue retry;
+264: 
+265:                 case DICT:
+266:                   if (!jsdocBuilder.recordDict()) {
+267:                     parser.addTypeWarning("msg.jsdoc.incompat.type",
+268:                                           stream.getLineno(),
+269:                                           stream.getCharno());
+270:                   }
+271:                   token = eatTokensUntilEOL();
+272:                   continue retry;
+273: 
+274:                 case CONSTRUCTOR:
+275:                   if (!jsdocBuilder.recordConstructor()) {
+276:                     if (jsdocBuilder.isInterfaceRecorded()) {
+277:                       parser.addTypeWarning("msg.jsdoc.interface.constructor",
+278:                           stream.getLineno(), stream.getCharno());
+279:                     } else {
+280:                       parser.addTypeWarning("msg.jsdoc.incompat.type",
+281:                           stream.getLineno(), stream.getCharno());
+282:                     }
+283:                   }
+284:                   token = eatTokensUntilEOL();
+285:                   continue retry;
+286: 
+287:                 case DEPRECATED:
+288:                   if (!jsdocBuilder.recordDeprecated()) {
+289:                     parser.addParserWarning("msg.jsdoc.deprecated",
+290:                         stream.getLineno(), stream.getCharno());
+291:                   }
+292: 
+293:                   // Find the reason/description, if any.
+294:                   ExtractionInfo reasonInfo =
+295:                       extractMultilineTextualBlock(token);
+296: 
+297:                   String reason = reasonInfo.string;
+298: 
+299:                   if (reason.length() > 0) {
+300:                     jsdocBuilder.recordDeprecationReason(reason);
+301:                   }
+302: 
+303:                   token = reasonInfo.token;
+304:                   continue retry;
+305: 
+306:                 case INTERFACE:
+307:                   if (!jsdocBuilder.recordInterface()) {
+308:                     if (jsdocBuilder.isConstructorRecorded()) {
+309:                       parser.addTypeWarning("msg.jsdoc.interface.constructor",
+310:                           stream.getLineno(), stream.getCharno());
+311:                     } else {
+312:                       parser.addTypeWarning("msg.jsdoc.incompat.type",
+313:                           stream.getLineno(), stream.getCharno());
+314:                     }
+315:                   }
+316:                   token = eatTokensUntilEOL();
+317:                   continue retry;
+318: 
+319:                 case DESC:
+320:                   if (jsdocBuilder.isDescriptionRecorded()) {
+321:                     parser.addParserWarning("msg.jsdoc.desc.extra",
+322:                         stream.getLineno(), stream.getCharno());
+323:                     token = eatTokensUntilEOL();
+324:                     continue retry;
+325:                   } else {
+326:                     ExtractionInfo descriptionInfo =
+327:                         extractMultilineTextualBlock(token);
+328: 
+329:                     String description = descriptionInfo.string;
+330: 
+331:                     jsdocBuilder.recordDescription(description);
+332:                     token = descriptionInfo.token;
+333:                     continue retry;
+334:                   }
+335: 
+336:                 case FILE_OVERVIEW:
+337:                   String fileOverview = "";
+338:                   if (jsdocBuilder.shouldParseDocumentation()) {
+339:                     ExtractionInfo fileOverviewInfo =
+340:                         extractMultilineTextualBlock(token,
+341:                             WhitespaceOption.TRIM);
+342: 
+343:                     fileOverview = fileOverviewInfo.string;
+344: 
+345:                     token = fileOverviewInfo.token;
+346:                   } else {
+347:                     token = eatTokensUntilEOL(token);
+348:                   }
+349: 
+350:                   if (!jsdocBuilder.recordFileOverview(fileOverview)) {
+351:                     parser.addParserWarning("msg.jsdoc.fileoverview.extra",
+352:                         stream.getLineno(), stream.getCharno());
+353:                   }
+354:                   continue retry;
+355: 
+356:                 case LICENSE:
+357:                 case PRESERVE:
+358:                   ExtractionInfo preserveInfo =
+359:                       extractMultilineTextualBlock(token,
+360:                                                    WhitespaceOption.PRESERVE);
+361: 
+362:                   String preserve = preserveInfo.string;
+363: 
+364:                   if (preserve.length() > 0) {
+365:                     if (fileLevelJsDocBuilder != null) {
+366:                       fileLevelJsDocBuilder.append(preserve);
+367:                     }
+368:                   }
+369: 
+370:                   token = preserveInfo.token;
+371:                   continue retry;
+372: 
+373:                 case ENUM:
+374:                   token = next();
+375:                   lineno = stream.getLineno();
+376:                   charno = stream.getCharno();
+377: 
+378:                   type = null;
+379:                   if (token != JsDocToken.EOL && token != JsDocToken.EOC) {
+380:                     type = createJSTypeExpression(
+381:                         parseAndRecordTypeNode(token));
+382:                   }
+383: 
+384:                   if (type == null) {
+385:                     type = createJSTypeExpression(newStringNode("number"));
+386:                   }
+387:                   if (!jsdocBuilder.recordEnumParameterType(type)) {
+388:                     parser.addTypeWarning(
+389:                         "msg.jsdoc.incompat.type", lineno, charno);
+390:                   }
+391:                   token = eatTokensUntilEOL(token);
+392:                   continue retry;
+393: 
+394:                 case EXPORT:
+395:                   if (!jsdocBuilder.recordExport()) {
+396:                     parser.addParserWarning("msg.jsdoc.export",
+397:                         stream.getLineno(), stream.getCharno());
+398:                   }
+399:                   token = eatTokensUntilEOL();
+400:                   continue retry;
+401: 
+402:                 case EXPOSE:
+403:                   if (!jsdocBuilder.recordExpose()) {
+404:                     parser.addParserWarning("msg.jsdoc.expose",
+405:                         stream.getLineno(), stream.getCharno());
+406:                   }
+407:                   token = eatTokensUntilEOL();
+408:                   continue retry;
+409: 
+410:                 case EXTERNS:
+411:                   if (!jsdocBuilder.recordExterns()) {
+412:                     parser.addParserWarning("msg.jsdoc.externs",
+413:                         stream.getLineno(), stream.getCharno());
+414:                   }
+415:                   token = eatTokensUntilEOL();
+416:                   continue retry;
+417: 
+418:                 case JAVA_DISPATCH:
+419:                   if (!jsdocBuilder.recordJavaDispatch()) {
+420:                     parser.addParserWarning("msg.jsdoc.javadispatch",
+421:                         stream.getLineno(), stream.getCharno());
+422:                   }
+423:                   token = eatTokensUntilEOL();
+424:                   continue retry;
+425: 
+426:                 case EXTENDS:
+427:                 case IMPLEMENTS:
+428:                   skipEOLs();
+429:                   token = next();
+430:                   lineno = stream.getLineno();
+431:                   charno = stream.getCharno();
+432:                   boolean matchingRc = false;
+433: 
+434:                   if (token == JsDocToken.LC) {
+435:                     token = next();
+436:                     matchingRc = true;
+437:                   }
+438: 
+439:                   if (token == JsDocToken.STRING) {
+440:                     Node typeNode = parseAndRecordTypeNameNode(
+441:                         token, lineno, charno, matchingRc);
+442: 
+443:                     lineno = stream.getLineno();
+444:                     charno = stream.getCharno();
+445: 
+446:                     typeNode = wrapNode(Token.BANG, typeNode);
+447:                     type = createJSTypeExpression(typeNode);
+448: 
+449:                     if (annotation == Annotation.EXTENDS) {
+450:                       // record the extended type, check later
+451:                       extendedTypes.add(new ExtendedTypeInfo(
+452:                           type, stream.getLineno(), stream.getCharno()));
+453:                     } else {
+454:                       Preconditions.checkState(
+455:                           annotation == Annotation.IMPLEMENTS);
+456:                       if (!jsdocBuilder.recordImplementedInterface(type)) {
+457:                         parser.addTypeWarning("msg.jsdoc.implements.duplicate",
+458:                             lineno, charno);
+459:                       }
+460:                     }
+461:                     token = next();
+462:                     if (matchingRc) {
+463:                       if (token != JsDocToken.RC) {
+464:                         parser.addTypeWarning("msg.jsdoc.missing.rc",
+465:                             stream.getLineno(), stream.getCharno());
+466:                       }
+467:                     } else if (token != JsDocToken.EOL &&
+468:                         token != JsDocToken.EOF && token != JsDocToken.EOC) {
+469:                       parser.addTypeWarning("msg.end.annotation.expected",
+470:                           stream.getLineno(), stream.getCharno());
+471:                     }
+472:                   } else {
+473:                     parser.addTypeWarning("msg.no.type.name", lineno, charno);
+474:                   }
+475:                   token = eatTokensUntilEOL(token);
+476:                   continue retry;
+477: 
+478:                 case HIDDEN:
+479:                   if (!jsdocBuilder.recordHiddenness()) {
+480:                     parser.addParserWarning("msg.jsdoc.hidden",
+481:                         stream.getLineno(), stream.getCharno());
+482:                   }
+483:                   token = eatTokensUntilEOL();
+484:                   continue retry;
+485: 
+486:                 case LENDS:
+487:                   skipEOLs();
+488: 
+489:                   matchingRc = false;
+490:                   if (match(JsDocToken.LC)) {
+491:                     token = next();
+492:                     matchingRc = true;
+493:                   }
+494: 
+495:                   if (match(JsDocToken.STRING)) {
+496:                     token = next();
+497:                     if (!jsdocBuilder.recordLends(stream.getString())) {
+498:                       parser.addTypeWarning("msg.jsdoc.lends.incompatible",
+499:                           stream.getLineno(), stream.getCharno());
+500:                     }
+501:                   } else {
+502:                     parser.addTypeWarning("msg.jsdoc.lends.missing",
+503:                         stream.getLineno(), stream.getCharno());
+504:                   }
+505: 
+506:                   if (matchingRc && !match(JsDocToken.RC)) {
+507:                     parser.addTypeWarning("msg.jsdoc.missing.rc",
+508:                         stream.getLineno(), stream.getCharno());
+509:                   }
+510:                   token = eatTokensUntilEOL();
+511:                   continue retry;
+512: 
+513:                 case MEANING:
+514:                   ExtractionInfo meaningInfo =
+515:                       extractMultilineTextualBlock(token);
+516:                   String meaning = meaningInfo.string;
+517:                   token = meaningInfo.token;
+518:                   if (!jsdocBuilder.recordMeaning(meaning)) {
+519:                     parser.addParserWarning("msg.jsdoc.meaning.extra",
+520:                         stream.getLineno(), stream.getCharno());
+521:                   }
+522:                   continue retry;
+523: 
+524:                 case NO_ALIAS:
+525:                   if (!jsdocBuilder.recordNoAlias()) {
+526:                     parser.addParserWarning("msg.jsdoc.noalias",
+527:                         stream.getLineno(), stream.getCharno());
+528:                   }
+529:                   token = eatTokensUntilEOL();
+530:                   continue retry;
+531: 
+532:                 case NO_COMPILE:
+533:                   if (!jsdocBuilder.recordNoCompile()) {
+534:                     parser.addParserWarning("msg.jsdoc.nocompile",
+535:                         stream.getLineno(), stream.getCharno());
+536:                   }
+537:                   token = eatTokensUntilEOL();
+538:                   continue retry;
+539: 
+540:                 case NO_TYPE_CHECK:
+541:                   if (!jsdocBuilder.recordNoTypeCheck()) {
+542:                     parser.addParserWarning("msg.jsdoc.nocheck",
+543:                         stream.getLineno(), stream.getCharno());
+544:                   }
+545:                   token = eatTokensUntilEOL();
+546:                   continue retry;
+547: 
+548:                 case NOT_IMPLEMENTED:
+549:                   token = eatTokensUntilEOL();
+550:                   continue retry;
+551: 
+552:                 case INHERIT_DOC:
+553:                 case OVERRIDE:
+554:                   if (!jsdocBuilder.recordOverride()) {
+555:                     parser.addTypeWarning("msg.jsdoc.override",
+556:                         stream.getLineno(), stream.getCharno());
+557:                   }
+558:                   token = eatTokensUntilEOL();
+559:                   continue retry;
+560: 
+561:                 case THROWS:
+562:                   skipEOLs();
+563:                   token = next();
+564:                   lineno = stream.getLineno();
+565:                   charno = stream.getCharno();
+566:                   type = null;
+567: 
+568:                   if (token == JsDocToken.LC) {
+569:                     type = createJSTypeExpression(
+570:                         parseAndRecordTypeNode(token));
+571: 
+572:                     if (type == null) {
+573:                       // parsing error reported during recursive descent
+574:                       // recovering parsing
+575:                       token = eatTokensUntilEOL();
+576:                       continue retry;
+577:                     }
+578:                   }
+579: 
+580:                   // *Update* the token to that after the type annotation.
+581:                   token = current();
+582: 
+583:                   // Save the throw type.
+584:                   jsdocBuilder.recordThrowType(type);
+585: 
+586:                   // Find the throw's description (if applicable).
+587:                   if (jsdocBuilder.shouldParseDocumentation()) {
+588:                     ExtractionInfo descriptionInfo =
+589:                         extractMultilineTextualBlock(token);
+590: 
+591:                     String description = descriptionInfo.string;
+592: 
+593:                     if (description.length() > 0) {
+594:                       jsdocBuilder.recordThrowDescription(type, description);
+595:                     }
+596: 
+597:                     token = descriptionInfo.token;
+598:                   } else {
+599:                     token = eatTokensUntilEOL(token);
+600:                   }
+601:                   continue retry;
+602: 
+603:                 case PARAM:
+604:                   skipEOLs();
+605:                   token = next();
+606:                   lineno = stream.getLineno();
+607:                   charno = stream.getCharno();
+608:                   type = null;
+609: 
+610:                   if (token == JsDocToken.LC) {
+611:                     type = createJSTypeExpression(
+612:                         parseAndRecordParamTypeNode(token));
+613: 
+614:                     if (type == null) {
+615:                       // parsing error reported during recursive descent
+616:                       // recovering parsing
+617:                       token = eatTokensUntilEOL();
+618:                       continue retry;
+619:                     }
+620:                     skipEOLs();
+621:                     token = next();
+622:                     lineno = stream.getLineno();
+623:                     charno = stream.getCharno();
+624:                   }
+625: 
+626:                   String name = null;
+627:                   boolean isBracketedParam = JsDocToken.LB == token;
+628:                   if (isBracketedParam) {
+629:                     token = next();
+630:                   }
+631: 
+632:                   if (JsDocToken.STRING != token) {
+633:                     parser.addTypeWarning("msg.missing.variable.name",
+634:                         lineno, charno);
+635:                   } else {
+636:                     name = stream.getString();
+637: 
+638:                     if (isBracketedParam) {
+639:                       token = next();
+640: 
+641:                       // Throw out JsDocToolkit's "default" parameter
+642:                       // annotation.  It makes no sense under our type
+643:                       // system.
+644:                       if (JsDocToken.EQUALS == token) {
+645:                         token = next();
+646:                         if (JsDocToken.STRING == token) {
+647:                           token = next();
+648:                         }
+649:                       }
+650: 
+651:                       if (JsDocToken.RB != token) {
+652:                         reportTypeSyntaxWarning("msg.jsdoc.missing.rb");
+653:                       } else if (type != null) {
+654:                         // Make the type expression optional, if it isn't
+655:                         // already.
+656:                         type = JSTypeExpression.makeOptionalArg(type);
+657:                       }
+658:                     }
+659: 
+660:                     // If the param name has a DOT in it, just throw it out
+661:                     // quietly. We do not handle the JsDocToolkit method
+662:                     // for handling properties of params.
+663:                     if (name.indexOf('.') > -1) {
+664:                       name = null;
+665:                     } else if (!jsdocBuilder.recordParameter(name, type)) {
+666:                       if (jsdocBuilder.hasParameter(name)) {
+667:                         parser.addTypeWarning("msg.dup.variable.name", name,
+668:                             lineno, charno);
+669:                       } else {
+670:                         parser.addTypeWarning("msg.jsdoc.incompat.type", name,
+671:                             lineno, charno);
+672:                       }
+673:                     }
+674:                   }
+675: 
+676:                   if (name == null) {
+677:                     token = eatTokensUntilEOL(token);
+678:                     continue retry;
+679:                   }
+680: 
+681:                   jsdocBuilder.markName(name, sourceFile, lineno, charno);
+682: 
+683:                   // Find the parameter's description (if applicable).
+684:                   if (jsdocBuilder.shouldParseDocumentation()) {
+685:                     ExtractionInfo paramDescriptionInfo =
+686:                         extractMultilineTextualBlock(token);
+687: 
+688:                     String paramDescription = paramDescriptionInfo.string;
+689: 
+690:                     if (paramDescription.length() > 0) {
+691:                       jsdocBuilder.recordParameterDescription(name,
+692:                           paramDescription);
+693:                     }
+694: 
+695:                     token = paramDescriptionInfo.token;
+696:                   } else {
+697:                     token = eatTokensUntilEOL(token);
+698:                   }
+699:                   continue retry;
+700: 
+701:                 case PRESERVE_TRY:
+702:                   if (!jsdocBuilder.recordPreserveTry()) {
+703:                     parser.addParserWarning("msg.jsdoc.preservertry",
+704:                         stream.getLineno(), stream.getCharno());
+705:                   }
+706:                   token = eatTokensUntilEOL();
+707:                   continue retry;
+708: 
+709:                 case NO_SHADOW:
+710:                   if (!jsdocBuilder.recordNoShadow()) {
+711:                     parser.addParserWarning("msg.jsdoc.noshadow",
+712:                         stream.getLineno(), stream.getCharno());
+713:                   }
+714:                   token = eatTokensUntilEOL();
+715:                   continue retry;
+716: 
+717:                 case NO_SIDE_EFFECTS:
+718:                   if (!jsdocBuilder.recordNoSideEffects()) {
+719:                     parser.addParserWarning("msg.jsdoc.nosideeffects",
+720:                         stream.getLineno(), stream.getCharno());
+721:                   }
+722:                   token = eatTokensUntilEOL();
+723:                   continue retry;
+724: 
+725:                 case MODIFIES:
+726:                   token = parseModifiesTag(next());
+727:                   continue retry;
+728: 
+729:                 case IMPLICIT_CAST:
+730:                   if (!jsdocBuilder.recordImplicitCast()) {
+731:                     parser.addTypeWarning("msg.jsdoc.implicitcast",
+732:                         stream.getLineno(), stream.getCharno());
+733:                   }
+734:                   token = eatTokensUntilEOL();
+735:                   continue retry;
+736: 
+737:                 case SEE:
+738:                   if (jsdocBuilder.shouldParseDocumentation()) {
+739:                     ExtractionInfo referenceInfo = extractSingleLineBlock();
+740:                     String reference = referenceInfo.string;
+741: 
+742:                     if (reference.length() == 0) {
+743:                       parser.addParserWarning("msg.jsdoc.seemissing",
+744:                           stream.getLineno(), stream.getCharno());
+745:                     } else {
+746:                       jsdocBuilder.addReference(reference);
+747:                     }
+748: 
+749:                     token = referenceInfo.token;
+750:                   } else {
+751:                     token = eatTokensUntilEOL(token);
+752:                   }
+753:                   continue retry;
+754: 
+755:                 case STABLEIDGENERATOR:
+756:                   if (!jsdocBuilder.recordStableIdGenerator()) {
+757:                     parser.addParserWarning("msg.jsdoc.stableidgen",
+758:                       stream.getLineno(), stream.getCharno());
+759:                   }
+760:                   token = eatTokensUntilEOL();
+761:                   continue retry;
+762: 
+763:                 case SUPPRESS:
+764:                   token = parseSuppressTag(next());
+765:                   continue retry;
+766: 
+767:                 case TEMPLATE:
+768:                   ExtractionInfo templateInfo = extractSingleLineBlock();
+769:                   List<String> names = Lists.newArrayList(
+770:                       Splitter.on(',')
+771:                           .trimResults()
+772:                           .split(templateInfo.string));
+773: 
+774:                   if (names.size() == 0 || names.get(0).length() == 0) {
+775:                     parser.addTypeWarning("msg.jsdoc.templatemissing",
+776:                           stream.getLineno(), stream.getCharno());
+777:                   } else if (!jsdocBuilder.recordTemplateTypeNames(names)) {
+778:                     parser.addTypeWarning("msg.jsdoc.template.at.most.once",
+779:                         stream.getLineno(), stream.getCharno());
+780:                   }
+781: 
+782:                   token = templateInfo.token;
+783:                   continue retry;
+784: 
+785:                 case IDGENERATOR:
+786:                   if (!jsdocBuilder.recordIdGenerator()) {
+787:                     parser.addParserWarning("msg.jsdoc.idgen",
+788:                       stream.getLineno(), stream.getCharno());
+789:                   }
+790:                   token = eatTokensUntilEOL();
+791:                   continue retry;
+792: 
+793:                 case VERSION:
+794:                   ExtractionInfo versionInfo = extractSingleLineBlock();
+795:                   String version = versionInfo.string;
+796: 
+797:                   if (version.length() == 0) {
+798:                     parser.addParserWarning("msg.jsdoc.versionmissing",
+799:                           stream.getLineno(), stream.getCharno());
+800:                   } else {
+801:                     if (!jsdocBuilder.recordVersion(version)) {
+802:                        parser.addParserWarning("msg.jsdoc.extraversion",
+803:                           stream.getLineno(), stream.getCharno());
+804:                     }
+805:                   }
+806: 
+807:                   token = versionInfo.token;
+808:                   continue retry;
+809: 
+810:                 case CONSTANT:
+811:                 case DEFINE:
+812:                 case RETURN:
+813:                 case PRIVATE:
+814:                 case PROTECTED:
+815:                 case PUBLIC:
+816:                 case THIS:
+817:                 case TYPE:
+818:                 case TYPEDEF:
+819:                   lineno = stream.getLineno();
+820:                   charno = stream.getCharno();
+821: 
+822:                   Node typeNode = null;
+823:                   boolean hasType = lookAheadForTypeAnnotation();
+824:                   boolean isAlternateTypeAnnotation =
+825:                       (annotation == Annotation.PRIVATE ||
+826:                        annotation == Annotation.PROTECTED ||
+827:                        annotation == Annotation.PUBLIC ||
+828:                        annotation == Annotation.CONSTANT);
+829:                   boolean canSkipTypeAnnotation =
+830:                       (isAlternateTypeAnnotation ||
+831:                        annotation == Annotation.RETURN);
+832:                   type = null;
+833:                   if (hasType || !canSkipTypeAnnotation) {
+834:                     skipEOLs();
+835:                     token = next();
+836:                     typeNode = parseAndRecordTypeNode(token);
+837: 
+838:                     if (annotation == Annotation.THIS) {
+839:                       typeNode = wrapNode(Token.BANG, typeNode);
+840:                     }
+841:                     type = createJSTypeExpression(typeNode);
+842:                   }
+843: 
+844:                   // The error was reported during recursive descent
+845:                   // recovering parsing
+846:                   boolean hasError = type == null && !canSkipTypeAnnotation;
+847:                   if (!hasError) {
+848:                     // Record types for @type.
+849:                     // If the @private, @protected, or @public annotations
+850:                     // have a type attached, pretend that they actually wrote:
+851:                     // @type {type}\n@private
+852:                     // This will have some weird behavior in some cases
+853:                     // (for example, @private can now be used as a type-cast),
+854:                     // but should be mostly OK.
+855:                     if ((type != null && isAlternateTypeAnnotation)
+856:                         || annotation == Annotation.TYPE) {
+857:                       if (!jsdocBuilder.recordType(type)) {
+858:                         parser.addTypeWarning(
+859:                             "msg.jsdoc.incompat.type", lineno, charno);
+860:                       }
+861:                     }
+862: 
+863:                     switch (annotation) {
+864:                       case CONSTANT:
+865:                         if (!jsdocBuilder.recordConstancy()) {
+866:                           parser.addParserWarning("msg.jsdoc.const",
+867:                               stream.getLineno(), stream.getCharno());
+868:                         }
+869:                         break;
+870: 
+871:                       case DEFINE:
+872:                         if (!jsdocBuilder.recordDefineType(type)) {
+873:                           parser.addParserWarning("msg.jsdoc.define",
+874:                               lineno, charno);
+875:                         }
+876:                         break;
+877: 
+878:                       case PRIVATE:
+879:                         if (!jsdocBuilder.recordVisibility(Visibility.PRIVATE)) {
+880:                           parser.addParserWarning(
+881:                               "msg.jsdoc.visibility.private",
+882:                               lineno, charno);
+883:                         }
+884:                         break;
+885: 
+886:                       case PROTECTED:
+887:                         if (!jsdocBuilder.recordVisibility(Visibility.PROTECTED)) {
+888:                           parser.addParserWarning(
+889:                               "msg.jsdoc.visibility.protected",
+890:                               lineno, charno);
+891:                         }
+892:                         break;
+893: 
+894:                       case PUBLIC:
+895:                         if (!jsdocBuilder.recordVisibility(Visibility.PUBLIC)) {
+896:                           parser.addParserWarning(
+897:                               "msg.jsdoc.visibility.public",
+898:                               lineno, charno);
+899:                         }
+900:                         break;
+901: 
+902:                       case RETURN:
+903:                         if (type == null) {
+904:                           type = createJSTypeExpression(newNode(Token.QMARK));
+905:                         }
+906: 
+907:                         if (!jsdocBuilder.recordReturnType(type)) {
+908:                           parser.addTypeWarning(
+909:                               "msg.jsdoc.incompat.type", lineno, charno);
+910:                           break;
+911:                         }
+912: 
+913:                         // Find the return's description (if applicable).
+914:                         if (jsdocBuilder.shouldParseDocumentation()) {
+915:                           ExtractionInfo returnDescriptionInfo =
+916:                               extractMultilineTextualBlock(token);
+917: 
+918:                           String returnDescription =
+919:                               returnDescriptionInfo.string;
+920: 
+921:                           if (returnDescription.length() > 0) {
+922:                             jsdocBuilder.recordReturnDescription(
+923:                                 returnDescription);
+924:                           }
+925: 
+926:                           token = returnDescriptionInfo.token;
+927:                         } else {
+928:                           token = eatTokensUntilEOL(token);
+929:                         }
+930:                         continue retry;
+931: 
+932:                       case THIS:
+933:                         if (!jsdocBuilder.recordThisType(type)) {
+934:                           parser.addTypeWarning(
+935:                               "msg.jsdoc.incompat.type", lineno, charno);
+936:                         }
+937:                         break;
+938: 
+939:                       case TYPEDEF:
+940:                         if (!jsdocBuilder.recordTypedef(type)) {
+941:                           parser.addTypeWarning(
+942:                               "msg.jsdoc.incompat.type", lineno, charno);
+943:                         }
+944:                         break;
+945:                     }
+946:                   }
+947: 
+948:                   token = eatTokensUntilEOL();
+949:                   continue retry;
+950:               }
+951:             }
+952:           }
+953:           break;
+954: 
+955:         case EOC:
+956:           if (hasParsedFileOverviewDocInfo()) {
+957:             fileOverviewJSDocInfo = retrieveAndResetParsedJSDocInfo();
+958:           }
+959:           checkExtendedTypes(extendedTypes);
+960:           return true;
+961: 
+962:         case EOF:
+963:           // discard any accumulated information
+964:           jsdocBuilder.build(null);
+965:           parser.addParserWarning("msg.unexpected.eof",
+966:               stream.getLineno(), stream.getCharno());
+967:           checkExtendedTypes(extendedTypes);
+968:           return false;
+969: 
+970:         case EOL:
+971:           if (state == State.SEARCHING_NEWLINE) {
+972:             state = State.SEARCHING_ANNOTATION;
+973:           }
+974:           token = next();
+975:           continue retry;
+976: 
+977:         default:
+978:           if (token == JsDocToken.STAR && state == State.SEARCHING_ANNOTATION) {
+979:             token = next();
+980:             continue retry;
+981:           } else {
+982:             state = State.SEARCHING_NEWLINE;
+983:             token = eatTokensUntilEOL();
+984:             continue retry;
+985:           }
+986:       }
+987: 
+988:       // next token
+989:       token = next();
+990:     }
+991:   }
+
+[22] com.google.javascript.rhino.jstype.FunctionType#setExtendedInterfaces  (lines 575-582)
+575:   public void setExtendedInterfaces(List<ObjectType> extendedInterfaces)
+576:     throws UnsupportedOperationException {
+577:     if (isInterface()) {
+578:       this.extendedInterfaces = ImmutableList.copyOf(extendedInterfaces);
+579:     } else {
+580:       throw new UnsupportedOperationException();
+581:     }
+582:   }
+
+[23] com.google.javascript.rhino.jstype.ObjectType#detectImplicitPrototypeCycle  (lines 176-196)
+176:   final boolean detectImplicitPrototypeCycle() {
+177:     // detecting cycle
+178:     this.visited = true;
+179:     ObjectType p = getImplicitPrototype();
+180:     while (p != null) {
+181:       if (p.visited) {
+182:         return true;
+183:       } else {
+184:         p.visited = true;
+185:       }
+186:       p = p.getImplicitPrototype();
+187:     }
+188: 
+189:     // clean up
+190:     p = this;
+191:     do {
+192:       p.visited = false;
+193:       p = p.getImplicitPrototype();
+194:     } while (p != null);
+195:     return false;
+196:   }
+
+[24] com.google.javascript.jscomp.TypeCheck#check  (lines 399-410)
+399:   public void check(Node node, boolean externs) {
+400:     Preconditions.checkNotNull(node);
+401: 
+402:     NodeTraversal t = new NodeTraversal(compiler, this, scopeCreator);
+403:     inExterns = externs;
+404:     t.traverseWithScope(node, topScope);
+405:     if (externs) {
+406:       inferJSDocInfo.process(node, null);
+407:     } else {
+408:       inferJSDocInfo.process(null, node);
+409:     }
+410:   }
+
+[25] com.google.javascript.jscomp.TypeCheck#processForTesting  (lines 379-396)
+379:   public Scope processForTesting(Node externsRoot, Node jsRoot) {
+380:     Preconditions.checkState(scopeCreator == null);
+381:     Preconditions.checkState(topScope == null);
+382: 
+383:     Preconditions.checkState(jsRoot.getParent() != null);
+384:     Node externsAndJsRoot = jsRoot.getParent();
+385: 
+386:     scopeCreator = new MemoizedScopeCreator(new TypedScopeCreator(compiler));
+387:     topScope = scopeCreator.createScope(externsAndJsRoot, null);
+388: 
+389:     TypeInferencePass inference = new TypeInferencePass(compiler,
+390:         reverseInterpreter, topScope, scopeCreator);
+391: 
+392:     inference.process(externsRoot, jsRoot);
+393:     process(externsRoot, jsRoot);
+394: 
+395:     return topScope;
+396:   }
+
+[26] com.google.javascript.jscomp.RhinoErrorReporter#warning  (lines 153-157)
+153:     @Override
+154:     public void warning(String message, String sourceName, int line,
+155:         int lineOffset) {
+156:       super.warningAtLine(message, sourceName, line, lineOffset);
+157:     }
+
+[27] com.google.javascript.rhino.jstype.FunctionType#getExtendedInterfacesCount  (lines 571-573)
+571:   public int getExtendedInterfacesCount() {
+572:     return extendedInterfaces.size();
+573:   }
+
+[28] com.google.javascript.jscomp.TypeCheck#process  (lines 362-376)
+362:   @Override
+363:   public void process(Node externsRoot, Node jsRoot) {
+364:     Preconditions.checkNotNull(scopeCreator);
+365:     Preconditions.checkNotNull(topScope);
+366: 
+367:     Node externsAndJs = jsRoot.getParent();
+368:     Preconditions.checkState(externsAndJs != null);
+369:     Preconditions.checkState(
+370:         externsRoot == null || externsAndJs.hasChild(externsRoot));
+371: 
+372:     if (externsRoot != null) {
+373:       check(externsRoot, true);
+374:     }
+375:     check(jsRoot, false);
+376:   }
+
+[29] com.google.javascript.rhino.jstype.FunctionType#setPrototypeNoCheck  (lines 440-475)
+440:   private boolean setPrototypeNoCheck(ObjectType prototype, Node propertyNode) {
+441:     ObjectType oldPrototype = prototypeSlot == null
+442:         ? null : (ObjectType) prototypeSlot.getType();
+443:     boolean replacedPrototype = oldPrototype != null;
+444: 
+445:     this.prototypeSlot = new Property("prototype", prototype, true,
+446:         propertyNode == null ? source : propertyNode);
+447:     prototype.setOwnerFunction(this);
+448: 
+449:     if (oldPrototype != null) {
+450:       // Disassociating the old prototype makes this easier to debug--
+451:       // we don't have to worry about two prototypes running around.
+452:       oldPrototype.setOwnerFunction(null);
+453:     }
+454: 
+455:     if (isConstructor() || isInterface()) {
+456:       FunctionType superClass = getSuperClassConstructor();
+457:       if (superClass != null) {
+458:         superClass.addSubType(this);
+459:       }
+460: 
+461:       if (isInterface()) {
+462:         for (ObjectType interfaceType : getExtendedInterfaces()) {
+463:           if (interfaceType.getConstructor() != null) {
+464:             interfaceType.getConstructor().addSubType(this);
+465:           }
+466:         }
+467:       }
+468:     }
+469: 
+470:     if (replacedPrototype) {
+471:       clearCachedValues();
+472:     }
+473: 
+474:     return true;
+475:   }
+
+[30] com.google.javascript.rhino.jstype.JSTypeRegistry#createInterfaceType  (lines 1435-1437)
+1435:   public FunctionType createInterfaceType(String name, Node source) {
+1436:     return FunctionType.forInterface(this, name, source);
+1437:   }
+
+[31] com.google.javascript.rhino.JSDocInfo#addExtendedInterface  (lines 1305-1315)
+1305:   boolean addExtendedInterface(JSTypeExpression type) {
+1306:     lazyInitInfo();
+1307:     if (info.extendedInterfaces == null) {
+1308:       info.extendedInterfaces = Lists.newArrayListWithCapacity(2);
+1309:     }
+1310:     if (info.extendedInterfaces.contains(type)) {
+1311:       return false;
+1312:     }
+1313:     info.extendedInterfaces.add(type);
+1314:     return true;
+1315:   }
+
+[32] com.google.javascript.rhino.jstype.FunctionType#FunctionType  (lines 162-174)
+162:   private FunctionType(JSTypeRegistry registry, String name, Node source) {
+163:     super(registry, name,
+164:         registry.getNativeObjectType(JSTypeNative.FUNCTION_INSTANCE_TYPE));
+165:     setPrettyPrint(true);
+166: 
+167:     Preconditions.checkArgument(source == null ||
+168:         Token.FUNCTION == source.getType());
+169:     Preconditions.checkArgument(name != null);
+170:     this.source = source;
+171:     this.call = new ArrowType(registry, new Node(Token.PARAM_LIST), null);
+172:     this.kind = Kind.INTERFACE;
+173:     this.typeOfThis = new InstanceObjectType(registry, this);
+174:   }
+
+[33] com.google.javascript.rhino.jstype.JSTypeRegistry#isLastGeneration  (lines 795-797)
+795:   boolean isLastGeneration() {
+796:     return lastGeneration;
+797:   }
+
+[34] com.google.javascript.rhino.jstype.ProxyObjectType#getConstructor  (lines 298-302)
+298:   @Override
+299:   public FunctionType getConstructor() {
+300:     return referencedObjType == null ? null :
+301:         referencedObjType.getConstructor();
+302:   }
+
+[35] com.google.javascript.jscomp.RhinoErrorReporter#warningAtLine  (lines 112-116)
+112:   void warningAtLine(String message, String sourceName, int line,
+113:       int lineOffset) {
+114:     compiler.report(
+115:         makeError(message, sourceName, line, lineOffset, CheckLevel.WARNING));
+116:   }
+
+[36] com.google.javascript.rhino.jstype.ProxyObjectType#getImplicitPrototype  (lines 254-258)
+254:   @Override
+255:   public ObjectType getImplicitPrototype() {
+256:     return referencedObjType == null ? null :
+257:         referencedObjType.getImplicitPrototype();
+258:   }
+
+[37] com.google.javascript.rhino.jstype.NamedType#resolveViaProperties  (lines 233-258)
+233:   private void resolveViaProperties(ErrorReporter t,
+234:                                     StaticScope<JSType> enclosing) {
+235:     JSType value = lookupViaProperties(t, enclosing);
+236:     // last component of the chain
+237:     if (value != null && value.isFunctionType() &&
+238:         (value.isConstructor() || value.isInterface())) {
+239:       FunctionType functionType = value.toMaybeFunctionType();
+240:       setReferencedAndResolvedType(
+241:           functionType.getInstanceType(), t, enclosing);
+242:     } else if (value != null && value.isNoObjectType()) {
+243:       setReferencedAndResolvedType(
+244:           registry.getNativeFunctionType(
+245:               JSTypeNative.NO_OBJECT_TYPE).getInstanceType(), t, enclosing);
+246:     } else if (value instanceof EnumType) {
+247:       setReferencedAndResolvedType(
+248:           ((EnumType) value).getElementsType(), t, enclosing);
+249:     } else {
+250:       // We've been running into issues where people forward-declare
+251:       // non-named types. (This is legitimate...our dependency management
+252:       // code doubles as our forward-declaration code.)
+253:       //
+254:       // So if the type does resolve to an actual value, but it's not named,
+255:       // then don't respect the forward declaration.
+256:       handleUnresolvedType(t, value == null || value.isUnknownType());
+257:     }
+258:   }
+
+[38] com.google.javascript.rhino.JSTypeExpression#equals  (lines 105-109)
+105:   @Override
+106:   public boolean equals(Object other) {
+107:     return other instanceof JSTypeExpression &&
+108:         ((JSTypeExpression) other).root.isEquivalentTo(root);
+109:   }
+
+[39] com.google.javascript.rhino.jstype.NamedType#setValidator  (lines 372-383)
+372:   @Override
+373:   public boolean setValidator(Predicate<JSType> validator) {
+374:     // If the type is already resolved, we can validate it now. If
+375:     // the type has not been resolved yet, we need to wait till its
+376:     // resolved before we can validate it.
+377:     if (this.isResolved()) {
+378:       return super.setValidator(validator);
+379:     } else {
+380:       this.validator = validator;
+381:       return true;
+382:     }
+383:   }
+
+[40] com.google.javascript.rhino.jstype.JSType#isResolved  (lines 1445-1447)
+1445:   public final boolean isResolved() {
+1446:     return resolved;
+1447:   }
+
+[41] com.google.javascript.rhino.JSDocInfo#setInterface  (lines 394-396)
+394:   void setInterface(boolean value) {
+395:     setFlag(value, MASK_INTERFACE);
+396:   }
+
+[42] com.google.javascript.rhino.jstype.NamedType#finishPropertyContinuations  (lines 133-143)
+133:   private void finishPropertyContinuations() {
+134:     ObjectType referencedObjType = getReferencedObjTypeInternal();
+135:     if (referencedObjType != null && !referencedObjType.isUnknownType()) {
+136:       if (propertyContinuations != null) {
+137:         for (PropertyContinuation c : propertyContinuations) {
+138:           c.commit(this);
+139:         }
+140:       }
+141:     }
+142:     propertyContinuations = null;
+143:   }
+
+[43] com.google.javascript.rhino.jstype.NamedType#NamedType  (lines 103-112)
+103:   NamedType(JSTypeRegistry registry, String reference,
+104:       String sourceName, int lineno, int charno) {
+105:     super(registry, registry.getNativeObjectType(JSTypeNative.UNKNOWN_TYPE));
+106: 
+107:     Preconditions.checkNotNull(reference);
+108:     this.reference = reference;
+109:     this.sourceName = sourceName;
+110:     this.lineno = lineno;
+111:     this.charno = charno;
+112:   }
+
+[44] com.google.javascript.jscomp.TypeCheck#visitFunction  (lines 1601-1670)
+1601:   private void visitFunction(NodeTraversal t, Node n) {
+1602:     FunctionType functionType = JSType.toMaybeFunctionType(n.getJSType());
+1603:     String functionPrivateName = n.getFirstChild().getString();
+1604:     if (functionType.isConstructor()) {
+1605:       FunctionType baseConstructor = functionType.getSuperClassConstructor();
+1606:       if (baseConstructor != getNativeType(OBJECT_FUNCTION_TYPE) &&
+1607:           baseConstructor != null &&
+1608:           baseConstructor.isInterface()) {
+1609:         compiler.report(
+1610:             t.makeError(n, CONFLICTING_EXTENDED_TYPE,
+1611:                         "constructor", functionPrivateName));
+1612:       } else {
+1613:         if (baseConstructor != getNativeType(OBJECT_FUNCTION_TYPE)) {
+1614:           ObjectType proto = functionType.getPrototype();
+1615:           if (functionType.makesStructs() && !proto.isStruct()) {
+1616:             compiler.report(t.makeError(n, CONFLICTING_EXTENDED_TYPE,
+1617:                                         "struct", functionPrivateName));
+1618:           } else if (functionType.makesDicts() && !proto.isDict()) {
+1619:             compiler.report(t.makeError(n, CONFLICTING_EXTENDED_TYPE,
+1620:                                         "dict", functionPrivateName));
+1621:           }
+1622:         }
+1623:         // All interfaces are properly implemented by a class
+1624:         for (JSType baseInterface : functionType.getImplementedInterfaces()) {
+1625:           boolean badImplementedType = false;
+1626:           ObjectType baseInterfaceObj = ObjectType.cast(baseInterface);
+1627:           if (baseInterfaceObj != null) {
+1628:             FunctionType interfaceConstructor =
+1629:               baseInterfaceObj.getConstructor();
+1630:             if (interfaceConstructor != null &&
+1631:                 !interfaceConstructor.isInterface()) {
+1632:               badImplementedType = true;
+1633:             }
+1634:           } else {
+1635:             badImplementedType = true;
+1636:           }
+1637:           if (badImplementedType) {
+1638:             report(t, n, BAD_IMPLEMENTED_TYPE, functionPrivateName);
+1639:           }
+1640:         }
+1641:         // check properties
+1642:         validator.expectAllInterfaceProperties(t, n, functionType);
+1643:       }
+1644:     } else if (functionType.isInterface()) {
+1645:       // Interface must extend only interfaces
+1646:       for (ObjectType extInterface : functionType.getExtendedInterfaces()) {
+1647:         if (extInterface.getConstructor() != null
+1648:             && !extInterface.getConstructor().isInterface()) {
+1649:           compiler.report(
+1650:               t.makeError(n, CONFLICTING_EXTENDED_TYPE,
+1651:                           "interface", functionPrivateName));
+1652:         }
+1653:       }
+1654: 
+1655:       // Check whether the extended interfaces have any conflicts
+1656:       if (functionType.getExtendedInterfacesCount() > 1) {
+1657:         // Only check when extending more than one interfaces
+1658:         HashMap<String, ObjectType> properties
+1659:             = new HashMap<String, ObjectType>();
+1660:         HashMap<String, ObjectType> currentProperties
+1661:             = new HashMap<String, ObjectType>();
+1662:         for (ObjectType interfaceType : functionType.getExtendedInterfaces()) {
+1663:           currentProperties.clear();
+1664:           checkInterfaceConflictProperties(t, n, functionPrivateName,
+1665:               properties, currentProperties, interfaceType);
+1666:           properties.putAll(currentProperties);
+1667:         }
+1668:       }
+1669:     }
+1670:   }
+
+[45] com.google.javascript.rhino.jstype.JSTypeRegistry#isForwardDeclaredType  (lines 865-867)
+865:   public boolean isForwardDeclaredType(String name) {
+866:     return forwardDeclaredTypes.contains(name);
+867:   }
+
+[46] com.google.javascript.rhino.jstype.ObjectType#isUnknownType  (lines 564-584)
+564:   @Override
+565:   public boolean isUnknownType() {
+566:     // If the object is unknown now, check the supertype again,
+567:     // because it might have been resolved since the last check.
+568:     if (unknown) {
+569:       ObjectType implicitProto = getImplicitPrototype();
+570:       if (implicitProto == null ||
+571:           implicitProto.isNativeObjectType()) {
+572:         unknown = false;
+573:         for (ObjectType interfaceType : getCtorExtendedInterfaces()) {
+574:           if (interfaceType.isUnknownType()) {
+575:             unknown = true;
+576:             break;
+577:           }
+578:         }
+579:       } else {
+580:         unknown = implicitProto.isUnknownType();
+581:       }
+582:     }
+583:     return unknown;
+584:   }
+
+[47] com.google.javascript.rhino.jstype.NamedType#hashCode  (lines 175-178)
+175:   @Override
+176:   public int hashCode() {
+177:     return reference.hashCode();
+178:   }
+
+[48] com.google.javascript.rhino.jstype.NamedType#resolveViaRegistry  (lines 218-226)
+218:   private boolean resolveViaRegistry(
+219:       ErrorReporter t, StaticScope<JSType> enclosing) {
+220:     JSType type = registry.getType(reference);
+221:     if (type != null) {
+222:       setReferencedAndResolvedType(type, t, enclosing);
+223:       return true;
+224:     }
+225:     return false;
+226:   }
+
+[49] com.google.javascript.rhino.jstype.ProxyObjectType#getCtorImplementedInterfaces  (lines 238-242)
+238:   @Override
+239:   public Iterable<ObjectType> getCtorImplementedInterfaces() {
+240:     return referencedObjType == null ? Collections.<ObjectType>emptyList() :
+241:         referencedObjType.getCtorImplementedInterfaces();
+242:   }
+
+[50] com.google.javascript.jscomp.BasicErrorManager#compare  (lines 128-179)
+128:     @Override
+129:     public int compare(ErrorWithLevel p1, ErrorWithLevel p2) {
+130:       // null is the smallest value
+131:       if (p2 == null) {
+132:         if (p1 == null) {
+133:           return 0;
+134:         } else {
+135:           return P1_GT_P2;
+136:         }
+137:       }
+138: 
+139:       // check level
+140:       if (p1.level != p2.level) {
+141:         return p2.level.compareTo(p1.level);
+142:       }
+143: 
+144:       // sourceName comparison
+145:       String source1 = p1.error.sourceName;
+146:       String source2 = p2.error.sourceName;
+147:       if (source1 != null && source2 != null) {
+148:         int sourceCompare = source1.compareTo(source2);
+149:         if (sourceCompare != 0) {
+150:           return sourceCompare;
+151:         }
+152:       } else if (source1 == null && source2 != null) {
+153:         return P1_LT_P2;
+154:       } else if (source1 != null && source2 == null) {
+155:         return P1_GT_P2;
+156:       }
+157:       // lineno comparison
+158:       int lineno1 = p1.error.lineNumber;
+159:       int lineno2 = p2.error.lineNumber;
+160:       if (lineno1 != lineno2) {
+161:         return lineno1 - lineno2;
+162:       } else if (lineno1 < 0 && 0 <= lineno2) {
+163:         return P1_LT_P2;
+164:       } else if (0 <= lineno1 && lineno2 < 0) {
+165:         return P1_GT_P2;
+166:       }
+167:       // charno comparison
+168:       int charno1 = p1.error.getCharno();
+169:       int charno2 = p2.error.getCharno();
+170:       if (charno1 != charno2) {
+171:         return charno1 - charno2;
+172:       } else if (charno1 < 0 && 0 <= charno2) {
+173:         return P1_LT_P2;
+174:       } else if (0 <= charno1 && charno2 < 0) {
+175:         return P1_GT_P2;
+176:       }
+177:       // description
+178:       return p1.error.description.compareTo(p2.error.description);
+179:     }

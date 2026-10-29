@@ -1,0 +1,2185 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.LooseTypeCheckTest::testDuplicateLocalVarDecl
+junit.framework.AssertionFailedError: expected:<2> but was:<1>
+	at com.google.javascript.jscomp.LooseTypeCheckTest.testClosureTypesMultipleWarnings(LooseTypeCheckTest.java:7054)
+	at com.google.javascript.jscomp.LooseTypeCheckTest.testDuplicateLocalVarDecl(LooseTypeCheckTest.java:1970)
+--- com.google.javascript.jscomp.LooseTypeCheckTest::testFunctionArguments13
+junit.framework.AssertionFailedError: expected a warning
+	at com.google.javascript.jscomp.LooseTypeCheckTest.testTypes(LooseTypeCheckTest.java:7084)
+	at com.google.javascript.jscomp.LooseTypeCheckTest.testTypes(LooseTypeCheckTest.java:7064)
+	at com.google.javascript.jscomp.LooseTypeCheckTest.testTypes(LooseTypeCheckTest.java:7008)
+	at com.google.javascript.jscomp.LooseTypeCheckTest.testFunctionArguments13(LooseTypeCheckTest.java:1346)
+--- com.google.javascript.jscomp.TypeCheckTest::testScoping12
+junit.framework.AssertionFailedError: expected a warning
+	at com.google.javascript.jscomp.TypeCheckTest.testTypes(TypeCheckTest.java:8883)
+	at com.google.javascript.jscomp.TypeCheckTest.testTypes(TypeCheckTest.java:8863)
+	at com.google.javascript.jscomp.TypeCheckTest.testTypes(TypeCheckTest.java:8804)
+	at com.google.javascript.jscomp.TypeCheckTest.testScoping12(TypeCheckTest.java:1421)
+--- com.google.javascript.jscomp.TypeCheckTest::testDuplicateLocalVarDecl
+junit.framework.AssertionFailedError: unexpected warning(s) : JSC_DUP_VAR_DECLARATION. variable x redefined with type string, original definition at  [testcode] :2 with type number at  [testcode]  line 2 : 42 expected:<2> but was:<1>
+	at com.google.javascript.jscomp.TypeCheckTest.testClosureTypesMultipleWarnings(TypeCheckTest.java:8850)
+	at com.google.javascript.jscomp.TypeCheckTest.testDuplicateLocalVarDecl(TypeCheckTest.java:2147)
+... (1 more triggering tests omitted)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.rhino.jstype.FunctionBuilder#withName  (lines 69-72)
+69:   public FunctionBuilder withName(String name) {
+70:     this.name = name;
+71:     return this;
+72:   }
+
+[2] com.google.javascript.rhino.jstype.UnionType#canAssignTo  (lines 187-197)
+187:   @Override
+188:   public boolean canAssignTo(JSType that) {
+189:     boolean canAssign = true;
+190:     for (JSType t : alternates) {
+191:       if (t.isUnknownType()) {
+192:         return true;
+193:       }
+194:       canAssign &= t.canAssignTo(that);
+195:     }
+196:     return canAssign;
+197:   }
+
+[3] com.google.javascript.rhino.jstype.JSType#filterNoResolvedType  (lines 654-680)
+654:   static JSType filterNoResolvedType(JSType type) {
+655:     if (type.isNoResolvedType()) {
+656:       // inf(UnresolvedType1, UnresolvedType2) needs to resolve
+657:       // to the base unresolved type, so that the relation is symmetric.
+658:       return type.getNativeType(JSTypeNative.NO_RESOLVED_TYPE);
+659:     } else if (type instanceof UnionType) {
+660:       UnionType unionType = (UnionType) type;
+661:       boolean needsFiltering = false;
+662:       for (JSType alt : unionType.getAlternates()) {
+663:         if (alt.isNoResolvedType()) {
+664:           needsFiltering = true;
+665:           break;
+666:         }
+667:       }
+668: 
+669:       if (needsFiltering) {
+670:         UnionTypeBuilder builder = new UnionTypeBuilder(type.registry);
+671:         for (JSType alt : unionType.getAlternates()) {
+672:           if (!alt.isNoResolvedType()) {
+673:             builder.addAlternate(alt);
+674:           }
+675:         }
+676:         return builder.build();
+677:       }
+678:     }
+679:     return type;
+680:   }
+
+[4] com.google.javascript.rhino.jstype.JSType#getLeastSupertype  (lines 581-587)
+581:   public JSType getLeastSupertype(JSType that) {
+582:     if (that.isUnionType()) {
+583:       // Union types have their own implementation of getLeastSupertype.
+584:       return that.getLeastSupertype(this);
+585:     }
+586:     return getLeastSupertype(this, that);
+587:   }
+
+[5] com.google.javascript.jscomp.ProcessClosurePrimitives#addProvide  (lines 823-831)
+823:     void addProvide(Node node, JSModule module, boolean explicit) {
+824:       if (explicit) {
+825:         Preconditions.checkState(explicitNode == null);
+826:         Preconditions.checkArgument(NodeUtil.isExpressionNode(node));
+827:         explicitNode = node;
+828:         explicitModule = module;
+829:       }
+830:       updateMinimumModule(module);
+831:     }
+
+[6] com.google.javascript.jscomp.ClosureReverseAbstractInterpreter#ClosureReverseAbstractInterpreter  (lines 121-197)
+121:   ClosureReverseAbstractInterpreter(CodingConvention convention,
+122:       final JSTypeRegistry typeRegistry) {
+123:     super(convention, typeRegistry);
+124:     this.restricters =
+125:       new ImmutableMap.Builder<String, Function<TypeRestriction, JSType>>()
+126:       .put("isDef", new Function<TypeRestriction, JSType>() {
+127:         public JSType apply(TypeRestriction p) {
+128:           if (p.outcome) {
+129:             return getRestrictedWithoutUndefined(p.type);
+130:           } else {
+131:             return null;
+132:           }
+133:          }
+134:       })
+135:       .put("isNull", new Function<TypeRestriction, JSType>() {
+136:         public JSType apply(TypeRestriction p) {
+137:           if (p.outcome) {
+138:             return getNativeType(NULL_TYPE);
+139:           } else {
+140:             return getRestrictedWithoutNull(p.type);
+141:           }
+142:         }
+143:       })
+144:       .put("isDefAndNotNull", new Function<TypeRestriction, JSType>() {
+145:         public JSType apply(TypeRestriction p) {
+146:           if (p.outcome) {
+147:             return getRestrictedWithoutUndefined(
+148:                 getRestrictedWithoutNull(p.type));
+149:           } else {
+150:             return null;
+151:           }
+152:         }
+153:       })
+154:       .put("isString", new Function<TypeRestriction, JSType>() {
+155:         public JSType apply(TypeRestriction p) {
+156:           return getRestrictedByTypeOfResult(p.type, "string", p.outcome);
+157:         }
+158:       })
+159:       .put("isBoolean", new Function<TypeRestriction, JSType>() {
+160:         public JSType apply(TypeRestriction p) {
+161:           return getRestrictedByTypeOfResult(p.type, "boolean", p.outcome);
+162:         }
+163:       })
+164:       .put("isNumber", new Function<TypeRestriction, JSType>() {
+165:         public JSType apply(TypeRestriction p) {
+166:           return getRestrictedByTypeOfResult(p.type, "number", p.outcome);
+167:         }
+168:       })
+169:       .put("isFunction", new Function<TypeRestriction, JSType>() {
+170:         public JSType apply(TypeRestriction p) {
+171:           return getRestrictedByTypeOfResult(p.type, "function", p.outcome);
+172:         }
+173:       })
+174:       .put("isArray", new Function<TypeRestriction, JSType>() {
+175:         public JSType apply(TypeRestriction p) {
+176:           if (p.type == null) {
+177:             return p.outcome ? getNativeType(ARRAY_TYPE) : null;
+178:           }
+179: 
+180:           Visitor<JSType> visitor = p.outcome ? restrictToArrayVisitor :
+181:               restrictToNotArrayVisitor;
+182:           return p.type.visit(visitor);
+183:         }
+184:       })
+185:       .put("isObject", new Function<TypeRestriction, JSType>() {
+186:         public JSType apply(TypeRestriction p) {
+187:           if (p.type == null) {
+188:             return p.outcome ? getNativeType(OBJECT_TYPE) : null;
+189:           }
+190: 
+191:           Visitor<JSType> visitor = p.outcome ? restrictToObjectVisitor :
+192:               restrictToNotObjectVisitor;
+193:           return p.type.visit(visitor);
+194:         }
+195:       })
+196:       .build();
+197:   }
+
+[7] com.google.javascript.rhino.jstype.UnionType#isUnionType  (lines 336-339)
+336:   @Override
+337:   public boolean isUnionType() {
+338:     return true;
+339:   }
+
+[8] com.google.javascript.jscomp.JSError#toString  (lines 186-194)
+186:   @Override
+187:   public String toString() {
+188:     // TODO(user): remove custom toString.
+189:     return type.key + ". " + description + " at " +
+190:       (sourceName != null && sourceName.length() > 0 ?
+191:        sourceName : "(unknown source)") + " line " +
+192:       (lineNumber != -1 ? String.valueOf(lineNumber) : "(unknown line)") +
+193:       " : " + (charno != -1 ? String.valueOf(charno) : "(unknown column)");
+194:   }
+
+[9] com.google.javascript.jscomp.ControlFlowAnalysis#handleIf  (lines 357-370)
+357:   private void handleIf(Node node) {
+358:     Node thenBlock = node.getFirstChild().getNext();
+359:     Node elseBlock = thenBlock.getNext();
+360:     createEdge(node, Branch.ON_TRUE, computeFallThrough(thenBlock));
+361: 
+362:     if (elseBlock == null) {
+363:       createEdge(node, Branch.ON_FALSE,
+364:           computeFollowNode(node, this)); // not taken branch
+365:     } else {
+366:       createEdge(node, Branch.ON_FALSE, computeFallThrough(elseBlock));
+367:     }
+368:     connectToPossibleExceptionHandler(
+369:         node, NodeUtil.getConditionExpression(node));
+370:   }
+
+[10] com.google.javascript.jscomp.ChainableReverseAbstractInterpreter#nextPreciserScopeKnowingConditionOutcome  (lines 105-109)
+105:   protected FlowScope nextPreciserScopeKnowingConditionOutcome(Node condition,
+106:       FlowScope blindScope, boolean outcome) {
+107:     return nextLink != null ? nextLink.getPreciserScopeKnowingConditionOutcome(
+108:         condition, blindScope, outcome) : blindScope;
+109:   }
+
+[11] com.google.javascript.jscomp.TypeCheck#visitAssign  (lines 835-940)
+835:   private void visitAssign(NodeTraversal t, Node assign) {
+836:     JSDocInfo info = assign.getJSDocInfo();
+837:     Node lvalue = assign.getFirstChild();
+838:     Node rvalue = assign.getLastChild();
+839: 
+840:     if (lvalue.getType() == Token.GETPROP) {
+841:       Node object = lvalue.getFirstChild();
+842:       JSType objectJsType = getJSType(object);
+843:       String property = lvalue.getLastChild().getString();
+844: 
+845:       // the first name in this getprop refers to an interface
+846:       // we perform checks in addition to the ones below
+847:       if (object.getType() == Token.GETPROP) {
+848:         JSType jsType = getJSType(object.getFirstChild());
+849:         if (jsType.isInterface() &&
+850:             object.getLastChild().getString().equals("prototype")) {
+851:           visitInterfaceGetprop(t, assign, object, property, lvalue, rvalue);
+852:         }
+853:       }
+854: 
+855:       // /** @type ... */object.name = ...;
+856:       if (info != null && info.hasType()) {
+857:         visitAnnotatedAssignGetprop(t, assign,
+858:             info.getType().evaluate(t.getScope(), typeRegistry), object,
+859:             property, rvalue);
+860:         return;
+861:       }
+862: 
+863:       // /** @enum ... */object.name = ...;
+864:       if (info != null && info.hasEnumParameterType()) {
+865:         checkEnumInitializer(
+866:             t, rvalue, info.getEnumParameterType().evaluate(
+867:                 t.getScope(), typeRegistry));
+868:         return;
+869:       }
+870: 
+871:       // object.prototype = ...;
+872:       if (property.equals("prototype")) {
+873:         if (objectJsType instanceof FunctionType) {
+874:           FunctionType functionType = (FunctionType) objectJsType;
+875:           if (functionType.isConstructor()) {
+876:             JSType rvalueType = rvalue.getJSType();
+877:             validator.expectObject(t, rvalue, rvalueType,
+878:                 OVERRIDING_PROTOTYPE_WITH_NON_OBJECT);
+879:           }
+880:         } else {
+881:           // TODO(user): might want to flag that
+882:         }
+883:         return;
+884:       }
+885: 
+886:       // object.prototype.property = ...;
+887:       if (object.getType() == Token.GETPROP) {
+888:         Node object2 = object.getFirstChild();
+889:         String property2 = NodeUtil.getStringValue(object.getLastChild());
+890: 
+891:         if ("prototype".equals(property2)) {
+892:           JSType jsType = object2.getJSType();
+893:           if (jsType instanceof FunctionType) {
+894:             FunctionType functionType = (FunctionType) jsType;
+895:             if (functionType.isConstructor() || functionType.isInterface()) {
+896:               checkDeclaredPropertyInheritance(
+897:                   t, assign, functionType, property, info, getJSType(rvalue));
+898:             }
+899:           } else {
+900:             // TODO(user): might want to flag that
+901:           }
+902:           return;
+903:         }
+904:       }
+905: 
+906:       // object.property = ...;
+907:       ObjectType type = ObjectType.cast(
+908:           objectJsType.restrictByNotNullOrUndefined());
+909:       if (type != null) {
+910:         if (type.hasProperty(property) &&
+911:             !type.isPropertyTypeInferred(property) &&
+912:             !propertyIsImplicitCast(type, property)) {
+913:           validator.expectCanAssignToPropertyOf(
+914:               t, assign, getJSType(rvalue),
+915:               type.getPropertyType(property), object, property);
+916:         }
+917:         return;
+918:       }
+919:     } else if (lvalue.getType() == Token.NAME) {
+920:       // variable with inferred type case
+921:       JSType rvalueType = getJSType(assign.getLastChild());
+922:       Var var = t.getScope().getVar(lvalue.getString());
+923:       if (var != null) {
+924:         if (var.isTypeInferred()) {
+925:           return;
+926:         }
+927:       }
+928:     }
+929: 
+930:     // fall through case
+931:     JSType leftType = getJSType(lvalue);
+932:     Node rightChild = assign.getLastChild();
+933:     JSType rightType = getJSType(rightChild);
+934:     if (validator.expectCanAssignTo(
+935:             t, assign, rightType, leftType, "assignment")) {
+936:       ensureTyped(t, assign, rightType);
+937:     } else {
+938:       ensureTyped(t, assign);
+939:     }
+940:   }
+
+[12] com.google.javascript.jscomp.NodeTraversal#getEnclosingFunction  (lines 508-519)
+508:   @SuppressWarnings("unchecked")
+509:   public Node getEnclosingFunction() {
+510:     if (scopes.size() + scopeRoots.size() < 2) {
+511:       return null;
+512:     } else {
+513:       if (scopeRoots.isEmpty()) {
+514:         return scopes.peek().getRootNode();
+515:       } else {
+516:         return scopeRoots.peek();
+517:       }
+518:     }
+519:   }
+
+[13] com.google.javascript.jscomp.FunctionTypeBuilder#inferInheritance  (lines 349-396)
+349:   FunctionTypeBuilder inferInheritance(@Nullable JSDocInfo info) {
+350:     if (info != null) {
+351:       isConstructor = info.isConstructor();
+352:       isInterface = info.isInterface();
+353: 
+354:       // base type
+355:       if (info.hasBaseType()) {
+356:         if (isConstructor) {
+357:           JSType maybeBaseType =
+358:               info.getBaseType().evaluate(scope, typeRegistry);
+359:           if (maybeBaseType != null &&
+360:               maybeBaseType.setValidator(new ExtendedTypeValidator())) {
+361:             baseType = (ObjectType) maybeBaseType;
+362:           }
+363:         } else {
+364:           reportWarning(EXTENDS_WITHOUT_TYPEDEF, fnName);
+365:         }
+366:       }
+367: 
+368:       // implemented interfaces
+369:       if (isConstructor || isInterface) {
+370:         implementedInterfaces = Lists.newArrayList();
+371:         for (JSTypeExpression t : info.getImplementedInterfaces()) {
+372:           JSType maybeInterType = t.evaluate(scope, typeRegistry);
+373:           if (maybeInterType != null &&
+374:               maybeInterType.setValidator(new ImplementedTypeValidator())) {
+375:             implementedInterfaces.add((ObjectType) maybeInterType);
+376:           }
+377:         }
+378:       } else if (info.getImplementedInterfaceCount() > 0) {
+379:         reportWarning(IMPLEMENTS_WITHOUT_CONSTRUCTOR, fnName);
+380:       }
+381: 
+382:       // extended interfaces (for interface only)
+383:       if (isInterface) {
+384:         extendedInterfaces = Lists.newArrayList();
+385:         for (JSTypeExpression t : info.getExtendedInterfaces()) {
+386:           JSType maybeInterfaceType = t.evaluate(scope, typeRegistry);
+387:           if (maybeInterfaceType != null &&
+388:               maybeInterfaceType.setValidator(new ExtendedTypeValidator())) {
+389:             extendedInterfaces.add((ObjectType) maybeInterfaceType);
+390:           }
+391:         }
+392:       }
+393:     }
+394: 
+395:     return this;
+396:   }
+
+[14] com.google.javascript.jscomp.ProcessClosurePrimitives#ProvidedName  (lines 808-818)
+808:     ProvidedName(String namespace, Node node, JSModule module,
+809:         boolean explicit) {
+810:       Preconditions.checkArgument(
+811:           node == null /* The base case */ ||
+812:           NodeUtil.isExpressionNode(node));
+813:       this.namespace = namespace;
+814:       this.firstNode = node;
+815:       this.firstModule = module;
+816: 
+817:       addProvide(node, module, explicit);
+818:     }
+
+[15] com.google.javascript.jscomp.ProcessClosurePrimitives#ProcessClosurePrimitives  (lines 120-131)
+120:   ProcessClosurePrimitives(AbstractCompiler compiler,
+121:                            CheckLevel requiresLevel,
+122:                            boolean rewriteNewDateGoogNow) {
+123:     this.compiler = compiler;
+124:     this.moduleGraph = compiler.getModuleGraph();
+125:     this.requiresLevel = requiresLevel;
+126:     this.rewriteNewDateGoogNow = rewriteNewDateGoogNow;
+127: 
+128:     // goog is special-cased because it is provided in Closure's base library.
+129:     providedNames.put(GOOG,
+130:         new ProvidedName(GOOG, null, null, false /* implicit */));
+131:   }
+
+[16] com.google.javascript.jscomp.Scope#setType  (lines 242-245)
+242:     void setType(JSType type) {
+243:       Preconditions.checkState(isTypeInferred());
+244:       this.type = type;
+245:     }
+
+[17] com.google.javascript.jscomp.TypeCheck#visit  (lines 455-806)
+455:   public void visit(NodeTraversal t, Node n, Node parent) {
+456:     JSType childType;
+457:     JSType leftType, rightType;
+458:     Node left, right;
+459:     // To be explicitly set to false if the node is not typeable.
+460:     boolean typeable = true;
+461: 
+462:     switch (n.getType()) {
+463:       case Token.NAME:
+464:         typeable = visitName(t, n, parent);
+465:         break;
+466: 
+467:       case Token.LP:
+468:         // If this is under a FUNCTION node, it is a parameter list and can be
+469:         // ignored here.
+470:         if (parent.getType() != Token.FUNCTION) {
+471:           ensureTyped(t, n, getJSType(n.getFirstChild()));
+472:         } else {
+473:           typeable = false;
+474:         }
+475:         break;
+476: 
+477:       case Token.COMMA:
+478:         ensureTyped(t, n, getJSType(n.getLastChild()));
+479:         break;
+480: 
+481:       case Token.TRUE:
+482:       case Token.FALSE:
+483:         ensureTyped(t, n, BOOLEAN_TYPE);
+484:         break;
+485: 
+486:       case Token.THIS:
+487:         ensureTyped(t, n, t.getScope().getTypeOfThis());
+488:         break;
+489: 
+490:       case Token.REF_SPECIAL:
+491:         ensureTyped(t, n);
+492:         break;
+493: 
+494:       case Token.GET_REF:
+495:         ensureTyped(t, n, getJSType(n.getFirstChild()));
+496:         break;
+497: 
+498:       case Token.NULL:
+499:         ensureTyped(t, n, NULL_TYPE);
+500:         break;
+501: 
+502:       case Token.NUMBER:
+503:         ensureTyped(t, n, NUMBER_TYPE);
+504:         break;
+505: 
+506:       case Token.STRING:
+507:         // Object literal keys are handled with OBJECTLIT
+508:         if (!NodeUtil.isObjectLitKey(n, n.getParent())) {
+509:           ensureTyped(t, n, STRING_TYPE);
+510:         }
+511:         break;
+512: 
+513:       case Token.GET:
+514:       case Token.SET:
+515:         // Object literal keys are handled with OBJECTLIT
+516:         break;
+517: 
+518:       case Token.ARRAYLIT:
+519:         ensureTyped(t, n, ARRAY_TYPE);
+520:         break;
+521: 
+522:       case Token.REGEXP:
+523:         ensureTyped(t, n, REGEXP_TYPE);
+524:         break;
+525: 
+526:       case Token.GETPROP:
+527:         visitGetProp(t, n, parent);
+528:         typeable = !(parent.getType() == Token.ASSIGN &&
+529:                      parent.getFirstChild() == n);
+530:         break;
+531: 
+532:       case Token.GETELEM:
+533:         visitGetElem(t, n);
+534:         // The type of GETELEM is always unknown, so no point counting that.
+535:         // If that unknown leaks elsewhere (say by an assignment to another
+536:         // variable), then it will be counted.
+537:         typeable = false;
+538:         break;
+539: 
+540:       case Token.VAR:
+541:         visitVar(t, n);
+542:         typeable = false;
+543:         break;
+544: 
+545:       case Token.NEW:
+546:         visitNew(t, n);
+547:         typeable = true;
+548:         break;
+549: 
+550:       case Token.CALL:
+551:         visitCall(t, n);
+552:         typeable = !NodeUtil.isExpressionNode(parent);
+553:         break;
+554: 
+555:       case Token.RETURN:
+556:         visitReturn(t, n);
+557:         typeable = false;
+558:         break;
+559: 
+560:       case Token.DEC:
+561:       case Token.INC:
+562:         left = n.getFirstChild();
+563:         validator.expectNumber(
+564:             t, left, getJSType(left), "increment/decrement");
+565:         ensureTyped(t, n, NUMBER_TYPE);
+566:         break;
+567: 
+568:       case Token.NOT:
+569:         ensureTyped(t, n, BOOLEAN_TYPE);
+570:         break;
+571: 
+572:       case Token.VOID:
+573:         ensureTyped(t, n, VOID_TYPE);
+574:         break;
+575: 
+576:       case Token.TYPEOF:
+577:         ensureTyped(t, n, STRING_TYPE);
+578:         break;
+579: 
+580:       case Token.BITNOT:
+581:         childType = getJSType(n.getFirstChild());
+582:         if (!childType.matchesInt32Context()) {
+583:           report(t, n, BIT_OPERATION, NodeUtil.opToStr(n.getType()),
+584:               childType.toString());
+585:         }
+586:         ensureTyped(t, n, NUMBER_TYPE);
+587:         break;
+588: 
+589:       case Token.POS:
+590:       case Token.NEG:
+591:         left = n.getFirstChild();
+592:         validator.expectNumber(t, left, getJSType(left), "sign operator");
+593:         ensureTyped(t, n, NUMBER_TYPE);
+594:         break;
+595: 
+596:       case Token.EQ:
+597:       case Token.NE: {
+598:         leftType = getJSType(n.getFirstChild());
+599:         rightType = getJSType(n.getLastChild());
+600: 
+601:         JSType leftTypeRestricted = leftType.restrictByNotNullOrUndefined();
+602:         JSType rightTypeRestricted = rightType.restrictByNotNullOrUndefined();
+603:         TernaryValue result =
+604:             leftTypeRestricted.testForEquality(rightTypeRestricted);
+605:         if (result != TernaryValue.UNKNOWN) {
+606:           if (n.getType() == Token.NE) {
+607:             result = result.not();
+608:           }
+609:           report(t, n, DETERMINISTIC_TEST, leftType.toString(),
+610:               rightType.toString(), result.toString());
+611:         }
+612:         ensureTyped(t, n, BOOLEAN_TYPE);
+613:         break;
+614:       }
+615: 
+616:       case Token.SHEQ:
+617:       case Token.SHNE: {
+618:         leftType = getJSType(n.getFirstChild());
+619:         rightType = getJSType(n.getLastChild());
+620: 
+621:         JSType leftTypeRestricted = leftType.restrictByNotNullOrUndefined();
+622:         JSType rightTypeRestricted = rightType.restrictByNotNullOrUndefined();
+623:         if (!leftTypeRestricted.canTestForShallowEqualityWith(
+624:                 rightTypeRestricted)) {
+625:           report(t, n, DETERMINISTIC_TEST_NO_RESULT, leftType.toString(),
+626:               rightType.toString());
+627:         }
+628:         ensureTyped(t, n, BOOLEAN_TYPE);
+629:         break;
+630:       }
+631: 
+632:       case Token.LT:
+633:       case Token.LE:
+634:       case Token.GT:
+635:       case Token.GE:
+636:         leftType = getJSType(n.getFirstChild());
+637:         rightType = getJSType(n.getLastChild());
+638:         if (rightType.isNumber()) {
+639:           validator.expectNumber(
+640:               t, n, leftType, "left side of numeric comparison");
+641:         } else if (leftType.isNumber()) {
+642:           validator.expectNumber(
+643:               t, n, rightType, "right side of numeric comparison");
+644:         } else if (leftType.matchesNumberContext() &&
+645:                    rightType.matchesNumberContext()) {
+646:           // OK.
+647:         } else {
+648:           // Whether the comparison is numeric will be determined at runtime
+649:           // each time the expression is evaluated. Regardless, both operands
+650:           // should match a string context.
+651:           String message = "left side of comparison";
+652:           validator.expectString(t, n, leftType, message);
+653:           validator.expectNotNullOrUndefined(
+654:               t, n, leftType, message, getNativeType(STRING_TYPE));
+655:           message = "right side of comparison";
+656:           validator.expectString(t, n, rightType, message);
+657:           validator.expectNotNullOrUndefined(
+658:               t, n, rightType, message, getNativeType(STRING_TYPE));
+659:         }
+660:         ensureTyped(t, n, BOOLEAN_TYPE);
+661:         break;
+662: 
+663:       case Token.IN:
+664:         left = n.getFirstChild();
+665:         right = n.getLastChild();
+666:         leftType = getJSType(left);
+667:         rightType = getJSType(right);
+668:         validator.expectObject(t, n, rightType, "'in' requires an object");
+669:         validator.expectString(t, left, leftType, "left side of 'in'");
+670:         ensureTyped(t, n, BOOLEAN_TYPE);
+671:         break;
+672: 
+673:       case Token.INSTANCEOF:
+674:         left = n.getFirstChild();
+675:         right = n.getLastChild();
+676:         leftType = getJSType(left);
+677:         rightType = getJSType(right).restrictByNotNullOrUndefined();
+678: 
+679:         validator.expectAnyObject(
+680:             t, left, leftType, "deterministic instanceof yields false");
+681:         validator.expectActualObject(
+682:             t, right, rightType, "instanceof requires an object");
+683:         ensureTyped(t, n, BOOLEAN_TYPE);
+684:         break;
+685: 
+686:       case Token.ASSIGN:
+687:         visitAssign(t, n);
+688:         typeable = false;
+689:         break;
+690: 
+691:       case Token.ASSIGN_LSH:
+692:       case Token.ASSIGN_RSH:
+693:       case Token.ASSIGN_URSH:
+694:       case Token.ASSIGN_DIV:
+695:       case Token.ASSIGN_MOD:
+696:       case Token.ASSIGN_BITOR:
+697:       case Token.ASSIGN_BITXOR:
+698:       case Token.ASSIGN_BITAND:
+699:       case Token.ASSIGN_SUB:
+700:       case Token.ASSIGN_ADD:
+701:       case Token.ASSIGN_MUL:
+702:       case Token.LSH:
+703:       case Token.RSH:
+704:       case Token.URSH:
+705:       case Token.DIV:
+706:       case Token.MOD:
+707:       case Token.BITOR:
+708:       case Token.BITXOR:
+709:       case Token.BITAND:
+710:       case Token.SUB:
+711:       case Token.ADD:
+712:       case Token.MUL:
+713:         visitBinaryOperator(n.getType(), t, n);
+714:         break;
+715: 
+716:       case Token.DELPROP:
+717:         if (!isReference(n.getFirstChild())) {
+718:           report(t, n, BAD_DELETE);
+719:         }
+720:         ensureTyped(t, n, BOOLEAN_TYPE);
+721:         break;
+722: 
+723:       case Token.CASE:
+724:         JSType switchType = getJSType(parent.getFirstChild());
+725:         JSType caseType = getJSType(n.getFirstChild());
+726:         validator.expectSwitchMatchesCase(t, n, switchType, caseType);
+727:         typeable = false;
+728:         break;
+729: 
+730:       case Token.WITH: {
+731:         Node child = n.getFirstChild();
+732:         childType = getJSType(child);
+733:         validator.expectObject(
+734:             t, child, childType, "with requires an object");
+735:         typeable = false;
+736:         break;
+737:       }
+738: 
+739:       case Token.FUNCTION:
+740:         visitFunction(t, n);
+741:         break;
+742: 
+743:       // These nodes have no interesting type behavior.
+744:       case Token.LABEL:
+745:       case Token.LABEL_NAME:
+746:       case Token.SWITCH:
+747:       case Token.BREAK:
+748:       case Token.CATCH:
+749:       case Token.TRY:
+750:       case Token.SCRIPT:
+751:       case Token.EXPR_RESULT:
+752:       case Token.BLOCK:
+753:       case Token.EMPTY:
+754:       case Token.DEFAULT:
+755:       case Token.CONTINUE:
+756:       case Token.DEBUGGER:
+757:       case Token.THROW:
+758:         typeable = false;
+759:         break;
+760: 
+761:       // These nodes require data flow analysis.
+762:       case Token.DO:
+763:       case Token.FOR:
+764:       case Token.IF:
+765:       case Token.WHILE:
+766:         typeable = false;
+767:         break;
+768: 
+769:       // These nodes are typed during the type inference.
+770:       case Token.AND:
+771:       case Token.HOOK:
+772:       case Token.OBJECTLIT:
+773:       case Token.OR:
+774:         if (n.getJSType() != null) { // If we didn't run type inference.
+775:           ensureTyped(t, n);
+776:         } else {
+777:           // If this is an enum, then give that type to the objectlit as well.
+778:           if ((n.getType() == Token.OBJECTLIT)
+779:               && (parent.getJSType() instanceof EnumType)) {
+780:             ensureTyped(t, n, parent.getJSType());
+781:           } else {
+782:             ensureTyped(t, n);
+783:           }
+784:         }
+785:         if (n.getType() == Token.OBJECTLIT) {
+786:           for (Node key : n.children()) {
+787:             visitObjLitKey(t, key, n);
+788:           }
+789:         }
+790:         break;
+791: 
+792:       default:
+793:         report(t, n, UNEXPECTED_TOKEN, Token.name(n.getType()));
+794:         ensureTyped(t, n);
+795:         break;
+796:     }
+797: 
+798:     // Don't count externs since the user's code may not even use that part.
+799:     typeable = typeable && !inExterns;
+800: 
+801:     if (typeable) {
+802:       doPercentTypedAccounting(t, n);
+803:     }
+804: 
+805:     checkNoTypeCheckSection(n, false);
+806:   }
+
+[18] com.google.javascript.jscomp.Scope#getInitialValue  (lines 202-214)
+202:     public Node getInitialValue() {
+203:       Node parent = getParentNode();
+204:       int pType = parent.getType();
+205:       if (pType == Token.FUNCTION) {
+206:         return parent;
+207:       } else if (pType == Token.ASSIGN) {
+208:         return parent.getLastChild();
+209:       } else if (pType == Token.VAR) {
+210:         return nameNode.getFirstChild();
+211:       } else {
+212:         return null;
+213:       }
+214:     }
+
+[19] com.google.javascript.rhino.jstype.FunctionBuilder#withReturnType  (lines 101-105)
+101:   public FunctionBuilder withReturnType(JSType returnType, boolean inferred) {
+102:     this.returnType = returnType;
+103:     this.inferredReturnType = inferred;
+104:     return this;
+105:   }
+
+[20] com.google.javascript.jscomp.MemoizedScopeCreator#createScope  (lines 49-59)
+49:   @Override
+50:   public Scope createScope(Node n, Scope parent) {
+51:     Scope scope = scopes.get(n);
+52:     if (scope == null) {
+53:       scope = delegate.createScope(n, parent);
+54:       scopes.put(n, scope);
+55:     } else {
+56:       Preconditions.checkState(parent == scope.getParent());
+57:     }
+58:     return scope;
+59:   }
+
+[21] com.google.javascript.jscomp.Scope#getInputName  (lines 264-269)
+264:     public String getInputName() {
+265:       if (input == null)
+266:         return "<non-file>";
+267:       else
+268:         return input.getName();
+269:     }
+
+[22] com.google.javascript.jscomp.ProcessClosurePrimitives#handleCandidateProvideDefinition  (lines 349-371)
+349:   private void handleCandidateProvideDefinition(
+350:       NodeTraversal t, Node n, Node parent) {
+351:     if (t.inGlobalScope()) {
+352:       String name = null;
+353:       if (n.getType() == Token.NAME && parent.getType() == Token.VAR) {
+354:         name = n.getString();
+355:       } else if (n.getType() == Token.ASSIGN &&
+356:           parent.getType() == Token.EXPR_RESULT) {
+357:         name = n.getFirstChild().getQualifiedName();
+358:       }
+359: 
+360:       if (name != null) {
+361:         if (parent.getBooleanProp(Node.IS_NAMESPACE)) {
+362:           processProvideFromPreviousPass(t, name, parent);
+363:         } else {
+364:           ProvidedName pn = providedNames.get(name);
+365:           if (pn != null) {
+366:             pn.addDefinition(parent, t.getModule());
+367:           }
+368:         }
+369:       }
+370:     }
+371:   }
+
+[23] com.google.javascript.jscomp.ProcessClosurePrimitives#process  (lines 137-160)
+137:   @Override
+138:   public void process(Node externs, Node root) {
+139:     new NodeTraversal(compiler, this).traverse(root);
+140: 
+141:     for (ProvidedName pn : providedNames.values()) {
+142:       pn.replace();
+143:     }
+144: 
+145:     if (requiresLevel.isOn()) {
+146:       for (UnrecognizedRequire r : unrecognizedRequires) {
+147:         DiagnosticType error;
+148:         ProvidedName expectedName = providedNames.get(r.namespace);
+149:         if (expectedName != null && expectedName.firstNode != null) {
+150:           // The namespace ended up getting provided after it was required.
+151:           error = LATE_PROVIDE_ERROR;
+152:         } else {
+153:           error = MISSING_PROVIDE_ERROR;
+154:         }
+155: 
+156:         compiler.report(JSError.make(
+157:             r.inputName, r.requireNode, requiresLevel, error, r.namespace));
+158:       }
+159:     }
+160:   }
+
+[24] com.google.javascript.jscomp.parsing.JsDocInfoParser#parseTypeExpression  (lines 1640-1679)
+1640:   private Node parseTypeExpression(JsDocToken token) {
+1641:     if (token == JsDocToken.QMARK) {
+1642:       // A QMARK could mean that a type is nullable, or that it's unknown.
+1643:       // We use look-ahead 1 to determine whether it's unknown. Otherwise,
+1644:       // we assume it means nullable. There are 5 cases:
+1645:       // {?} - right curly
+1646:       // {?=} - equals
+1647:       // {function(?, number)} - comma
+1648:       // {function(number, ?)} - right paren
+1649:       // {function(): ?|number} - pipe
+1650:       // I'm not a big fan of using look-ahead for this, but it makes
+1651:       // the type language a lot nicer.
+1652:       token = next();
+1653:       if (token == JsDocToken.COMMA ||
+1654:           token == JsDocToken.EQUALS ||
+1655:           token == JsDocToken.RC ||
+1656:           token == JsDocToken.RP ||
+1657:           token == JsDocToken.PIPE) {
+1658:         restoreLookAhead(token);
+1659:         return newNode(Token.QMARK);
+1660:       }
+1661: 
+1662:       return wrapNode(Token.QMARK, parseBasicTypeExpression(token));
+1663:     } else if (token == JsDocToken.BANG) {
+1664:       return wrapNode(Token.BANG, parseBasicTypeExpression(next()));
+1665:     } else {
+1666:       Node basicTypeExpr = parseBasicTypeExpression(token);
+1667:       if (basicTypeExpr != null) {
+1668:         if (match(JsDocToken.QMARK)) {
+1669:           next();
+1670:           return wrapNode(Token.QMARK, basicTypeExpr);
+1671:         } else if (match(JsDocToken.BANG)) {
+1672:           next();
+1673:           return wrapNode(Token.BANG, basicTypeExpr);
+1674:         }
+1675:       }
+1676: 
+1677:       return basicTypeExpr;
+1678:     }
+1679:   }
+
+[25] com.google.javascript.jscomp.TypeValidator#expectUndeclaredVariable  (lines 506-562)
+506:   void expectUndeclaredVariable(String sourceName, Node n, Node parent, Var var,
+507:       String variableName, JSType newType) {
+508:     boolean allowDupe = false;
+509:     if (n.getType() == Token.GETPROP ||
+510:         NodeUtil.isObjectLitKey(n, parent)) {
+511:       JSDocInfo info = n.getJSDocInfo();
+512:       if (info == null) {
+513:         info = parent.getJSDocInfo();
+514:       }
+515:       allowDupe =
+516:           info != null && info.getSuppressions().contains("duplicate");
+517:     }
+518: 
+519:     JSType varType = var.getType();
+520: 
+521:     // Only report duplicate declarations that have types. Other duplicates
+522:     // will be reported by the syntactic scope creator later in the
+523:     // compilation process.
+524:     if (varType != null &&
+525:         varType != typeRegistry.getNativeType(UNKNOWN_TYPE) &&
+526:         newType != null &&
+527:         newType != typeRegistry.getNativeType(UNKNOWN_TYPE)) {
+528:       // If there are two typed declarations of the same variable, that
+529:       // is an error and the second declaration is ignored, except in the
+530:       // case of native types. A null input type means that the declaration
+531:       // was made in TypedScopeCreator#createInitialScope and is a
+532:       // native type.
+533:       if (var.input == null) {
+534:         n.setJSType(varType);
+535:         if (parent.getType() == Token.VAR) {
+536:           if (n.getFirstChild() != null) {
+537:             n.getFirstChild().setJSType(varType);
+538:           }
+539:         } else {
+540:           Preconditions.checkState(parent.getType() == Token.FUNCTION);
+541:           parent.setJSType(varType);
+542:         }
+543:       } else {
+544:         // Always warn about duplicates if the overridden type does not
+545:         // match the original type.
+546:         //
+547:         // If the types match, suppress the warning iff there was a @suppress
+548:         // tag, or if the original declaration was a stub.
+549:         if (!(allowDupe ||
+550:               var.getParentNode().getType() == Token.EXPR_RESULT) ||
+551:             !newType.equals(varType)) {
+552:           if (shouldReport) {
+553:             compiler.report(
+554:                 JSError.make(sourceName, n, DUP_VAR_DECLARATION,
+555:                     variableName, newType.toString(), var.getInputName(),
+556:                     String.valueOf(var.nameNode.getLineno()),
+557:                     varType.toString()));
+558:           }
+559:         }
+560:       }
+561:     }
+562:   }
+
+[26] com.google.javascript.rhino.jstype.JSTypeRegistry#createFromTypeNodesInternal  (lines 1365-1519)
+1365:   private JSType createFromTypeNodesInternal(Node n, String sourceName,
+1366:       StaticScope<JSType> scope) {
+1367:     switch (n.getType()) {
+1368:       case Token.LC: // Record type.
+1369:         return createRecordTypeFromNodes(
+1370:             n.getFirstChild(), sourceName, scope);
+1371: 
+1372:       case Token.BANG: // Not nullable
+1373:         return createFromTypeNodesInternal(
+1374:             n.getFirstChild(), sourceName, scope)
+1375:             .restrictByNotNullOrUndefined();
+1376: 
+1377:       case Token.QMARK: // Nullable or unknown
+1378:         Node firstChild = n.getFirstChild();
+1379:         if (firstChild == null) {
+1380:           return getNativeType(UNKNOWN_TYPE);
+1381:         }
+1382:         return createDefaultObjectUnion(
+1383:             createFromTypeNodesInternal(
+1384:                 firstChild, sourceName, scope));
+1385: 
+1386:       case Token.EQUALS: // Optional
+1387:         return createOptionalType(
+1388:             createFromTypeNodesInternal(
+1389:                 n.getFirstChild(), sourceName, scope));
+1390: 
+1391:       case Token.ELLIPSIS: // Var args
+1392:         return createOptionalType(
+1393:             createFromTypeNodesInternal(
+1394:                 n.getFirstChild(), sourceName, scope));
+1395: 
+1396:       case Token.STAR: // The AllType
+1397:         return getNativeType(ALL_TYPE);
+1398: 
+1399:       case Token.LB: // Array type
+1400:         // TODO(nicksantos): Enforce membership restrictions on the Array.
+1401:         return getNativeType(ARRAY_TYPE);
+1402: 
+1403:       case Token.PIPE: // Union type
+1404:         UnionTypeBuilder builder = new UnionTypeBuilder(this);
+1405:         for (Node child = n.getFirstChild(); child != null;
+1406:              child = child.getNext()) {
+1407:           builder.addAlternate(
+1408:               createFromTypeNodesInternal(child, sourceName, scope));
+1409:         }
+1410:         return builder.build();
+1411: 
+1412:       case Token.EMPTY: // When the return value of a function is not specified
+1413:         return getNativeType(UNKNOWN_TYPE);
+1414: 
+1415:       case Token.VOID: // Only allowed in the return value of a function.
+1416:         return getNativeType(VOID_TYPE);
+1417: 
+1418:       case Token.STRING:
+1419:         JSType namedType = getType(scope, n.getString(), sourceName,
+1420:             n.getLineno(), n.getCharno());
+1421:         if (resolveMode != ResolveMode.LAZY_NAMES) {
+1422:           namedType = namedType.resolveInternal(reporter, scope);
+1423:         }
+1424:         if ((namedType instanceof ObjectType) &&
+1425:             !(nonNullableTypeNames.contains(n.getString()))) {
+1426:           Node typeList = n.getFirstChild();
+1427:           if (typeList != null &&
+1428:               ("Array".equals(n.getString()) ||
+1429:                "Object".equals(n.getString()))) {
+1430:             JSType parameterType =
+1431:                 createFromTypeNodesInternal(
+1432:                     typeList.getLastChild(), sourceName, scope);
+1433:             namedType = new ParameterizedType(
+1434:                 this, (ObjectType) namedType, parameterType);
+1435:             if (typeList.hasMoreThanOneChild()) {
+1436:               JSType indexType =
+1437:                   createFromTypeNodesInternal(
+1438:                       typeList.getFirstChild(), sourceName, scope);
+1439:               namedType = new IndexedType(
+1440:                   this, (ObjectType) namedType, indexType);
+1441:             }
+1442:           }
+1443:           return createDefaultObjectUnion(namedType);
+1444:         } else {
+1445:           return namedType;
+1446:         }
+1447: 
+1448:       case Token.FUNCTION:
+1449:         ObjectType thisType = null;
+1450:         boolean isConstructor = false;
+1451:         Node current = n.getFirstChild();
+1452:         if (current.getType() == Token.THIS ||
+1453:             current.getType() == Token.NEW) {
+1454:           Node contextNode = current.getFirstChild();
+1455:           thisType =
+1456:               ObjectType.cast(
+1457:                   createFromTypeNodesInternal(
+1458:                       contextNode, sourceName, scope)
+1459:                   .restrictByNotNullOrUndefined());
+1460:           if (thisType == null) {
+1461:             reporter.warning(
+1462:                 ScriptRuntime.getMessage0(
+1463:                     current.getType() == Token.THIS ?
+1464:                     "msg.jsdoc.function.thisnotobject" :
+1465:                     "msg.jsdoc.function.newnotobject"),
+1466:                 sourceName,
+1467:                 contextNode.getLineno(), "", contextNode.getCharno());
+1468:           }
+1469: 
+1470:           isConstructor = current.getType() == Token.NEW;
+1471:           current = current.getNext();
+1472:         }
+1473: 
+1474:         FunctionParamBuilder paramBuilder = new FunctionParamBuilder(this);
+1475: 
+1476:         if (current.getType() == Token.LP) {
+1477:           Node args = current.getFirstChild();
+1478:           for (Node arg = current.getFirstChild(); arg != null;
+1479:                arg = arg.getNext()) {
+1480:             if (arg.getType() == Token.ELLIPSIS) {
+1481:               if (arg.getChildCount() == 0) {
+1482:                 paramBuilder.addVarArgs(getNativeType(UNKNOWN_TYPE));
+1483:               } else {
+1484:                 paramBuilder.addVarArgs(
+1485:                     createFromTypeNodesInternal(
+1486:                         arg.getFirstChild(), sourceName, scope));
+1487:               }
+1488:             } else {
+1489:               JSType type = createFromTypeNodesInternal(
+1490:                   arg, sourceName, scope);
+1491:               if (arg.getType() == Token.EQUALS) {
+1492:                 boolean addSuccess = paramBuilder.addOptionalParams(type);
+1493:                 if (!addSuccess) {
+1494:                   reporter.warning(
+1495:                       ScriptRuntime.getMessage0("msg.jsdoc.function.varargs"),
+1496:                       sourceName, arg.getLineno(), "", arg.getCharno());
+1497:                 }
+1498:               } else {
+1499:                 paramBuilder.addRequiredParams(type);
+1500:               }
+1501:             }
+1502:           }
+1503:           current = current.getNext();
+1504:         }
+1505: 
+1506:         JSType returnType =
+1507:             createFromTypeNodesInternal(current, sourceName, scope);
+1508: 
+1509:         return new FunctionBuilder(this)
+1510:             .withParams(paramBuilder)
+1511:             .withReturnType(returnType)
+1512:             .withTypeOfThis(thisType)
+1513:             .setIsConstructor(isConstructor)
+1514:             .build();
+1515:     }
+1516: 
+1517:     throw new IllegalStateException(
+1518:         "Unexpected node in type expression: " + n.toString());
+1519:   }
+
+[27] com.google.javascript.jscomp.TypeCheck#visitName  (lines 1213-1242)
+1213:   boolean visitName(NodeTraversal t, Node n, Node parent) {
+1214:     // At this stage, we need to determine whether this is a leaf
+1215:     // node in an expression (which therefore needs to have a type
+1216:     // assigned for it) versus some other decorative node that we
+1217:     // can safely ignore.  Function names, arguments (children of LP nodes) and
+1218:     // variable declarations are ignored.
+1219:     // TODO(user): remove this short-circuiting in favor of a
+1220:     // pre order traversal of the FUNCTION, CATCH, LP and VAR nodes.
+1221:     int parentNodeType = parent.getType();
+1222:     if (parentNodeType == Token.FUNCTION ||
+1223:         parentNodeType == Token.CATCH ||
+1224:         parentNodeType == Token.LP ||
+1225:         parentNodeType == Token.VAR) {
+1226:       return false;
+1227:     }
+1228: 
+1229:     JSType type = n.getJSType();
+1230:     if (type == null) {
+1231:       type = getNativeType(UNKNOWN_TYPE);
+1232:       Var var = t.getScope().getVar(n.getString());
+1233:       if (var != null) {
+1234:         JSType varType = var.getType();
+1235:         if (varType != null) {
+1236:           type = varType;
+1237:         }
+1238:       }
+1239:     }
+1240:     ensureTyped(t, n, type);
+1241:     return true;
+1242:   }
+
+[28] com.google.javascript.jscomp.Scope#getScope  (lines 161-163)
+161:     Scope getScope() {
+162:       return scope;
+163:     }
+
+[29] com.google.javascript.jscomp.ProcessClosurePrimitives#updateMinimumModule  (lines 854-866)
+854:     private void updateMinimumModule(JSModule newModule) {
+855:       if (minimumModule == null) {
+856:         minimumModule = newModule;
+857:       } else if (moduleGraph != null) {
+858:         minimumModule = moduleGraph.getDeepestCommonDependencyInclusive(
+859:             minimumModule, newModule);
+860:       } else {
+861:         // If there is no module graph, then there must be exactly one
+862:         // module in the program.
+863:         Preconditions.checkState(newModule == minimumModule,
+864:                                  "Missing module graph");
+865:       }
+866:     }
+
+[30] com.google.javascript.jscomp.ProcessClosurePrimitives#replace  (lines 875-938)
+875:     void replace() {
+876:       if (firstNode == null) {
+877:         // Don't touch the base case ('goog').
+878:         replacementNode = candidateDefinition;
+879:         return;
+880:       }
+881: 
+882:       // Handle the case where there is a duplicate definition for an explicitly
+883:       // provided symbol.
+884:       if (candidateDefinition != null && explicitNode != null) {
+885:         explicitNode.detachFromParent();
+886:         compiler.reportCodeChange();
+887: 
+888:         // Does this need a VAR keyword?
+889:         replacementNode = candidateDefinition;
+890:         if (NodeUtil.isExpressionNode(candidateDefinition) &&
+891:             !candidateDefinition.getFirstChild().isQualifiedName()) {
+892:           candidateDefinition.putBooleanProp(Node.IS_NAMESPACE, true);
+893:           Node assignNode = candidateDefinition.getFirstChild();
+894:           Node nameNode = assignNode.getFirstChild();
+895:           if (nameNode.getType() == Token.NAME) {
+896:             // Need to convert this assign to a var declaration.
+897:             Node valueNode = nameNode.getNext();
+898:             assignNode.removeChild(nameNode);
+899:             assignNode.removeChild(valueNode);
+900:             nameNode.addChildToFront(valueNode);
+901:             Node varNode = new Node(Token.VAR, nameNode);
+902:             varNode.copyInformationFrom(candidateDefinition);
+903:             candidateDefinition.getParent().replaceChild(
+904:                 candidateDefinition, varNode);
+905:             nameNode.setJSDocInfo(assignNode.getJSDocInfo());
+906:             compiler.reportCodeChange();
+907:             replacementNode = varNode;
+908:           }
+909:         }
+910:       } else {
+911:         // Handle the case where there's not a duplicate definition.
+912:         replacementNode = createDeclarationNode();
+913:         if (firstModule == minimumModule) {
+914:           firstNode.getParent().addChildBefore(replacementNode, firstNode);
+915:         } else {
+916:           // In this case, the name was implicitly provided by two independent
+917:           // modules. We need to move this code up to a common module.
+918:           int indexOfDot = namespace.lastIndexOf('.');
+919:           if (indexOfDot == -1) {
+920:             // Any old place is fine.
+921:             compiler.getNodeForCodeInsertion(minimumModule)
+922:                 .addChildToBack(replacementNode);
+923:           } else {
+924:             // Add it after the parent namespace.
+925:             ProvidedName parentName =
+926:                 providedNames.get(namespace.substring(0, indexOfDot));
+927:             Preconditions.checkNotNull(parentName);
+928:             Preconditions.checkNotNull(parentName.replacementNode);
+929:             parentName.replacementNode.getParent().addChildAfter(
+930:                 replacementNode, parentName.replacementNode);
+931:           }
+932:         }
+933:         if (explicitNode != null) {
+934:           explicitNode.detachFromParent();
+935:         }
+936:         compiler.reportCodeChange();
+937:       }
+938:     }
+
+[31] com.google.javascript.jscomp.TypeInference#updateScopeForTypeChange  (lines 494-540)
+494:   private void updateScopeForTypeChange(
+495:       FlowScope scope, Node left, JSType leftType, JSType resultType) {
+496:     Preconditions.checkNotNull(resultType);
+497:     switch (left.getType()) {
+498:       case Token.NAME:
+499:         String varName = left.getString();
+500:         Var var = syntacticScope.getVar(varName);
+501:         if (var != null && var.isLocal() && var.getScope() != syntacticScope) {
+502:           assignedOuterLocalVars.put(var.getScope(), var);
+503:         }
+504: 
+505:         // When looking at VAR initializers for declared VARs, we trust
+506:         // the declared type over the type it's being initialized to.
+507:         // This has two purposes:
+508:         // 1) We avoid re-declaring declared variables so that built-in
+509:         //    types defined in externs are not redeclared.
+510:         // 2) When there's a lexical closure like
+511:         //    /** @type {?string} */ var x = null;
+512:         //    function f() { x = 'xyz'; }
+513:         //    the inference will ignore the lexical closure,
+514:         //    which is just wrong. This bug needs to be fixed eventually.
+515:         boolean isVarDeclaration = left.hasChildren();
+516:         if (!isVarDeclaration || var == null || var.isTypeInferred()) {
+517:           redeclare(scope, varName, resultType);
+518:         }
+519:         left.setJSType(isVarDeclaration || leftType == null ?
+520:             resultType : null);
+521: 
+522:         if (var != null && var.isTypeInferred()) {
+523:           JSType oldType = var.getType();
+524:           var.setType(oldType == null ?
+525:               resultType : oldType.getLeastSupertype(resultType));
+526:         }
+527:         break;
+528:       case Token.GETPROP:
+529:         String qualifiedName = left.getQualifiedName();
+530:         if (qualifiedName != null) {
+531:           scope.inferQualifiedSlot(qualifiedName,
+532:               leftType == null ? getNativeType(UNKNOWN_TYPE) : leftType,
+533:               resultType);
+534:         }
+535: 
+536:         left.setJSType(resultType);
+537:         ensurePropertyDefined(left, resultType);
+538:         break;
+539:     }
+540:   }
+
+[32] com.google.javascript.rhino.jstype.UnionType#getLeastSupertype  (lines 260-271)
+260:   @Override
+261:   public JSType getLeastSupertype(JSType that) {
+262:     if (!that.isUnknownType() && !that.isUnionType()) {
+263:       for (JSType alternate : alternates) {
+264:         if (!alternate.isUnknownType() && that.isSubtype(alternate)) {
+265:           return this;
+266:         }
+267:       }
+268:     }
+269: 
+270:     return getLeastSupertype(this, that);
+271:   }
+
+[33] com.google.javascript.jscomp.SemanticReverseAbstractInterpreter#getPreciserScopeKnowingConditionOutcome  (lines 118-257)
+118:   public FlowScope getPreciserScopeKnowingConditionOutcome(Node condition,
+119:       FlowScope blindScope, boolean outcome) {
+120:     // Check for the typeof operator.
+121:     int operatorToken = condition.getType();
+122:     switch (operatorToken) {
+123:       case Token.EQ:
+124:       case Token.NE:
+125:       case Token.SHEQ:
+126:       case Token.SHNE:
+127:       case Token.CASE:
+128:         Node left;
+129:         Node right;
+130:         if (operatorToken == Token.CASE) {
+131:           left = condition.getParent().getFirstChild(); // the switch condition
+132:           right = condition.getFirstChild();
+133:         } else {
+134:           left = condition.getFirstChild();
+135:           right = condition.getLastChild();
+136:         }
+137: 
+138:         Node typeOfNode = null;
+139:         Node stringNode = null;
+140:         if (left.getType() == Token.TYPEOF && right.getType() == Token.STRING) {
+141:           typeOfNode = left;
+142:           stringNode = right;
+143:         } else if (right.getType() == Token.TYPEOF &&
+144:                    left.getType() == Token.STRING) {
+145:           typeOfNode = right;
+146:           stringNode = left;
+147:         }
+148:         if (typeOfNode != null && stringNode != null) {
+149:           Node operandNode = typeOfNode.getFirstChild();
+150:           JSType operandType = getTypeIfRefinable(operandNode, blindScope);
+151:           if (operandType != null) {
+152:             boolean resultEqualsValue = operatorToken == Token.EQ ||
+153:                 operatorToken == Token.SHEQ || operatorToken == Token.CASE;
+154:             if (!outcome) {
+155:               resultEqualsValue = !resultEqualsValue;
+156:             }
+157:             return caseTypeOf(operandNode, operandType, stringNode.getString(),
+158:                 resultEqualsValue, blindScope);
+159:           }
+160:         }
+161:     }
+162:     switch (operatorToken) {
+163:       case Token.AND:
+164:         if (outcome) {
+165:           return caseAndOrNotShortCircuiting(condition.getFirstChild(),
+166:               condition.getLastChild(), blindScope, true);
+167:         } else {
+168:           return caseAndOrMaybeShortCircuiting(condition.getFirstChild(),
+169:               condition.getLastChild(), blindScope, true);
+170:         }
+171: 
+172:       case Token.OR:
+173:         if (!outcome) {
+174:           return caseAndOrNotShortCircuiting(condition.getFirstChild(),
+175:               condition.getLastChild(), blindScope, false);
+176:         } else {
+177:           return caseAndOrMaybeShortCircuiting(condition.getFirstChild(),
+178:               condition.getLastChild(), blindScope, false);
+179:         }
+180: 
+181:       case Token.EQ:
+182:         if (outcome) {
+183:           return caseEquality(condition, blindScope, EQ);
+184:         } else {
+185:           return caseEquality(condition, blindScope, NE);
+186:         }
+187: 
+188:       case Token.NE:
+189:         if (outcome) {
+190:           return caseEquality(condition, blindScope, NE);
+191:         } else {
+192:           return caseEquality(condition, blindScope, EQ);
+193:         }
+194: 
+195:       case Token.SHEQ:
+196:         if (outcome) {
+197:           return caseEquality(condition, blindScope, SHEQ);
+198:         } else {
+199:           return caseEquality(condition, blindScope, SHNE);
+200:         }
+201: 
+202:       case Token.SHNE:
+203:         if (outcome) {
+204:           return caseEquality(condition, blindScope, SHNE);
+205:         } else {
+206:           return caseEquality(condition, blindScope, SHEQ);
+207:         }
+208: 
+209:       case Token.NAME:
+210:       case Token.GETPROP:
+211:         return caseNameOrGetProp(condition, blindScope, outcome);
+212: 
+213:       case Token.ASSIGN:
+214:         return firstPreciserScopeKnowingConditionOutcome(
+215:             condition.getFirstChild(),
+216:             firstPreciserScopeKnowingConditionOutcome(
+217:                 condition.getFirstChild().getNext(), blindScope, outcome),
+218:             outcome);
+219: 
+220:       case Token.NOT:
+221:         return firstPreciserScopeKnowingConditionOutcome(
+222:             condition.getFirstChild(), blindScope, !outcome);
+223: 
+224:       case Token.LE:
+225:       case Token.LT:
+226:       case Token.GE:
+227:       case Token.GT:
+228:         if (outcome) {
+229:           return caseEquality(condition, blindScope, INEQ);
+230:         }
+231:         break;
+232: 
+233:       case Token.INSTANCEOF:
+234:         return caseInstanceOf(
+235:             condition.getFirstChild(), condition.getLastChild(), blindScope,
+236:             outcome);
+237: 
+238:       case Token.IN:
+239:         if (outcome && condition.getFirstChild().getType() == Token.STRING) {
+240:           return caseIn(condition.getLastChild(),
+241:               condition.getFirstChild().getString(), blindScope);
+242:         }
+243:         break;
+244: 
+245:       case Token.CASE:
+246:         Node left =
+247:             condition.getParent().getFirstChild(); // the switch condition
+248:         Node right = condition.getFirstChild();
+249:         if (outcome) {
+250:           return caseEquality(left, right, blindScope, SHEQ);
+251:         } else {
+252:           return caseEquality(left, right, blindScope, SHNE);
+253:         }
+254:     }
+255:     return nextPreciserScopeKnowingConditionOutcome(
+256:         condition, blindScope, outcome);
+257:   }
+
+[34] com.google.javascript.jscomp.parsing.JsDocTokenStream#getJsDocToken  (lines 59-195)
+59:   @SuppressWarnings("fallthrough")
+60:   final JsDocToken getJsDocToken() {
+61:     int c;
+62:     stringBufferTop = 0;
+63:     for (;;) {
+64:       // eat white spaces
+65:       for (;;) {
+66:         charno = -1;
+67:         c = getChar();
+68:         if (c == EOF_CHAR) {
+69:           return JsDocToken.EOF;
+70:         } else if (c == '\n') {
+71:           return JsDocToken.EOL;
+72:         } else if (!isJSSpace(c)) {
+73:           break;
+74:         }
+75:       }
+76: 
+77:       switch (c) {
+78:         // annotation, e.g. @type or @constructor
+79:         case '@':
+80:           do {
+81:             c = getChar();
+82:             if (isAlpha(c)) {
+83:               addToString(c);
+84:             } else {
+85:               ungetChar(c);
+86:               this.string = getStringFromBuffer();
+87:               stringBufferTop = 0;
+88:               return JsDocToken.ANNOTATION;
+89:             }
+90:           } while (true);
+91: 
+92:         case '*':
+93:           if (matchChar('/')) {
+94:             return JsDocToken.EOC;
+95:           } else {
+96:             return JsDocToken.STAR;
+97:           }
+98: 
+99:         case ',':
+100:           return JsDocToken.COMMA;
+101: 
+102:         case '>':
+103:           return JsDocToken.GT;
+104: 
+105:         case '(':
+106:           return JsDocToken.LP;
+107: 
+108:         case ')':
+109:           return JsDocToken.RP;
+110: 
+111:         case '{':
+112:           return JsDocToken.LC;
+113: 
+114:         case '}':
+115:           return JsDocToken.RC;
+116: 
+117:         case '[':
+118:           return JsDocToken.LB;
+119: 
+120:         case ']':
+121:           return JsDocToken.RB;
+122: 
+123:         case '?':
+124:           return JsDocToken.QMARK;
+125: 
+126:         case '!':
+127:           return JsDocToken.BANG;
+128: 
+129:         case ':':
+130:           return JsDocToken.COLON;
+131: 
+132:         case '=':
+133:           return JsDocToken.EQUALS;
+134: 
+135:         case '|':
+136:           matchChar('|');
+137:           return JsDocToken.PIPE;
+138: 
+139:         case '.':
+140:           c = getChar();
+141:           if (c == '<') {
+142:             return JsDocToken.LT;
+143:           } else {
+144:             if (c == '.') {
+145:               c = getChar();
+146:               if (c == '.') {
+147:                 return JsDocToken.ELLIPSIS;
+148:               } else {
+149:                 addToString('.');
+150:               }
+151:             }
+152:             // we may backtrack across line boundary
+153:             ungetBuffer[ungetCursor++] = c;
+154:             c = '.';
+155:           }
+156:           // fall through
+157: 
+158:         default: {
+159:           // recognize a jsdoc string but discard last . if it is followed by
+160:           // a non-jsdoc comment char, e.g. Array.<
+161:           int c1 = c;
+162:           addToString(c);
+163:           int c2 = getChar();
+164:           if (!isJSDocString(c2)) {
+165:             ungetChar(c2);
+166:             this.string = getStringFromBuffer();
+167:             stringBufferTop = 0;
+168:             return JsDocToken.STRING;
+169:           } else {
+170:             do {
+171:               c1 = c2;
+172:               c2 = getChar();
+173:               if (c1 == '.' && c2 == '<') {
+174:                 ungetChar(c2);
+175:                 ungetChar(c1);
+176:                 this.string = getStringFromBuffer();
+177:                 stringBufferTop = 0;
+178:                 return JsDocToken.STRING;
+179:               } else {
+180:                 if (isJSDocString(c2)) {
+181:                   addToString(c1);
+182:                 } else {
+183:                   ungetChar(c2);
+184:                   addToString(c1);
+185:                   this.string = getStringFromBuffer();
+186:                   stringBufferTop = 0;
+187:                   return JsDocToken.STRING;
+188:                 }
+189:               }
+190:             } while (true);
+191:           }
+192:         }
+193:       }
+194:     }
+195:   }
+
+[35] com.google.javascript.rhino.jstype.StringType#autoboxesTo  (lines 100-103)
+100:   @Override
+101:   public JSType autoboxesTo() {
+102:     return getNativeType(JSTypeNative.STRING_OBJECT_TYPE);
+103:   }
+
+[36] com.google.javascript.rhino.jstype.JSType#getLeastSupertype  (lines 593-598)
+593:   static JSType getLeastSupertype(JSType thisType, JSType thatType) {
+594:     boolean areEquivalent = thisType.isEquivalentTo(thatType);
+595:     return areEquivalent ? thisType :
+596:         filterNoResolvedType(
+597:             thisType.registry.createUnionType(thisType, thatType));
+598:   }
+
+[37] com.google.javascript.rhino.JSDocInfo#getImplementedInterfaceCount  (lines 1122-1127)
+1122:   public int getImplementedInterfaceCount() {
+1123:     if (info == null || info.implementedInterfaces == null) {
+1124:       return 0;
+1125:     }
+1126:     return info.implementedInterfaces.size();
+1127:   }
+
+[38] com.google.javascript.jscomp.LinkedFlowScope#FlatFlowScopeCache  (lines 412-476)
+412:     FlatFlowScopeCache(LinkedFlowScope joinedScopeA,
+413:         LinkedFlowScope joinedScopeB) {
+414:       linkedEquivalent = null;
+415: 
+416:       // Always prefer the "real" function scope to the faked-out
+417:       // bottom scope.
+418:       functionScope = joinedScopeA.flowsFromBottom() ?
+419:           joinedScopeB.getFunctionScope() : joinedScopeA.getFunctionScope();
+420: 
+421:       Map<String, StaticSlot<JSType>> slotsA = joinedScopeA.allFlowSlots();
+422:       Map<String, StaticSlot<JSType>> slotsB = joinedScopeB.allFlowSlots();
+423: 
+424:       symbols = slotsA;
+425: 
+426:       // There are 5 different join cases:
+427:       // 1) The type is declared in joinedScopeA, not in joinedScopeB,
+428:       //    and not in functionScope. Just use the one in A.
+429:       // 2) The type is declared in joinedScopeB, not in joinedScopeA,
+430:       //    and not in functionScope. Just use the one in B.
+431:       // 3) The type is declared in functionScope and joinedScopeA, but
+432:       //    not in joinedScopeB. Join the two types.
+433:       // 4) The type is declared in functionScope and joinedScopeB, but
+434:       //    not in joinedScopeA. Join the two types.
+435:       // 5) The type is declared in joinedScopeA and joinedScopeB. Join
+436:       //    the two types.
+437:       Set<String> symbolNames = Sets.newHashSet(symbols.keySet());
+438:       symbolNames.addAll(slotsB.keySet());
+439: 
+440:       for (String name : symbolNames) {
+441:         StaticSlot<JSType> slotA = slotsA.get(name);
+442:         StaticSlot<JSType> slotB = slotsB.get(name);
+443: 
+444:         JSType joinedType = null;
+445:         if (slotB == null || slotB.getType() == null) {
+446:           StaticSlot<JSType> fnSlot
+447:               = joinedScopeB.getFunctionScope().getSlot(name);
+448:           JSType fnSlotType = fnSlot == null ? null : fnSlot.getType();
+449:           if (fnSlotType == null) {
+450:             // Case #1 -- already inserted.
+451:           } else {
+452:             // Case #3
+453:             joinedType = slotA.getType().getLeastSupertype(fnSlotType);
+454:           }
+455:         } else if (slotA == null || slotA.getType() == null) {
+456:           StaticSlot<JSType> fnSlot
+457:               = joinedScopeA.getFunctionScope().getSlot(name);
+458:           JSType fnSlotType = fnSlot == null ? null : fnSlot.getType();
+459:           if (fnSlotType == null) {
+460:             // Case #2
+461:             symbols.put(name, slotB);
+462:           } else {
+463:             // Case #4
+464:             joinedType = slotB.getType().getLeastSupertype(fnSlotType);
+465:           }
+466:         } else {
+467:           // Case #5
+468:           joinedType =
+469:               slotA.getType().getLeastSupertype(slotB.getType());
+470:         }
+471: 
+472:         if (joinedType != null) {
+473:           symbols.put(name, new SimpleSlot(name, joinedType, true));
+474:         }
+475:       }
+476:     }
+
+[39] com.google.javascript.jscomp.LinkedFlowScope#getSlot  (lines 481-487)
+481:     public StaticSlot<JSType> getSlot(String name) {
+482:       if (symbols.containsKey(name)) {
+483:         return symbols.get(name);
+484:       } else {
+485:         return functionScope.getSlot(name);
+486:       }
+487:     }
+
+[40] com.google.javascript.jscomp.ControlFlowAnalysis#computeFollowNode  (lines 682-779)
+682:   private static Node computeFollowNode(
+683:       Node fromNode, Node node, ControlFlowAnalysis cfa) {
+684:     /*
+685:      * This is the case where:
+686:      *
+687:      * 1. Parent is null implies that we are transferring control to the end of
+688:      * the script.
+689:      *
+690:      * 2. Parent is a function implies that we are transferring control back to
+691:      * the caller of the function.
+692:      *
+693:      * 3. If the node is a return statement, we should also transfer control
+694:      * back to the caller of the function.
+695:      *
+696:      * 4. If the node is root then we have reached the end of what we have been
+697:      * asked to traverse.
+698:      *
+699:      * In all cases we should transfer control to a "symbolic return" node.
+700:      * This will make life easier for DFAs.
+701:      */
+702:     Node parent = node.getParent();
+703:     if (parent == null || parent.getType() == Token.FUNCTION ||
+704:         (cfa != null && node == cfa.root)) {
+705:       return null;
+706:     }
+707: 
+708:     // If we are just before a IF/WHILE/DO/FOR:
+709:     switch (parent.getType()) {
+710:       // The follow() of any of the path from IF would be what follows IF.
+711:       case Token.IF:
+712:         return computeFollowNode(fromNode, parent, cfa);
+713:       case Token.CASE:
+714:       case Token.DEFAULT:
+715:         // After the body of a CASE, the control goes to the body of the next
+716:         // case, without having to go to the case condition.
+717:         if (parent.getNext() != null) {
+718:           if (parent.getNext().getType() == Token.CASE) {
+719:             return parent.getNext().getFirstChild().getNext();
+720:           } else if (parent.getNext().getType() == Token.DEFAULT) {
+721:             return parent.getNext().getFirstChild();
+722:           } else {
+723:             Preconditions.checkState(false, "Not reachable");
+724:           }
+725:         } else {
+726:           return computeFollowNode(fromNode, parent, cfa);
+727:         }
+728:         break;
+729:       case Token.FOR:
+730:         if (NodeUtil.isForIn(parent)) {
+731:           return parent;
+732:         } else {
+733:           return parent.getFirstChild().getNext().getNext();
+734:         }
+735:       case Token.WHILE:
+736:       case Token.DO:
+737:         return parent;
+738:       case Token.TRY:
+739:         // If we are coming out of the TRY block...
+740:         if (parent.getFirstChild() == node) {
+741:           if (NodeUtil.hasFinally(parent)) { // and have FINALLY block.
+742:             return computeFallThrough(parent.getLastChild());
+743:           } else { // and have no FINALLY.
+744:             return computeFollowNode(fromNode, parent, cfa);
+745:           }
+746:         // CATCH block.
+747:         } else if (NodeUtil.getCatchBlock(parent) == node){
+748:           if (NodeUtil.hasFinally(parent)) { // and have FINALLY block.
+749:             return computeFallThrough(node.getNext());
+750:           } else {
+751:             return computeFollowNode(fromNode, parent, cfa);
+752:           }
+753:         // If we are coming out of the FINALLY block...
+754:         } else if (parent.getLastChild() == node){
+755:           if (cfa != null) {
+756:             for (Node finallyNode : cfa.finallyMap.get(parent)) {
+757:               cfa.createEdge(fromNode, Branch.UNCOND, finallyNode);
+758:             }
+759:           }
+760:           return computeFollowNode(fromNode, parent, cfa);
+761:         }
+762:     }
+763: 
+764:     // Now that we are done with the special cases follow should be its
+765:     // immediate sibling, unless its sibling is a function
+766:     Node nextSibling = node.getNext();
+767: 
+768:     // Skip function declarations because control doesn't get pass into it.
+769:     while (nextSibling != null && nextSibling.getType() == Token.FUNCTION) {
+770:       nextSibling = nextSibling.getNext();
+771:     }
+772: 
+773:     if (nextSibling != null) {
+774:       return computeFallThrough(nextSibling);
+775:     } else {
+776:       // If there are no more siblings, control is transfered up the AST.
+777:       return computeFollowNode(fromNode, parent, cfa);
+778:     }
+779:   }
+
+[41] com.google.javascript.rhino.jstype.FunctionBuilder#withSourceNode  (lines 75-78)
+75:   public FunctionBuilder withSourceNode(Node sourceNode) {
+76:     this.sourceNode = sourceNode;
+77:     return this;
+78:   }
+
+[42] com.google.javascript.jscomp.ProcessClosurePrimitives#visit  (lines 169-260)
+169:   @Override
+170:   public void visit(NodeTraversal t, Node n, Node parent) {
+171:     switch (n.getType()) {
+172:       case Token.CALL:
+173:         boolean isExpr = parent.getType() == Token.EXPR_RESULT;
+174:         Node left = n.getFirstChild();
+175:         if (left.getType() == Token.GETPROP) {
+176:           Node name = left.getFirstChild();
+177:           if (name.getType() == Token.NAME &&
+178:               GOOG.equals(name.getString())) {
+179:             // For the sake of simplicity, we report code changes
+180:             // when we see a provides/requires, and don't worry about
+181:             // reporting the change when we actually do the replacement.
+182:             String methodName = name.getNext().getString();
+183:             if ("base".equals(methodName)) {
+184:               processBaseClassCall(t, n);
+185:             } else if (!isExpr) {
+186:               // All other methods must be called in an EXPR.
+187:               break;
+188:             } else if ("require".equals(methodName)) {
+189:               processRequireCall(t, n, parent);
+190:             } else if ("provide".equals(methodName)) {
+191:               processProvideCall(t, n, parent);
+192:             } else if ("exportSymbol".equals(methodName)) {
+193:               Node arg = left.getNext();
+194:               if (arg.getType() == Token.STRING) {
+195:                 int dot = arg.getString().indexOf('.');
+196:                 if (dot == -1) {
+197:                   exportedVariables.add(arg.getString());
+198:                 } else {
+199:                   exportedVariables.add(arg.getString().substring(0, dot));
+200:                 }
+201:               }
+202:             } else if ("addDependency".equals(methodName)) {
+203:               CodingConvention convention = compiler.getCodingConvention();
+204:               List<String> typeDecls =
+205:                   convention.identifyTypeDeclarationCall(n);
+206:               if (typeDecls != null) {
+207:                 for (String typeDecl : typeDecls) {
+208:                   compiler.getTypeRegistry().forwardDeclareType(typeDecl);
+209:                 }
+210:               }
+211: 
+212:               // We can't modify parent, so just create a node that will
+213:               // get compiled out.
+214:               parent.replaceChild(n, Node.newNumber(0));
+215:               compiler.reportCodeChange();
+216:             } else if ("setCssNameMapping".equals(methodName)) {
+217:               processSetCssNameMapping(t, n, parent);
+218:             }
+219:           }
+220:         }
+221:         break;
+222: 
+223:       case Token.ASSIGN:
+224:       case Token.NAME:
+225:         // If this is an assignment to a provided name, remove the provided
+226:         // object.
+227:         handleCandidateProvideDefinition(t, n, parent);
+228:         break;
+229: 
+230:       case Token.EXPR_RESULT:
+231:         handleTypedefDefinition(t, n, parent);
+232:         break;
+233: 
+234:       case Token.FUNCTION:
+235:         // If this is a declaration of a provided named function, this is an
+236:         // error. Hosited functions will explode if the're provided.
+237:         if (t.inGlobalScope() &&
+238:             !NodeUtil.isFunctionExpression(n)) {
+239:           String name = n.getFirstChild().getString();
+240:           ProvidedName pn = providedNames.get(name);
+241:           if (pn != null) {
+242:             compiler.report(t.makeError(n, FUNCTION_NAMESPACE_ERROR, name));
+243:           }
+244:         }
+245:         break;
+246: 
+247:       case Token.NEW:
+248:         trySimplifyNewDate(t, n, parent);
+249:         break;
+250: 
+251:       case Token.GETPROP:
+252:         if (n.getFirstChild().getType() == Token.NAME &&
+253:             parent.getType() != Token.CALL &&
+254:             parent.getType() != Token.ASSIGN &&
+255:             "goog.base".equals(n.getQualifiedName())) {
+256:           reportBadBaseClassUse(t, n, "May only be called directly.");
+257:         }
+258:         break;
+259:     }
+260:   }
+
+[43] com.google.javascript.jscomp.FunctionTypeBuilder#buildAndRegister  (lines 630-672)
+630:   FunctionType buildAndRegister() {
+631:     if (returnType == null) {
+632:       returnType = typeRegistry.getNativeType(UNKNOWN_TYPE);
+633:     }
+634: 
+635:     if (parametersNode == null) {
+636:       throw new IllegalStateException(
+637:           "All Function types must have params and a return type");
+638:     }
+639: 
+640:     FunctionType fnType;
+641:     if (isConstructor) {
+642:       fnType = getOrCreateConstructor();
+643:     } else if (isInterface) {
+644:       fnType = typeRegistry.createInterfaceType(fnName, sourceNode);
+645:       if (getScopeDeclaredIn().isGlobal() && !fnName.isEmpty()) {
+646:         typeRegistry.declareType(fnName, fnType.getInstanceType());
+647:       }
+648:       maybeSetBaseType(fnType);
+649:     } else {
+650:       fnType = new FunctionBuilder(typeRegistry)
+651:           .withName(fnName)
+652:           .withSourceNode(sourceNode)
+653:           .withParamsNode(parametersNode)
+654:           .withReturnType(returnType, returnTypeInferred)
+655:           .withTypeOfThis(thisType)
+656:           .withTemplateName(templateTypeName)
+657:           .build();
+658:       maybeSetBaseType(fnType);
+659:     }
+660: 
+661:     if (implementedInterfaces != null) {
+662:       fnType.setImplementedInterfaces(implementedInterfaces);
+663:     }
+664: 
+665:     if (extendedInterfaces != null) {
+666:       fnType.setExtendedInterfaces(extendedInterfaces);
+667:     }
+668: 
+669:     typeRegistry.clearTemplateTypeName();
+670: 
+671:     return fnType;
+672:   }
+
+[44] com.google.javascript.jscomp.TypeInference#branchedFlowThrough  (lines 188-300)
+188:   @Override
+189:   @SuppressWarnings("fallthrough")
+190:   List<FlowScope> branchedFlowThrough(Node source, FlowScope input) {
+191:     // NOTE(nicksantos): Right now, we just treat ON_EX edges like UNCOND
+192:     // edges. If we wanted to be perfect, we'd actually JOIN all the out
+193:     // lattices of this flow with the in lattice, and then make that the out
+194:     // lattice for the ON_EX edge. But it's probably to expensive to be
+195:     // worthwhile.
+196:     FlowScope output = flowThrough(source, input);
+197:     Node condition = null;
+198:     FlowScope conditionFlowScope = null;
+199:     BooleanOutcomePair conditionOutcomes = null;
+200: 
+201:     List<DiGraphEdge<Node, Branch>> branchEdges = getCfg().getOutEdges(source);
+202:     List<FlowScope> result = Lists.newArrayListWithCapacity(branchEdges.size());
+203:     for (DiGraphEdge<Node, Branch> branchEdge : branchEdges) {
+204:       Branch branch = branchEdge.getValue();
+205:       FlowScope newScope = output;
+206: 
+207:       switch (branch) {
+208:         case ON_TRUE:
+209:           if (NodeUtil.isForIn(source)) {
+210:             // item is assigned a property name, so its type should be string.
+211:             Node item = source.getFirstChild();
+212:             Node obj = item.getNext();
+213: 
+214:             FlowScope informed = traverse(obj, output.createChildFlowScope());
+215: 
+216:             if (item.getType() == Token.VAR) {
+217:               item = item.getFirstChild();
+218:             }
+219:             if (item.getType() == Token.NAME) {
+220:               JSType iterKeyType = getNativeType(STRING_TYPE);
+221:               ObjectType objType = getJSType(obj).dereference();
+222:               JSType objIndexType = objType == null ?
+223:                   null : objType.getIndexType();
+224:               if (objIndexType != null && !objIndexType.isUnknownType()) {
+225:                 JSType narrowedKeyType =
+226:                     iterKeyType.getGreatestSubtype(objIndexType);
+227:                 if (!narrowedKeyType.isEmptyType()) {
+228:                   iterKeyType = narrowedKeyType;
+229:                 }
+230:               }
+231:               redeclare(informed, item.getString(), iterKeyType);
+232:             }
+233:             newScope = informed;
+234:             break;
+235:           }
+236: 
+237:           // FALL THROUGH
+238: 
+239:         case ON_FALSE:
+240:           if (condition == null) {
+241:             condition = NodeUtil.getConditionExpression(source);
+242:             if (condition == null && source.getType() == Token.CASE) {
+243:               condition = source;
+244: 
+245:               // conditionFlowScope is cached from previous iterations
+246:               // of the loop.
+247:               if (conditionFlowScope == null) {
+248:                 conditionFlowScope = traverse(
+249:                     condition.getFirstChild(), output.createChildFlowScope());
+250:               }
+251:             }
+252:           }
+253: 
+254:           if (condition != null) {
+255:             if (condition.getType() == Token.AND ||
+256:                 condition.getType() == Token.OR) {
+257:               // When handling the short-circuiting binary operators,
+258:               // the outcome scope on true can be different than the outcome
+259:               // scope on false.
+260:               //
+261:               // TODO(nicksantos): The "right" way to do this is to
+262:               // carry the known outcome all the way through the
+263:               // recursive traversal, so that we can construct a
+264:               // different flow scope based on the outcome. However,
+265:               // this would require a bunch of code and a bunch of
+266:               // extra computation for an edge case. This seems to be
+267:               // a "good enough" approximation.
+268: 
+269:               // conditionOutcomes is cached from previous iterations
+270:               // of the loop.
+271:               if (conditionOutcomes == null) {
+272:                 conditionOutcomes = condition.getType() == Token.AND ?
+273:                     traverseAnd(condition, output.createChildFlowScope()) :
+274:                     traverseOr(condition, output.createChildFlowScope());
+275:               }
+276:               newScope =
+277:                   reverseInterpreter.getPreciserScopeKnowingConditionOutcome(
+278:                       condition,
+279:                       conditionOutcomes.getOutcomeFlowScope(
+280:                           condition.getType(), branch == Branch.ON_TRUE),
+281:                       branch == Branch.ON_TRUE);
+282:             } else {
+283:               // conditionFlowScope is cached from previous iterations
+284:               // of the loop.
+285:               if (conditionFlowScope == null) {
+286:                 conditionFlowScope =
+287:                     traverse(condition, output.createChildFlowScope());
+288:               }
+289:               newScope =
+290:                   reverseInterpreter.getPreciserScopeKnowingConditionOutcome(
+291:                       condition, conditionFlowScope, branch == Branch.ON_TRUE);
+292:             }
+293:           }
+294:           break;
+295:       }
+296: 
+297:       result.add(newScope.optimize());
+298:     }
+299:     return result;
+300:   }
+
+[45] com.google.javascript.jscomp.Compiler#getWarningCount  (lines 1777-1779)
+1777:   public int getWarningCount() {
+1778:     return errorManager.getWarningCount();
+1779:   }
+
+[46] com.google.javascript.jscomp.ControlFlowAnalysis#visit  (lines 294-355)
+294:   @Override
+295:   public void visit(NodeTraversal t, Node n, Node parent) {
+296:     switch (n.getType()) {
+297:       case Token.IF:
+298:         handleIf(n);
+299:         return;
+300:       case Token.WHILE:
+301:         handleWhile(n);
+302:         return;
+303:       case Token.DO:
+304:         handleDo(n);
+305:         return;
+306:       case Token.FOR:
+307:         handleFor(n);
+308:         return;
+309:       case Token.SWITCH:
+310:         handleSwitch(n);
+311:         return;
+312:       case Token.CASE:
+313:         handleCase(n);
+314:         return;
+315:       case Token.DEFAULT:
+316:         handleDefault(n);
+317:         return;
+318:       case Token.BLOCK:
+319:       case Token.SCRIPT:
+320:         handleStmtList(n);
+321:         return;
+322:       case Token.FUNCTION:
+323:         handleFunction(n);
+324:         return;
+325:       case Token.EXPR_RESULT:
+326:         handleExpr(n);
+327:         return;
+328:       case Token.THROW:
+329:         handleThrow(n);
+330:         return;
+331:       case Token.TRY:
+332:         handleTry(n);
+333:         return;
+334:       case Token.CATCH:
+335:         handleCatch(n);
+336:         return;
+337:       case Token.BREAK:
+338:         handleBreak(n);
+339:         return;
+340:       case Token.CONTINUE:
+341:         handleContinue(n);
+342:         return;
+343:       case Token.RETURN:
+344:         handleReturn(n);
+345:         return;
+346:       case Token.WITH:
+347:         handleWith(n);
+348:         return;
+349:       case Token.LABEL:
+350:         return;
+351:       default:
+352:         handleStmt(n);
+353:         return;
+354:     }
+355:   }
+
+[47] com.google.javascript.jscomp.ChainableReverseAbstractInterpreter#getFirst  (lines 88-90)
+88:   ChainableReverseAbstractInterpreter getFirst() {
+89:     return firstLink;
+90:   }
+
+[48] com.google.javascript.jscomp.TypedScopeCreator#attachLiteralTypes  (lines 491-532)
+491:     private void attachLiteralTypes(NodeTraversal t, Node n) {
+492:       switch (n.getType()) {
+493:         case Token.NULL:
+494:           n.setJSType(getNativeType(NULL_TYPE));
+495:           break;
+496: 
+497:         case Token.VOID:
+498:           n.setJSType(getNativeType(VOID_TYPE));
+499:           break;
+500: 
+501:         case Token.STRING:
+502:           // Defer keys to the Token.OBJECTLIT case
+503:           if (!NodeUtil.isObjectLitKey(n, n.getParent())) {
+504:             n.setJSType(getNativeType(STRING_TYPE));
+505:           }
+506:           break;
+507: 
+508:         case Token.NUMBER:
+509:           n.setJSType(getNativeType(NUMBER_TYPE));
+510:           break;
+511: 
+512:         case Token.TRUE:
+513:         case Token.FALSE:
+514:           n.setJSType(getNativeType(BOOLEAN_TYPE));
+515:           break;
+516: 
+517:         case Token.REGEXP:
+518:           n.setJSType(getNativeType(REGEXP_TYPE));
+519:           break;
+520: 
+521:         case Token.REF_SPECIAL:
+522:           n.setJSType(getNativeType(UNKNOWN_TYPE));
+523:           break;
+524: 
+525:         case Token.OBJECTLIT:
+526:           defineObjectLiteral(t, n);
+527:           break;
+528: 
+529:           // NOTE(nicksantos): If we ever support Array tuples,
+530:           // we will need to put ARRAYLIT here as well.
+531:       }
+532:     }
+
+[49] com.google.javascript.jscomp.ChainableReverseAbstractInterpreter#append  (lines 77-83)
+77:   ChainableReverseAbstractInterpreter append(
+78:       ChainableReverseAbstractInterpreter lastLink) {
+79:     Preconditions.checkArgument(lastLink.nextLink == null);
+80:     this.nextLink = lastLink;
+81:     lastLink.firstLink = this.firstLink;
+82:     return lastLink;
+83:   }
+
+[50] com.google.javascript.jscomp.TypeInference#redeclare  (lines 1283-1291)
+1283:   private void redeclare(FlowScope scope, String varName, JSType varType) {
+1284:     if (varType == null) {
+1285:       varType = getNativeType(JSTypeNative.UNKNOWN_TYPE);
+1286:     }
+1287:     if (unflowableVarNames.contains(varName)) {
+1288:       return;
+1289:     }
+1290:     scope.inferSlotType(varName, varType);
+1291:   }

@@ -1,0 +1,1387 @@
+You are an expert Java debugging assistant performing fault localization.
+One or more failing tests revealed a bug. Below is their error output and stack trace(s), followed by numbered candidate methods (with source and ORIGINAL line numbers), listed in no particular order. One or a few of them contain the fault.
+
+For EACH candidate method, give an integer suspiciousness score from 0 to 100 (100 = almost certainly contains the fault, 0 = almost certainly not). Base it on the error, the stack trace, and the code. Output ONLY a JSON object mapping each index (as a string) to its score, e.g. {"1": 10, "2": 85}. Output no other text.
+
+=== FAILING TEST(S) / STACK TRACE ===
+--- com.google.javascript.jscomp.TypeInferenceTest::testBackwardsInferenceNew
+junit.framework.ComparisonFailure: expected:<{[foo: (number|undefined)]}> but was:<{[]}>
+	at com.google.javascript.jscomp.TypeInferenceTest.testBackwardsInferenceNew(TypeInferenceTest.java:890)
+
+=== CANDIDATE METHODS ===
+
+[1] com.google.javascript.jscomp.TypedScopeCreator#visit  (lines 1960-2000)
+1960:     @Override public void visit(NodeTraversal t, Node n, Node parent) {
+1961:       if (t.inGlobalScope()) {
+1962:         return;
+1963:       }
+1964: 
+1965:       if (n.isReturn() && n.getFirstChild() != null) {
+1966:         data.get(t.getScopeRoot()).recordNonEmptyReturn();
+1967:       }
+1968: 
+1969:       if (t.getScopeDepth() <= 2) {
+1970:         // We only need to worry about escaped variables at depth 3.
+1971:         // An variable escaped at depth 2 is, by definition, a global variable.
+1972:         // We treat all global variables as escaped by default, so there's
+1973:         // no reason to do this extra computation for them.
+1974:         return;
+1975:       }
+1976: 
+1977:       if (n.isName() && NodeUtil.isLValue(n)) {
+1978:         String name = n.getString();
+1979:         Scope scope = t.getScope();
+1980:         Var var = scope.getVar(name);
+1981:         if (var != null) {
+1982:           Scope ownerScope = var.getScope();
+1983:           if (scope != ownerScope && ownerScope.isLocal()) {
+1984:             data.get(ownerScope.getRootNode()).recordEscapedVarName(name);
+1985:           }
+1986:         }
+1987:       } else if (n.isGetProp() && n.isUnscopedQualifiedName() &&
+1988:           NodeUtil.isLValue(n)) {
+1989:         String name = NodeUtil.getRootOfQualifiedName(n).getString();
+1990:         Scope scope = t.getScope();
+1991:         Var var = scope.getVar(name);
+1992:         if (var != null) {
+1993:           Scope ownerScope = var.getScope();
+1994:           if (scope != ownerScope && ownerScope.isLocal()) {
+1995:             data.get(ownerScope.getRootNode())
+1996:                 .recordEscapedQualifiedName(n.getQualifiedName());
+1997:           }
+1998:         }
+1999:       }
+2000:     }
+
+[2] com.google.javascript.rhino.jstype.RecordTypeBuilder#addProperty  (lines 69-77)
+69:   public RecordTypeBuilder addProperty(String name, JSType type, Node
+70:       propertyNode) {
+71:     isEmpty = false;
+72:     if (properties.containsKey(name)) {
+73:       return null;
+74:     }
+75:     properties.put(name, new RecordProperty(type, propertyNode));
+76:     return this;
+77:   }
+
+[3] com.google.javascript.jscomp.SyntacticScopeCreator#scanRoot  (lines 84-119)
+84:   private void scanRoot(Node n, Scope parent) {
+85:     if (n.isFunction()) {
+86:       if (inputId == null) {
+87:         inputId = NodeUtil.getInputId(n);
+88:         // TODO(johnlenz): inputId maybe null if the FUNCTION node is detached
+89:         // from the AST.
+90:         // Is it meaningful to build a scope for detached FUNCTION node?
+91:       }
+92: 
+93:       final Node fnNameNode = n.getFirstChild();
+94:       final Node args = fnNameNode.getNext();
+95:       final Node body = args.getNext();
+96: 
+97:       // Bleed the function name into the scope, if it hasn't
+98:       // been declared in the outer scope.
+99:       String fnName = fnNameNode.getString();
+100:       if (!fnName.isEmpty() && NodeUtil.isFunctionExpression(n)) {
+101:         declareVar(fnNameNode);
+102:       }
+103: 
+104:       // Args: Declare function variables
+105:       Preconditions.checkState(args.isParamList());
+106:       for (Node a = args.getFirstChild(); a != null;
+107:            a = a.getNext()) {
+108:         Preconditions.checkState(a.isName());
+109:         declareVar(a);
+110:       }
+111: 
+112:       // Body
+113:       scanVars(body, n);
+114:     } else {
+115:       // It's the global block
+116:       Preconditions.checkState(scope.getParent() == null);
+117:       scanVars(n, null);
+118:     }
+119:   }
+
+[4] com.google.javascript.rhino.jstype.PrototypeObjectType#toStringHelper  (lines 352-396)
+352:   @Override
+353:   String toStringHelper(boolean forAnnotations) {
+354:     if (hasReferenceName()) {
+355:       return getReferenceName();
+356:     } else if (prettyPrint) {
+357:       // Don't pretty print recursively.
+358:       prettyPrint = false;
+359: 
+360:       // Use a tree set so that the properties are sorted.
+361:       Set<String> propertyNames = Sets.newTreeSet();
+362:       for (ObjectType current = this;
+363:            current != null && !current.isNativeObjectType() &&
+364:                propertyNames.size() <= MAX_PRETTY_PRINTED_PROPERTIES;
+365:            current = current.getImplicitPrototype()) {
+366:         propertyNames.addAll(current.getOwnPropertyNames());
+367:       }
+368: 
+369:       StringBuilder sb = new StringBuilder();
+370:       sb.append("{");
+371: 
+372:       int i = 0;
+373:       for (String property : propertyNames) {
+374:         if (i > 0) {
+375:           sb.append(", ");
+376:         }
+377: 
+378:         sb.append(property);
+379:         sb.append(": ");
+380:         sb.append(getPropertyType(property).toStringHelper(forAnnotations));
+381: 
+382:         ++i;
+383:         if (!forAnnotations && i == MAX_PRETTY_PRINTED_PROPERTIES) {
+384:           sb.append(", ...");
+385:           break;
+386:         }
+387:       }
+388: 
+389:       sb.append("}");
+390: 
+391:       prettyPrint = true;
+392:       return sb.toString();
+393:     } else {
+394:       return forAnnotations ? "?" : "{...}";
+395:     }
+396:   }
+
+[5] com.google.javascript.rhino.jstype.RecordTypeBuilder#build  (lines 83-90)
+83:   public JSType build() {
+84:      // If we have an empty record, simply return the object type.
+85:     if (isEmpty) {
+86:        return registry.getNativeObjectType(JSTypeNative.OBJECT_TYPE);
+87:     }
+88: 
+89:     return registry.createRecordType(Collections.unmodifiableMap(properties));
+90:   }
+
+[6] com.google.javascript.jscomp.ClosureCodingConvention#isOptionalParameter  (lines 320-323)
+320:   @Override
+321:   public boolean isOptionalParameter(Node parameter) {
+322:     return false;
+323:   }
+
+[7] com.google.javascript.jscomp.parsing.JsDocInfoParser#parseBasicTypeExpression  (lines 1730-1756)
+1730:   private Node parseBasicTypeExpression(JsDocToken token) {
+1731:     if (token == JsDocToken.STAR) {
+1732:       return newNode(Token.STAR);
+1733:     } else if (token == JsDocToken.LB) {
+1734:       skipEOLs();
+1735:       return parseArrayType(next());
+1736:     } else if (token == JsDocToken.LC) {
+1737:       skipEOLs();
+1738:       return parseRecordType(next());
+1739:     } else if (token == JsDocToken.LP) {
+1740:       skipEOLs();
+1741:       return parseUnionType(next());
+1742:     } else if (token == JsDocToken.STRING) {
+1743:       String string = stream.getString();
+1744:       if ("function".equals(string)) {
+1745:         skipEOLs();
+1746:         return parseFunctionType(next());
+1747:       } else if ("null".equals(string) || "undefined".equals(string)) {
+1748:         return newStringNode(string);
+1749:       } else {
+1750:         return parseTypeName(token);
+1751:       }
+1752:     }
+1753: 
+1754:     restoreLookAhead(token);
+1755:     return reportGenericTypeSyntaxWarning();
+1756:   }
+
+[8] com.google.javascript.jscomp.Scope#Scope  (lines 390-404)
+390:   Scope(Scope parent, Node rootNode) {
+391:     Preconditions.checkNotNull(parent);
+392:     Preconditions.checkArgument(rootNode != parent.rootNode);
+393: 
+394:     this.parent = parent;
+395:     this.rootNode = rootNode;
+396:     JSType nodeType = rootNode.getJSType();
+397:     if (nodeType != null && nodeType.isFunctionType()) {
+398:       thisType = nodeType.toMaybeFunctionType().getTypeOfThis();
+399:     } else {
+400:       thisType = parent.thisType;
+401:     }
+402:     this.isBottom = false;
+403:     this.depth = parent.depth + 1;
+404:   }
+
+[9] com.google.javascript.rhino.jstype.RecordType#defineProperty  (lines 125-138)
+125:   @Override
+126:   boolean defineProperty(String propertyName, JSType type,
+127:       boolean inferred, Node propertyNode) {
+128:     if (isFrozen) {
+129:       return false;
+130:     }
+131: 
+132:     if (!inferred) {
+133:       properties.put(propertyName, type);
+134:     }
+135: 
+136:     return super.defineProperty(propertyName, type, inferred,
+137:         propertyNode);
+138:   }
+
+[10] com.google.javascript.jscomp.parsing.JsDocTokenStream#getJsDocToken  (lines 58-194)
+58:   @SuppressWarnings("fallthrough")
+59:   final JsDocToken getJsDocToken() {
+60:     int c;
+61:     stringBufferTop = 0;
+62:     for (;;) {
+63:       // eat white spaces
+64:       for (;;) {
+65:         charno = -1;
+66:         c = getChar();
+67:         if (c == EOF_CHAR) {
+68:           return JsDocToken.EOF;
+69:         } else if (c == '\n') {
+70:           return JsDocToken.EOL;
+71:         } else if (!isJSSpace(c)) {
+72:           break;
+73:         }
+74:       }
+75: 
+76:       switch (c) {
+77:         // annotation, e.g. @type or @constructor
+78:         case '@':
+79:           do {
+80:             c = getChar();
+81:             if (isAlpha(c)) {
+82:               addToString(c);
+83:             } else {
+84:               ungetChar(c);
+85:               this.string = getStringFromBuffer();
+86:               stringBufferTop = 0;
+87:               return JsDocToken.ANNOTATION;
+88:             }
+89:           } while (true);
+90: 
+91:         case '*':
+92:           if (matchChar('/')) {
+93:             return JsDocToken.EOC;
+94:           } else {
+95:             return JsDocToken.STAR;
+96:           }
+97: 
+98:         case ',':
+99:           return JsDocToken.COMMA;
+100: 
+101:         case '>':
+102:           return JsDocToken.GT;
+103: 
+104:         case '(':
+105:           return JsDocToken.LP;
+106: 
+107:         case ')':
+108:           return JsDocToken.RP;
+109: 
+110:         case '{':
+111:           return JsDocToken.LC;
+112: 
+113:         case '}':
+114:           return JsDocToken.RC;
+115: 
+116:         case '[':
+117:           return JsDocToken.LB;
+118: 
+119:         case ']':
+120:           return JsDocToken.RB;
+121: 
+122:         case '?':
+123:           return JsDocToken.QMARK;
+124: 
+125:         case '!':
+126:           return JsDocToken.BANG;
+127: 
+128:         case ':':
+129:           return JsDocToken.COLON;
+130: 
+131:         case '=':
+132:           return JsDocToken.EQUALS;
+133: 
+134:         case '|':
+135:           matchChar('|');
+136:           return JsDocToken.PIPE;
+137: 
+138:         case '.':
+139:           c = getChar();
+140:           if (c == '<') {
+141:             return JsDocToken.LT;
+142:           } else {
+143:             if (c == '.') {
+144:               c = getChar();
+145:               if (c == '.') {
+146:                 return JsDocToken.ELLIPSIS;
+147:               } else {
+148:                 addToString('.');
+149:               }
+150:             }
+151:             // we may backtrack across line boundary
+152:             ungetBuffer[ungetCursor++] = c;
+153:             c = '.';
+154:           }
+155:           // fall through
+156: 
+157:         default: {
+158:           // recognize a JsDoc string but discard last . if it is followed by
+159:           // a non-JsDoc comment char, e.g. Array.<
+160:           int c1 = c;
+161:           addToString(c);
+162:           int c2 = getChar();
+163:           if (!isJSDocString(c2)) {
+164:             ungetChar(c2);
+165:             this.string = getStringFromBuffer();
+166:             stringBufferTop = 0;
+167:             return JsDocToken.STRING;
+168:           } else {
+169:             do {
+170:               c1 = c2;
+171:               c2 = getChar();
+172:               if (c1 == '.' && c2 == '<') {
+173:                 ungetChar(c2);
+174:                 ungetChar(c1);
+175:                 this.string = getStringFromBuffer();
+176:                 stringBufferTop = 0;
+177:                 return JsDocToken.STRING;
+178:               } else {
+179:                 if (isJSDocString(c2)) {
+180:                   addToString(c1);
+181:                 } else {
+182:                   ungetChar(c2);
+183:                   addToString(c1);
+184:                   this.string = getStringFromBuffer();
+185:                   stringBufferTop = 0;
+186:                   return JsDocToken.STRING;
+187:                 }
+188:               }
+189:             } while (true);
+190:           }
+191:         }
+192:       }
+193:     }
+194:   }
+
+[11] com.google.javascript.rhino.jstype.JSTypeRegistry#createRecordTypeFromNodes  (lines 1614-1665)
+1614:   private JSType createRecordTypeFromNodes(Node n, String sourceName,
+1615:       StaticScope<JSType> scope) {
+1616: 
+1617:     RecordTypeBuilder builder = new RecordTypeBuilder(this);
+1618: 
+1619:     // For each of the fields in the record type.
+1620:     for (Node fieldTypeNode = n.getFirstChild();
+1621:          fieldTypeNode != null;
+1622:          fieldTypeNode = fieldTypeNode.getNext()) {
+1623: 
+1624:       // Get the property's name.
+1625:       Node fieldNameNode = fieldTypeNode;
+1626:       boolean hasType = false;
+1627: 
+1628:       if (fieldTypeNode.getType() == Token.COLON) {
+1629:         fieldNameNode = fieldTypeNode.getFirstChild();
+1630:         hasType = true;
+1631:       }
+1632: 
+1633:       String fieldName = fieldNameNode.getString();
+1634: 
+1635:       // TODO(user): Move this into the lexer/parser.
+1636:       // Remove the string literal characters around a field name,
+1637:       // if any.
+1638:       if (fieldName.startsWith("'") || fieldName.startsWith("\"")) {
+1639:         fieldName = fieldName.substring(1, fieldName.length() - 1);
+1640:       }
+1641: 
+1642:       // Get the property's type.
+1643:       JSType fieldType = null;
+1644: 
+1645:       if (hasType) {
+1646:         // We have a declared type.
+1647:         fieldType = createFromTypeNodesInternal(
+1648:             fieldTypeNode.getLastChild(), sourceName, scope);
+1649:       } else {
+1650:         // Otherwise, the type is UNKNOWN.
+1651:         fieldType = getNativeType(JSTypeNative.UNKNOWN_TYPE);
+1652:       }
+1653: 
+1654:       // Add the property to the record.
+1655:       if (builder.addProperty(fieldName, fieldType, fieldNameNode) == null) {
+1656:         // Duplicate field name, warning and skip
+1657:         reporter.warning(
+1658:             "Duplicate record field " + fieldName,
+1659:             sourceName,
+1660:             n.getLineno(), fieldNameNode.getCharno());
+1661:       }
+1662:     }
+1663: 
+1664:     return builder.build();
+1665:   }
+
+[12] com.google.javascript.jscomp.DiagnosticGroup#isSubGroup  (lines 116-123)
+116:   boolean isSubGroup(DiagnosticGroup group) {
+117:     for (DiagnosticType type : group.types) {
+118:       if (!matches(type)) {
+119:         return false;
+120:       }
+121:     }
+122:     return true;
+123:   }
+
+[13] com.google.javascript.jscomp.ComposeWarningsGuard#disables  (lines 124-142)
+124:   @Override
+125:   public boolean disables(DiagnosticGroup group) {
+126:     nextSingleton:
+127:     for (DiagnosticType type : group.getTypes()) {
+128:       DiagnosticGroup singleton = DiagnosticGroup.forType(type);
+129: 
+130:       for (WarningsGuard guard : guards) {
+131:         if (guard.disables(singleton)) {
+132:           continue nextSingleton;
+133:         } else if (guard.enables(singleton)) {
+134:           return false;
+135:         }
+136:       }
+137: 
+138:       return false;
+139:     }
+140: 
+141:     return true;
+142:   }
+
+[14] com.google.javascript.jscomp.parsing.JsDocInfoParser#parseUnionType  (lines 1990-1992)
+1990:   private Node parseUnionType(JsDocToken token) {
+1991:     return parseUnionTypeWithAlternate(token, null);
+1992:   }
+
+[15] com.google.javascript.jscomp.NodeUtil#isLValue  (lines 2024-2036)
+2024:   static boolean isLValue(Node n) {
+2025:     Preconditions.checkArgument(n.isName() || n.isGetProp() ||
+2026:         n.isGetElem());
+2027:     Node parent = n.getParent();
+2028:     return (NodeUtil.isAssignmentOp(parent) && parent.getFirstChild() == n)
+2029:         || (NodeUtil.isForIn(parent) && parent.getFirstChild() == n)
+2030:         || parent.isVar()
+2031:         || (parent.isFunction() && parent.getFirstChild() == n)
+2032:         || parent.isDec()
+2033:         || parent.isInc()
+2034:         || parent.isParamList()
+2035:         || parent.isCatch();
+2036:   }
+
+[16] com.google.javascript.jscomp.NodeUtil#getBestLValue  (lines 3034-3053)
+3034:   static Node getBestLValue(Node n) {
+3035:     Node parent = n.getParent();
+3036:     boolean isFunctionDeclaration = isFunctionDeclaration(n);
+3037:     if (isFunctionDeclaration) {
+3038:       return n.getFirstChild();
+3039:     } else if (parent.isName()) {
+3040:       return parent;
+3041:     } else if (parent.isAssign()) {
+3042:       return parent.getFirstChild();
+3043:     } else if (isObjectLitKey(parent, parent.getParent())) {
+3044:       return parent;
+3045:     } else if (
+3046:         (parent.isHook() && parent.getFirstChild() != n) ||
+3047:         parent.isOr() ||
+3048:         parent.isAnd() ||
+3049:         (parent.isComma() && parent.getFirstChild() != n)) {
+3050:       return getBestLValue(parent);
+3051:     }
+3052:     return null;
+3053:   }
+
+[17] com.google.javascript.jscomp.Scope#isMarkedEscaped  (lines 345-347)
+345:     boolean isMarkedEscaped() {
+346:       return markedEscaped;
+347:     }
+
+[18] com.google.javascript.rhino.jstype.JSTypeRegistry#createFromTypeNodesInternal  (lines 1452-1606)
+1452:   private JSType createFromTypeNodesInternal(Node n, String sourceName,
+1453:       StaticScope<JSType> scope) {
+1454:     switch (n.getType()) {
+1455:       case Token.LC: // Record type.
+1456:         return createRecordTypeFromNodes(
+1457:             n.getFirstChild(), sourceName, scope);
+1458: 
+1459:       case Token.BANG: // Not nullable
+1460:         return createFromTypeNodesInternal(
+1461:             n.getFirstChild(), sourceName, scope)
+1462:             .restrictByNotNullOrUndefined();
+1463: 
+1464:       case Token.QMARK: // Nullable or unknown
+1465:         Node firstChild = n.getFirstChild();
+1466:         if (firstChild == null) {
+1467:           return getNativeType(UNKNOWN_TYPE);
+1468:         }
+1469:         return createDefaultObjectUnion(
+1470:             createFromTypeNodesInternal(
+1471:                 firstChild, sourceName, scope));
+1472: 
+1473:       case Token.EQUALS: // Optional
+1474:         return createOptionalType(
+1475:             createFromTypeNodesInternal(
+1476:                 n.getFirstChild(), sourceName, scope));
+1477: 
+1478:       case Token.ELLIPSIS: // Var args
+1479:         return createOptionalType(
+1480:             createFromTypeNodesInternal(
+1481:                 n.getFirstChild(), sourceName, scope));
+1482: 
+1483:       case Token.STAR: // The AllType
+1484:         return getNativeType(ALL_TYPE);
+1485: 
+1486:       case Token.LB: // Array type
+1487:         // TODO(nicksantos): Enforce membership restrictions on the Array.
+1488:         return getNativeType(ARRAY_TYPE);
+1489: 
+1490:       case Token.PIPE: // Union type
+1491:         UnionTypeBuilder builder = new UnionTypeBuilder(this);
+1492:         for (Node child = n.getFirstChild(); child != null;
+1493:              child = child.getNext()) {
+1494:           builder.addAlternate(
+1495:               createFromTypeNodesInternal(child, sourceName, scope));
+1496:         }
+1497:         return builder.build();
+1498: 
+1499:       case Token.EMPTY: // When the return value of a function is not specified
+1500:         return getNativeType(UNKNOWN_TYPE);
+1501: 
+1502:       case Token.VOID: // Only allowed in the return value of a function.
+1503:         return getNativeType(VOID_TYPE);
+1504: 
+1505:       case Token.STRING:
+1506:         JSType namedType = getType(scope, n.getString(), sourceName,
+1507:             n.getLineno(), n.getCharno());
+1508:         if (resolveMode != ResolveMode.LAZY_NAMES) {
+1509:           namedType = namedType.resolveInternal(reporter, scope);
+1510:         }
+1511:         if ((namedType instanceof ObjectType) &&
+1512:             !(nonNullableTypeNames.contains(n.getString()))) {
+1513:           Node typeList = n.getFirstChild();
+1514:           if (typeList != null &&
+1515:               ("Array".equals(n.getString()) ||
+1516:                "Object".equals(n.getString()))) {
+1517:             JSType parameterType =
+1518:                 createFromTypeNodesInternal(
+1519:                     typeList.getLastChild(), sourceName, scope);
+1520:             namedType = new ParameterizedType(
+1521:                 this, (ObjectType) namedType, parameterType);
+1522:             if (typeList.hasMoreThanOneChild()) {
+1523:               JSType indexType =
+1524:                   createFromTypeNodesInternal(
+1525:                       typeList.getFirstChild(), sourceName, scope);
+1526:               namedType = new IndexedType(
+1527:                   this, (ObjectType) namedType, indexType);
+1528:             }
+1529:           }
+1530:           return createDefaultObjectUnion(namedType);
+1531:         } else {
+1532:           return namedType;
+1533:         }
+1534: 
+1535:       case Token.FUNCTION:
+1536:         ObjectType thisType = null;
+1537:         boolean isConstructor = false;
+1538:         Node current = n.getFirstChild();
+1539:         if (current.getType() == Token.THIS ||
+1540:             current.getType() == Token.NEW) {
+1541:           Node contextNode = current.getFirstChild();
+1542:           thisType =
+1543:               ObjectType.cast(
+1544:                   createFromTypeNodesInternal(
+1545:                       contextNode, sourceName, scope)
+1546:                   .restrictByNotNullOrUndefined());
+1547:           if (thisType == null) {
+1548:             reporter.warning(
+1549:                 ScriptRuntime.getMessage0(
+1550:                     current.getType() == Token.THIS ?
+1551:                     "msg.jsdoc.function.thisnotobject" :
+1552:                     "msg.jsdoc.function.newnotobject"),
+1553:                 sourceName,
+1554:                 contextNode.getLineno(), contextNode.getCharno());
+1555:           }
+1556: 
+1557:           isConstructor = current.getType() == Token.NEW;
+1558:           current = current.getNext();
+1559:         }
+1560: 
+1561:         FunctionParamBuilder paramBuilder = new FunctionParamBuilder(this);
+1562: 
+1563:         if (current.getType() == Token.PARAM_LIST) {
+1564:           Node args = current.getFirstChild();
+1565:           for (Node arg = current.getFirstChild(); arg != null;
+1566:                arg = arg.getNext()) {
+1567:             if (arg.getType() == Token.ELLIPSIS) {
+1568:               if (arg.getChildCount() == 0) {
+1569:                 paramBuilder.addVarArgs(getNativeType(UNKNOWN_TYPE));
+1570:               } else {
+1571:                 paramBuilder.addVarArgs(
+1572:                     createFromTypeNodesInternal(
+1573:                         arg.getFirstChild(), sourceName, scope));
+1574:               }
+1575:             } else {
+1576:               JSType type = createFromTypeNodesInternal(
+1577:                   arg, sourceName, scope);
+1578:               if (arg.getType() == Token.EQUALS) {
+1579:                 boolean addSuccess = paramBuilder.addOptionalParams(type);
+1580:                 if (!addSuccess) {
+1581:                   reporter.warning(
+1582:                       ScriptRuntime.getMessage0("msg.jsdoc.function.varargs"),
+1583:                       sourceName, arg.getLineno(), arg.getCharno());
+1584:                 }
+1585:               } else {
+1586:                 paramBuilder.addRequiredParams(type);
+1587:               }
+1588:             }
+1589:           }
+1590:           current = current.getNext();
+1591:         }
+1592: 
+1593:         JSType returnType =
+1594:             createFromTypeNodesInternal(current, sourceName, scope);
+1595: 
+1596:         return new FunctionBuilder(this)
+1597:             .withParams(paramBuilder)
+1598:             .withReturnType(returnType)
+1599:             .withTypeOfThis(thisType)
+1600:             .setIsConstructor(isConstructor)
+1601:             .build();
+1602:     }
+1603: 
+1604:     throw new IllegalStateException(
+1605:         "Unexpected node in type expression: " + n.toString());
+1606:   }
+
+[19] com.google.javascript.jscomp.DiagnosticGroup#DiagnosticGroup  (lines 60-63)
+60:   private DiagnosticGroup(DiagnosticType type) {
+61:     this.name = null;
+62:     this.types = ImmutableSet.of(type);
+63:   }
+
+[20] com.google.javascript.jscomp.Compiler#initOptions  (lines 242-305)
+242:   public void initOptions(CompilerOptions options) {
+243:     this.options = options;
+244:     if (errorManager == null) {
+245:       if (outStream == null) {
+246:         setErrorManager(
+247:             new LoggerErrorManager(createMessageFormatter(), logger));
+248:       } else {
+249:         PrintStreamErrorManager printer =
+250:             new PrintStreamErrorManager(createMessageFormatter(), outStream);
+251:         printer.setSummaryDetailLevel(options.summaryDetailLevel);
+252:         setErrorManager(printer);
+253:       }
+254:     }
+255: 
+256:     // DiagnosticGroups override the plain checkTypes option.
+257:     if (options.enables(DiagnosticGroups.CHECK_TYPES)) {
+258:       options.checkTypes = true;
+259:     } else if (options.disables(DiagnosticGroups.CHECK_TYPES)) {
+260:       options.checkTypes = false;
+261:     } else if (!options.checkTypes) {
+262:       // If DiagnosticGroups did not override the plain checkTypes
+263:       // option, and checkTypes is enabled, then turn off the
+264:       // parser type warnings.
+265:       options.setWarningLevel(
+266:           DiagnosticGroup.forType(
+267:               RhinoErrorReporter.TYPE_PARSE_ERROR),
+268:           CheckLevel.OFF);
+269:     }
+270: 
+271:     if (options.checkGlobalThisLevel.isOn() &&
+272:         !options.disables(DiagnosticGroups.GLOBAL_THIS)) {
+273:       options.setWarningLevel(
+274:           DiagnosticGroups.GLOBAL_THIS,
+275:           options.checkGlobalThisLevel);
+276:     }
+277: 
+278:     if (options.getLanguageIn() == LanguageMode.ECMASCRIPT5_STRICT) {
+279:       options.setWarningLevel(
+280:           DiagnosticGroups.ES5_STRICT,
+281:           CheckLevel.ERROR);
+282:     }
+283: 
+284:     // Initialize the warnings guard.
+285:     List<WarningsGuard> guards = Lists.newArrayList();
+286:     guards.add(
+287:         new SuppressDocWarningsGuard(
+288:             getDiagnosticGroups().getRegisteredGroups()));
+289:     guards.add(options.getWarningsGuard());
+290: 
+291:     ComposeWarningsGuard composedGuards = new ComposeWarningsGuard(guards);
+292: 
+293:     // All passes must run the variable check. This synthesizes
+294:     // variables later so that the compiler doesn't crash. It also
+295:     // checks the externs file for validity. If you don't want to warn
+296:     // about missing variable declarations, we shut that specific
+297:     // error off.
+298:     if (!options.checkSymbols &&
+299:         !composedGuards.enables(DiagnosticGroups.CHECK_VARIABLES)) {
+300:       composedGuards.addGuard(new DiagnosticGroupWarningsGuard(
+301:           DiagnosticGroups.CHECK_VARIABLES, CheckLevel.OFF));
+302:     }
+303: 
+304:     this.warningsGuard = composedGuards;
+305:   }
+
+[21] com.google.javascript.rhino.jstype.RecordType#RecordType  (lines 78-93)
+78:   RecordType(JSTypeRegistry registry, Map<String, RecordProperty> properties) {
+79:     super(registry, null, null);
+80:     setPrettyPrint(true);
+81: 
+82:     for (String property : properties.keySet()) {
+83:       RecordProperty prop = properties.get(property);
+84:       if (prop == null) {
+85:         throw new IllegalStateException(
+86:             "RecordProperty associated with a property should not be null!");
+87:       }
+88:       defineDeclaredProperty(property, prop.getType(), prop.getPropertyNode());
+89:     }
+90: 
+91:     // Freeze the record type.
+92:     isFrozen = true;
+93:   }
+
+[22] com.google.javascript.jscomp.CompilerOptions#disables  (lines 1059-1061)
+1059:   boolean disables(DiagnosticGroup type) {
+1060:     return warningsGuard.disables(type);
+1061:   }
+
+[23] com.google.javascript.rhino.jstype.RecordType#resolveInternal  (lines 270-280)
+270:   @Override
+271:   JSType resolveInternal(ErrorReporter t, StaticScope<JSType> scope) {
+272:     for (Map.Entry<String, JSType> entry : properties.entrySet()) {
+273:       JSType type = entry.getValue();
+274:       JSType resolvedType = type.resolve(t, scope);
+275:       if (type != resolvedType) {
+276:         properties.put(entry.getKey(), resolvedType);
+277:       }
+278:     }
+279:     return super.resolveInternal(t, scope);
+280:   }
+
+[24] com.google.javascript.jscomp.ClosureCodingConvention#isVarArgsParameter  (lines 325-328)
+325:   @Override
+326:   public boolean isVarArgsParameter(Node parameter) {
+327:     return false;
+328:   }
+
+[25] com.google.javascript.jscomp.parsing.JsDocInfoParser#match  (lines 2274-2277)
+2274:   private boolean match(JsDocToken token1, JsDocToken token2) {
+2275:     unreadToken = next();
+2276:     return unreadToken == token1 || unreadToken == token2;
+2277:   }
+
+[26] com.google.javascript.rhino.jstype.RecordTypeBuilder#getType  (lines 101-103)
+101:     public JSType getType() {
+102:       return type;
+103:     }
+
+[27] com.google.javascript.rhino.Node#isInc  (lines 2280-2282)
+2280:   public boolean isInc() {
+2281:     return this.getType() == Token.INC;
+2282:   }
+
+[28] com.google.javascript.jscomp.parsing.IRFactory#processParenthesizedExpression  (lines 860-865)
+860:     @Override
+861:     Node processParenthesizedExpression(ParenthesizedExpression exprNode) {
+862:       Node node = transform(exprNode.getExpression());
+863:       node.putProp(Node.PARENTHESIZED_PROP, Boolean.TRUE);
+864:       return node;
+865:     }
+
+[29] com.google.javascript.rhino.jstype.RecordTypeBuilder#RecordTypeBuilder  (lines 57-59)
+57:   public RecordTypeBuilder(JSTypeRegistry registry) {
+58:     this.registry = registry;
+59:   }
+
+[30] com.google.javascript.jscomp.parsing.JsDocInfoParser#newStringNode  (lines 2192-2194)
+2192:   private Node newStringNode(String s) {
+2193:     return newStringNode(s, stream.getLineno(), stream.getCharno());
+2194:   }
+
+[31] com.google.javascript.rhino.jstype.PrototypeObjectType#getOwnPropertyNames  (lines 177-180)
+177:   @Override
+178:   public Set<String> getOwnPropertyNames() {
+179:     return properties.keySet();
+180:   }
+
+[32] com.google.javascript.jscomp.TypeInference#traverse  (lines 251-414)
+251:   private FlowScope traverse(Node n, FlowScope scope) {
+252:     switch (n.getType()) {
+253:       case Token.ASSIGN:
+254:         scope = traverseAssign(n, scope);
+255:         break;
+256: 
+257:       case Token.NAME:
+258:         scope = traverseName(n, scope);
+259:         break;
+260: 
+261:       case Token.GETPROP:
+262:         scope = traverseGetProp(n, scope);
+263:         break;
+264: 
+265:       case Token.AND:
+266:         scope = traverseAnd(n, scope).getJoinedFlowScope()
+267:             .createChildFlowScope();
+268:         break;
+269: 
+270:       case Token.OR:
+271:         scope = traverseOr(n, scope).getJoinedFlowScope()
+272:             .createChildFlowScope();
+273:         break;
+274: 
+275:       case Token.HOOK:
+276:         scope = traverseHook(n, scope);
+277:         break;
+278: 
+279:       case Token.OBJECTLIT:
+280:         scope = traverseObjectLiteral(n, scope);
+281:         break;
+282: 
+283:       case Token.CALL:
+284:         scope = traverseCall(n, scope);
+285:         break;
+286: 
+287:       case Token.NEW:
+288:         scope = traverseNew(n, scope);
+289:         break;
+290: 
+291:       case Token.ASSIGN_ADD:
+292:       case Token.ADD:
+293:         scope = traverseAdd(n, scope);
+294:         break;
+295: 
+296:       case Token.POS:
+297:       case Token.NEG:
+298:         scope = traverse(n.getFirstChild(), scope);  // Find types.
+299:         n.setJSType(getNativeType(NUMBER_TYPE));
+300:         break;
+301: 
+302:       case Token.ARRAYLIT:
+303:         scope = traverseArrayLiteral(n, scope);
+304:         break;
+305: 
+306:       case Token.THIS:
+307:         n.setJSType(scope.getTypeOfThis());
+308:         break;
+309: 
+310:       case Token.ASSIGN_LSH:
+311:       case Token.ASSIGN_RSH:
+312:       case Token.LSH:
+313:       case Token.RSH:
+314:       case Token.ASSIGN_URSH:
+315:       case Token.URSH:
+316:       case Token.ASSIGN_DIV:
+317:       case Token.ASSIGN_MOD:
+318:       case Token.ASSIGN_BITAND:
+319:       case Token.ASSIGN_BITXOR:
+320:       case Token.ASSIGN_BITOR:
+321:       case Token.ASSIGN_MUL:
+322:       case Token.ASSIGN_SUB:
+323:       case Token.DIV:
+324:       case Token.MOD:
+325:       case Token.BITAND:
+326:       case Token.BITXOR:
+327:       case Token.BITOR:
+328:       case Token.MUL:
+329:       case Token.SUB:
+330:       case Token.DEC:
+331:       case Token.INC:
+332:       case Token.BITNOT:
+333:         scope = traverseChildren(n, scope);
+334:         n.setJSType(getNativeType(NUMBER_TYPE));
+335:         break;
+336: 
+337:       case Token.PARAM_LIST:
+338:         scope = traverse(n.getFirstChild(), scope);
+339:         n.setJSType(getJSType(n.getFirstChild()));
+340:         break;
+341: 
+342:       case Token.COMMA:
+343:         scope = traverseChildren(n, scope);
+344:         n.setJSType(getJSType(n.getLastChild()));
+345:         break;
+346: 
+347:       case Token.TYPEOF:
+348:         scope = traverseChildren(n, scope);
+349:         n.setJSType(getNativeType(STRING_TYPE));
+350:         break;
+351: 
+352:       case Token.DELPROP:
+353:       case Token.LT:
+354:       case Token.LE:
+355:       case Token.GT:
+356:       case Token.GE:
+357:       case Token.NOT:
+358:       case Token.EQ:
+359:       case Token.NE:
+360:       case Token.SHEQ:
+361:       case Token.SHNE:
+362:       case Token.INSTANCEOF:
+363:       case Token.IN:
+364:         scope = traverseChildren(n, scope);
+365:         n.setJSType(getNativeType(BOOLEAN_TYPE));
+366:         break;
+367: 
+368:       case Token.GETELEM:
+369:         scope = traverseGetElem(n, scope);
+370:         break;
+371: 
+372:       case Token.EXPR_RESULT:
+373:         scope = traverseChildren(n, scope);
+374:         if (n.getFirstChild().isGetProp()) {
+375:           ensurePropertyDeclared(n.getFirstChild());
+376:         }
+377:         break;
+378: 
+379:       case Token.SWITCH:
+380:         scope = traverse(n.getFirstChild(), scope);
+381:         break;
+382: 
+383:       case Token.RETURN:
+384:         scope = traverseReturn(n, scope);
+385:         break;
+386: 
+387:       case Token.VAR:
+388:       case Token.THROW:
+389:         scope = traverseChildren(n, scope);
+390:         break;
+391: 
+392:       case Token.CATCH:
+393:         scope = traverseCatch(n, scope);
+394:         break;
+395:     }
+396:     if (!n.isFunction()) {
+397:       JSDocInfo info = n.getJSDocInfo();
+398:       if (info != null && info.hasType()) {
+399:         JSType castType = info.getType().evaluate(syntacticScope, registry);
+400: 
+401:         // A stubbed type cast on a qualified name should take
+402:         // effect for all subsequent accesses of that name,
+403:         // so treat it the same as an assign to that name.
+404:         if (n.isQualifiedName() &&
+405:             n.getParent().isExprResult()) {
+406:           updateScopeForTypeChange(scope, n, n.getJSType(), castType);
+407:         }
+408: 
+409:         n.setJSType(castType);
+410:       }
+411:     }
+412: 
+413:     return scope;
+414:   }
+
+[33] com.google.javascript.jscomp.DiagnosticGroup#forType  (lines 70-75)
+70:   public static DiagnosticGroup forType(DiagnosticType type) {
+71:     if (!singletons.containsKey(type)) {
+72:       singletons.put(type, new DiagnosticGroup(type));
+73:     }
+74:     return singletons.get(type);
+75:   }
+
+[34] com.google.javascript.rhino.jstype.RecordTypeBuilder#RecordProperty  (lines 96-99)
+96:     RecordProperty(JSType type, Node propertyNode) {
+97:       this.type = type;
+98:       this.propertyNode = propertyNode;
+99:     }
+
+[35] com.google.javascript.rhino.Node#isFor  (lines 2248-2250)
+2248:   public boolean isFor() {
+2249:     return this.getType() == Token.FOR;
+2250:   }
+
+[36] com.google.javascript.jscomp.parsing.JsDocInfoParser#parseFieldName  (lines 2170-2179)
+2170:   private Node parseFieldName(JsDocToken token) {
+2171:     switch (token) {
+2172:       case STRING:
+2173:         String string = stream.getString();
+2174:         return newStringNode(string);
+2175: 
+2176:       default:
+2177:         return null;
+2178:     }
+2179:   }
+
+[37] com.google.javascript.jscomp.parsing.TypeSafeDispatcher#process  (lines 120-285)
+120:   public T process(AstNode node) {
+121:     switch (node.getType()) {
+122:       case Token.ADD:
+123:       case Token.AND:
+124:       case Token.BITAND:
+125:       case Token.BITOR:
+126:       case Token.BITXOR:
+127:       case Token.COMMA:
+128:       case Token.DIV:
+129:       case Token.EQ:
+130:       case Token.GE:
+131:       case Token.GT:
+132:       case Token.IN:
+133:       case Token.INSTANCEOF:
+134:       case Token.LE:
+135:       case Token.LSH:
+136:       case Token.LT:
+137:       case Token.MOD:
+138:       case Token.MUL:
+139:       case Token.NE:
+140:       case Token.OR:
+141:       case Token.RSH:
+142:       case Token.SHEQ:
+143:       case Token.SHNE:
+144:       case Token.SUB:
+145:       case Token.URSH:
+146:         return processInfixExpression((InfixExpression) node);
+147:       case Token.ARRAYLIT:
+148:         return processArrayLiteral((ArrayLiteral) node);
+149:       case Token.ASSIGN:
+150:       case Token.ASSIGN_ADD:
+151:       case Token.ASSIGN_BITAND:
+152:       case Token.ASSIGN_BITOR:
+153:       case Token.ASSIGN_BITXOR:
+154:       case Token.ASSIGN_DIV:
+155:       case Token.ASSIGN_LSH:
+156:       case Token.ASSIGN_MOD:
+157:       case Token.ASSIGN_MUL:
+158:       case Token.ASSIGN_RSH:
+159:       case Token.ASSIGN_SUB:
+160:       case Token.ASSIGN_URSH:
+161:         return processAssignment((Assignment) node);
+162:       case Token.BITNOT:
+163:       case Token.DEC:
+164:       case Token.DELPROP:
+165:       case Token.INC:
+166:       case Token.NEG:
+167:       case Token.NOT:
+168:       case Token.POS:
+169:       case Token.TYPEOF:
+170:       case Token.VOID:
+171:         return processUnaryExpression((UnaryExpression) node);
+172:       case Token.BLOCK:
+173:         if (node instanceof Block) {
+174:           return processBlock((Block) node);
+175:         } else  if (node instanceof Scope) {
+176:           return processScope((Scope) node);
+177:         } else {
+178:           throw new IllegalStateException("Unexpected node type.  class: " +
+179:                                           node.getClass() +
+180:                                           " type: " +
+181:                                           Token.typeToName(node.getType()));
+182:         }
+183:       case Token.BREAK:
+184:         return processBreakStatement((BreakStatement) node);
+185:       case Token.CALL:
+186:         return processFunctionCall((FunctionCall) node);
+187:       case Token.CASE:
+188:       case Token.DEFAULT:
+189:         return processSwitchCase((SwitchCase) node);
+190:       case Token.CATCH:
+191:         return processCatchClause((CatchClause) node);
+192:       case Token.COLON:
+193:         return processObjectProperty((ObjectProperty) node);
+194:       case Token.CONTINUE:
+195:         return processContinueStatement((ContinueStatement) node);
+196:       case Token.DO:
+197:         return processDoLoop((DoLoop) node);
+198:       case Token.EMPTY:
+199:         return (node instanceof EmptyExpression) ?
+200:             processEmptyExpression((EmptyExpression) node) :
+201:             processEmptyStatement((EmptyStatement) node);
+202:       case Token.EXPR_RESULT:
+203:       case Token.EXPR_VOID:
+204:         if (node instanceof ExpressionStatement) {
+205:           return processExpressionStatement((ExpressionStatement) node);
+206:         } else  if (node instanceof LabeledStatement) {
+207:           return processLabeledStatement((LabeledStatement) node);
+208:         } else {
+209:           throw new IllegalStateException("Unexpected node type.  class: " +
+210:                                           node.getClass() +
+211:                                           " type: " +
+212:                                           Token.typeToName(node.getType()));
+213:         }
+214:       case Token.DEBUGGER:
+215:       case Token.FALSE:
+216:       case Token.NULL:
+217:       case Token.THIS:
+218:       case Token.TRUE:
+219:         return processKeywordLiteral((KeywordLiteral) node);
+220:       case Token.FOR:
+221:         if (node instanceof ForInLoop) {
+222:           return processForInLoop((ForInLoop) node);
+223:         } else  if (node instanceof ForLoop) {
+224:           return processForLoop((ForLoop) node);
+225:         } else {
+226:           throw new IllegalStateException("Unexpected node type.  class: " +
+227:                                           node.getClass() +
+228:                                           " type: " +
+229:                                           Token.typeToName(node.getType()));
+230:         }
+231:       case Token.FUNCTION:
+232:         return processFunctionNode((FunctionNode) node);
+233:       case Token.GETELEM:
+234:         return processElementGet((ElementGet) node);
+235:       case Token.GETPROP:
+236:         return processPropertyGet((PropertyGet) node);
+237:       case Token.HOOK:
+238:         return processConditionalExpression((ConditionalExpression) node);
+239:       case Token.IF:
+240:         return processIfStatement((IfStatement) node);
+241:       case Token.LABEL:
+242:         return processLabel((Label) node);
+243:       case Token.LP:
+244:         return processParenthesizedExpression((ParenthesizedExpression) node);
+245:       case Token.NAME:
+246:         return processName((Name) node);
+247:       case Token.NEW:
+248:         return processNewExpression((NewExpression) node);
+249:       case Token.NUMBER:
+250:         return processNumberLiteral((NumberLiteral) node);
+251:       case Token.OBJECTLIT:
+252:         return processObjectLiteral((ObjectLiteral) node);
+253:       case Token.REGEXP:
+254:         return processRegExpLiteral((RegExpLiteral) node);
+255:       case Token.RETURN:
+256:         return processReturnStatement((ReturnStatement) node);
+257:       case Token.SCRIPT:
+258:         return processAstRoot((AstRoot) node);
+259:       case Token.STRING:
+260:         return processStringLiteral((StringLiteral) node);
+261:       case Token.SWITCH:
+262:         return processSwitchStatement((SwitchStatement) node);
+263:       case Token.THROW:
+264:         return processThrowStatement((ThrowStatement) node);
+265:       case Token.TRY:
+266:         return processTryStatement((TryStatement) node);
+267:       case Token.CONST:
+268:       case Token.VAR:
+269:         if (node instanceof VariableDeclaration) {
+270:           return processVariableDeclaration((VariableDeclaration) node);
+271:         } else  if (node instanceof VariableInitializer) {
+272:           return processVariableInitializer((VariableInitializer) node);
+273:         } else {
+274:           throw new IllegalStateException("Unexpected node type.  class: " +
+275:                                           node.getClass() +
+276:                                           " type: " +
+277:                                           Token.typeToName(node.getType()));
+278:         }
+279:       case Token.WHILE:
+280:         return processWhileLoop((WhileLoop) node);
+281:       case Token.WITH:
+282:         return processWithStatement((WithStatement) node);
+283:     }
+284:     return processIllegalToken(node);
+285:   }
+
+[38] com.google.javascript.jscomp.DataFlowAnalysis#getIn  (lines 503-505)
+503:     L getIn() {
+504:       return in;
+505:     }
+
+[39] com.google.javascript.rhino.Node#isDec  (lines 2220-2222)
+2220:   public boolean isDec() {
+2221:     return this.getType() == Token.DEC;
+2222:   }
+
+[40] com.google.javascript.rhino.jstype.RecordType#getImplicitPrototype  (lines 120-123)
+120:   @Override
+121:   public ObjectType getImplicitPrototype() {
+122:     return registry.getNativeObjectType(JSTypeNative.OBJECT_TYPE);
+123:   }
+
+[41] com.google.javascript.jscomp.Compiler#parseTestCode  (lines 1534-1544)
+1534:   @Override
+1535:   Node parseTestCode(String js) {
+1536:     initCompilerOptionsIfTesting();
+1537:     CompilerInput input = new CompilerInput(
+1538:         SourceFile.fromCode("[testcode]", js));
+1539:     if (inputsById == null) {
+1540:       inputsById = Maps.newHashMap();
+1541:     }
+1542:     putCompilerInput(input.getInputId(), input);
+1543:     return input.getAstRoot(this);
+1544:   }
+
+[42] com.google.javascript.jscomp.NodeUtil#isForIn  (lines 1564-1567)
+1564:   static boolean isForIn(Node n) {
+1565:     return n.isFor()
+1566:         && n.getChildCount() == 3;
+1567:   }
+
+[43] com.google.javascript.jscomp.NodeUtil#getBestLValueOwner  (lines 3056-3067)
+3056:   static Node getBestLValueOwner(@Nullable Node lValue) {
+3057:     if (lValue == null || lValue.getParent() == null) {
+3058:       return null;
+3059:     }
+3060:     if (isObjectLitKey(lValue, lValue.getParent())) {
+3061:       return getBestLValue(lValue.getParent());
+3062:     } else if (isGet(lValue)) {
+3063:       return lValue.getFirstChild();
+3064:     }
+3065: 
+3066:     return null;
+3067:   }
+
+[44] com.google.javascript.jscomp.parsing.JsDocInfoParser#parseRecordType  (lines 2083-2100)
+2083:   private Node parseRecordType(JsDocToken token) {
+2084:     Node recordType = newNode(Token.LC);
+2085:     Node fieldTypeList = parseFieldTypeList(token);
+2086: 
+2087:     if (fieldTypeList == null) {
+2088:       return reportGenericTypeSyntaxWarning();
+2089:     }
+2090: 
+2091:     skipEOLs();
+2092:     if (!match(JsDocToken.RC)) {
+2093:       return reportTypeSyntaxWarning("msg.jsdoc.missing.rc");
+2094:     }
+2095: 
+2096:     next();
+2097: 
+2098:     recordType.addChildToBack(fieldTypeList);
+2099:     return recordType;
+2100:   }
+
+[45] com.google.javascript.jscomp.TypeInference#traverseNew  (lines 1035-1063)
+1035:   private FlowScope traverseNew(Node n, FlowScope scope) {
+1036: 
+1037:     Node constructor = n.getFirstChild();
+1038:     scope = traverse(constructor, scope);
+1039:     JSType constructorType = constructor.getJSType();
+1040:     JSType type = null;
+1041:     if (constructorType != null) {
+1042:       constructorType = constructorType.restrictByNotNullOrUndefined();
+1043:       if (constructorType.isUnknownType()) {
+1044:         type = getNativeType(UNKNOWN_TYPE);
+1045:       } else {
+1046:         FunctionType ct = constructorType.toMaybeFunctionType();
+1047:         if (ct == null && constructorType instanceof FunctionType) {
+1048:           // If constructorType is a NoObjectType, then toMaybeFunctionType will
+1049:           // return null. But NoObjectType implements the FunctionType
+1050:           // interface, precisely because it can validly construct objects.
+1051:           ct = (FunctionType) constructorType;
+1052:         }
+1053:         if (ct != null && ct.isConstructor()) {
+1054:           type = ct.getInstanceType();
+1055:         }
+1056:       }
+1057:     }
+1058:     n.setJSType(type);
+1059:     for (Node arg = constructor.getNext(); arg != null; arg = arg.getNext()) {
+1060:       scope = traverse(arg, scope);
+1061:     }
+1062:     return scope;
+1063:   }
+
+[46] com.google.javascript.jscomp.parsing.JsDocInfoParser#parseUnionTypeWithAlternate  (lines 1998-2037)
+1998:   private Node parseUnionTypeWithAlternate(JsDocToken token, Node alternate) {
+1999:     Node union = newNode(Token.PIPE);
+2000:     if (alternate != null) {
+2001:       union.addChildToBack(alternate);
+2002:     }
+2003: 
+2004:     Node expr = null;
+2005:     do {
+2006:       if (expr != null) {
+2007:         skipEOLs();
+2008:         token = next();
+2009:         Preconditions.checkState(
+2010:             token == JsDocToken.PIPE || token == JsDocToken.COMMA);
+2011: 
+2012:         boolean isPipe = token == JsDocToken.PIPE;
+2013:         if (isPipe && match(JsDocToken.PIPE)) {
+2014:           // We support double pipes for backwards compatibility.
+2015:           next();
+2016:         }
+2017:         skipEOLs();
+2018:         token = next();
+2019:       }
+2020:       expr = parseTypeExpression(token);
+2021:       if (expr == null) {
+2022:         return null;
+2023:       }
+2024: 
+2025:       union.addChildToBack(expr);
+2026:       // We support commas for backwards compatibility.
+2027:     } while (match(JsDocToken.PIPE, JsDocToken.COMMA));
+2028: 
+2029:     if (alternate == null) {
+2030:       skipEOLs();
+2031:       if (!match(JsDocToken.RP)) {
+2032:         return reportTypeSyntaxWarning("msg.jsdoc.missing.rp");
+2033:       }
+2034:       next();
+2035:     }
+2036:     return union;
+2037:   }
+
+[47] com.google.javascript.rhino.jstype.RecordTypeBuilder#getPropertyNode  (lines 105-107)
+105:     public Node getPropertyNode() {
+106:       return propertyNode;
+107:     }
+
+[48] com.google.javascript.jscomp.parsing.JsDocInfoParser#parseFieldTypeList  (lines 2105-2131)
+2105:   private Node parseFieldTypeList(JsDocToken token) {
+2106:     Node fieldTypeList = newNode(Token.LB);
+2107: 
+2108:     do {
+2109:       Node fieldType = parseFieldType(token);
+2110: 
+2111:       if (fieldType == null) {
+2112:         return null;
+2113:       }
+2114: 
+2115:       fieldTypeList.addChildToBack(fieldType);
+2116: 
+2117:       skipEOLs();
+2118:       if (!match(JsDocToken.COMMA)) {
+2119:         break;
+2120:       }
+2121: 
+2122:       // Move to the comma token.
+2123:       next();
+2124: 
+2125:       // Move to the token passed the comma.
+2126:       skipEOLs();
+2127:       token = next();
+2128:     } while (true);
+2129: 
+2130:     return fieldTypeList;
+2131:   }
+
+[49] com.google.javascript.rhino.jstype.JSTypeRegistry#createRecordType  (lines 1313-1315)
+1313:   public RecordType createRecordType(Map<String, RecordProperty> properties) {
+1314:     return new RecordType(this, properties);
+1315:   }
+
+[50] com.google.javascript.jscomp.parsing.JsDocInfoParser#parseFieldType  (lines 2136-2164)
+2136:   private Node parseFieldType(JsDocToken token) {
+2137:     Node fieldName = parseFieldName(token);
+2138: 
+2139:     if (fieldName == null) {
+2140:       return null;
+2141:     }
+2142: 
+2143:     skipEOLs();
+2144:     if (!match(JsDocToken.COLON)) {
+2145:       return fieldName;
+2146:     }
+2147: 
+2148:     // Move to the colon.
+2149:     next();
+2150: 
+2151:     // Move to the token after the colon and parse
+2152:     // the type expression.
+2153:     skipEOLs();
+2154:     Node typeExpression = parseTypeExpression(next());
+2155: 
+2156:     if (typeExpression == null) {
+2157:       return null;
+2158:     }
+2159: 
+2160:     Node fieldType = newNode(Token.COLON);
+2161:     fieldType.addChildToBack(fieldName);
+2162:     fieldType.addChildToBack(typeExpression);
+2163:     return fieldType;
+2164:   }
