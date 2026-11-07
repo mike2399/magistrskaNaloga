@@ -116,11 +116,14 @@ ustrezno mapo `*_cache/`.
 
 | del naloge | skripta |
 |---|---|
-| tabela učinka združevanja v metode (4. poglavje) | `izhodisca/ochiai_stavki.py`, `izhodisca/ochiai_metode.py` |
-| tabela 6.1 do 6.4 in slika 6.1 (posamezne tehnike, družine, komplementarnost) | `analize/primerjava_druzin.py` |
-| tabela 6.5 (polni in okrnjeni pogled) | `analize/polni_pogled.py` |
-| tabela 6.6, 6.7, 6.12 in 6.13, slika 5.2 in 6.2 (glavni poskus, testi, rezultati po projektih) | `modeli/mlp_llm.py` |
-| tabela 6.8 in 6.15 (rankSVM z oceno LLM, obravnava enakih ocen) | `modeli/ranksvm_h9.py`, `modeli/ranksvm_llm.py` |
-| tabela 6.9, 6.10 in 6.14 (prečno preverjanje po projektih, semena) | `modeli/mlp_lopo.py` |
-| poglavje 7 in dodatek B (kvalitativna analiza primerov) | `analize/kvalitativni_primeri.py` |
+| tabela 4.1 (sestava napak in izključitve) | `priprava_podatkov/matrika_metod.py` |
+| tabela 4.2 (nivo stavka proti nivoju metode) | `izhodisca/ochiai_stavki.py`, `izhodisca/ochiai_metode.py` |
+| tabela 5.2 (zagoni in cena klicev) | `jezikovni_model/klici.py` |
+| tabeli 6.1 in 6.2, slika 6.1, tabela A.1 (tehnike, družine, komplementarnost) | `analize/primerjava_druzin.py` |
+| tabela 6.3 (polni in okrnjeni pogled) | `analize/polni_pogled.py` |
+| tabele 6.4, 6.5 in 6.6, sliki 5.2 in 6.2 (glavni poskus, rezultati po projektih) | `modeli/mlp_llm.py` |
+| tabela 6.7 (rankSVM in MLP z oceno LLM, obravnava enakih ocen) | `modeli/ranksvm_h9.py`, `modeli/ranksvm_llm.py` |
+| tabela 6.8 (prečno preverjanje po projektih) | `modeli/mlp_lopo.py` |
+| tabela A.2 (vsi statistični testi) | skripte 8 do 12 |
+| poglavje 7 in tabela B.1 (kvalitativna analiza dvajsetih primerov) | `analize/kvalitativni_primeri.py` |
 | vse tabele in slike v obliki za nalogo | `porocila/tabele_poglavje6.py`, `porocila/slike.py` |

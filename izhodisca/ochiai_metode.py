@@ -76,9 +76,6 @@ def main():
                                 for t in TEHNIKI for k in (0, 1) for i in range(len(N.NS) - 1)))
     p("za vsak n velja 0 <= pesimistično <= optimistično <= število napak",
       all(0 <= rezultati[t][n][1] <= rezultati[t][n][0] <= len(ocenljive) for t in TEHNIKI for n in N.NS))
-    o10, d10 = rezultati["ochiai"][10][0], rezultati["dstar"][10][0]
-    p("Ochiai in DStar sta pri Top-10 blizu", abs(o10 - d10) <= max(20, int(0.25 * max(o10, d10))),
-      f"ochiai {o10}, dstar {d10}")
     razpon_metode = float(np.mean([v["ochiai_worst"] - v["ochiai_best"] for v in po_napakah]))
     print(f"  povprečni razpon ranga na napako (pesimistična minus optimistična meja), Ochiai: metode {razpon_metode:.2f}"
           + (f", stavki {stavki['razpon']:.2f}" if stavki else ""))

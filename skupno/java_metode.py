@@ -7,19 +7,10 @@ from skupno.defects4j import pot_razreda
 
 
 def nalozi_parser():
-    """Vrne razčlenjevalnik za Javo, deluje z več različicami vmesnika tree-sitter."""
+    """Vrne razčlenjevalnik tree-sitter za Javo."""
     import tree_sitter_java as tsjava
     from tree_sitter import Language, Parser
-    jezik = Language(tsjava.language())
-    try:
-        return Parser(jezik)
-    except Exception:
-        p = Parser()
-        try:
-            p.language = jezik
-        except Exception:
-            p.set_language(jezik)
-        return p
+    return Parser(Language(tsjava.language()))
 
 
 def _zberi_metode(vozlisce, bajti, out):

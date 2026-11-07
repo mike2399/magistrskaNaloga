@@ -5,10 +5,18 @@ Povsod velja isto merilo. Znotraj ene napake metode uredimo padajoče po oceni, 
 povprečni rang, rang napake pa je rang njene najbolje uvrščene krive metode. Iz teh rangov izhajajo
 Top-N, MFR in MAR.
 """
+import math
+
 import numpy as np
 from scipy.stats import rankdata, wilcoxon
 
 from nastavitve import NS
+
+
+def rangi_krivih(g, stolpec, metoda="average"):
+    """Rangi krivih metod ene napake. Metode uredimo padajoče po oceni, enake ocene dobijo rang po pravilu `metoda`."""
+    r = rankdata(-g[stolpec].to_numpy(dtype=float), method=metoda)
+    return r[g["faulty"].to_numpy() == 1]
 
 
 def metrike_po_napakah(df, stolpec, podmnozica=None):
@@ -22,11 +30,10 @@ def metrike_po_napakah(df, stolpec, podmnozica=None):
     for fid, g in df.groupby("fault_id"):
         if podmnozica is not None and fid not in podmnozica:
             continue
-        r = rankdata(-g[stolpec].to_numpy(dtype=float), method="average")
-        krivi = r[g["faulty"].to_numpy() == 1]
-        prvi_rang, povpr_rang = float(krivi.min()), float(krivi.mean())
+        krivi = rangi_krivih(g, stolpec)
+        prvi_rang = float(krivi.min())
         prvi.append(prvi_rang)
-        povprecni.append(povpr_rang)
+        povprecni.append(float(krivi.mean()))
         prvi_po_napaki[fid] = prvi_rang
         for n in NS:
             if prvi_rang <= n:
@@ -36,23 +43,14 @@ def metrike_po_napakah(df, stolpec, podmnozica=None):
 
 def prvi_rangi(df, stolpec):
     """Slovar {fault_id: rang prve krive metode} po pravilu povprečnega ranga."""
-    out = {}
-    for fid, g in df.groupby("fault_id"):
-        r = rankdata(-g[stolpec].to_numpy(dtype=float), method="average")
-        out[fid] = float(r[g["faulty"].to_numpy() == 1].min())
-    return out
+    return {fid: float(rangi_krivih(g, stolpec).min()) for fid, g in df.groupby("fault_id")}
 
 
 def top1_po_konvencijah(df, stolpec):
     """Top-1 pri treh obravnavah enakih ocen: optimistični (min), povprečni (avg) in pesimistični (max)."""
     out = {}
     for metoda, oznaka in (("min", "min"), ("average", "avg"), ("max", "max")):
-        n = 0
-        for fid, g in df.groupby("fault_id"):
-            r = rankdata(-g[stolpec].to_numpy(dtype=float), method=metoda)
-            if float(r[g["faulty"].to_numpy() == 1].min()) <= 1.0:
-                n += 1
-        out[oznaka] = n
+        out[oznaka] = sum(1 for _, g in df.groupby("fault_id") if rangi_krivih(g, stolpec, metoda).min() <= 1.0)
     return out
 
 
@@ -89,14 +87,14 @@ def wilcoxon_parni(rang_a, rang_b, napake, alternativa="less", metoda="auto"):
 
 
 def holm(pvals):
-    """Holm-Bonferronijev popravek za več primerjav. Vrne popravljene vrednosti p v istem vrstnem redu."""
+    """Holm-Bonferronijev popravek za več primerjav. Vrne popravljene vrednosti p v istem vrstnem redu, nan ostane nan."""
     m = len(pvals)
-    vrstni_red = np.argsort([p if p == p else 2.0 for p in pvals])
+    vrstni_red = np.argsort([2.0 if math.isnan(p) else p for p in pvals])
     popravljeni = [float("nan")] * m
     tekoci_max = 0.0
     for k, idx in enumerate(vrstni_red):
         p = pvals[idx]
-        if p != p:                       # nan ostane nan
+        if math.isnan(p):
             continue
         tekoci_max = max(tekoci_max, min(1.0, (m - k) * p))
         popravljeni[idx] = tekoci_max

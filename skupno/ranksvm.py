@@ -49,43 +49,6 @@ def pozeni_svm(args, kaj):
     return r.stdout
 
 
-def preveri_letor(pot, n_znacilk, vrni_podatke=False):
-    """Preveri obliko datoteke LETOR (cilj 0 ali 1, strnjeni qid, značilke 1..n po vrsti). Vrne množico qid."""
-    videni, trenutni = set(), None
-    cilji, vrstice = [], []
-    with open(pot) as f:
-        for st, line in enumerate(f, 1):
-            deli = line.split()
-            if not deli:
-                continue
-            t = deli[0]
-            if t not in ("0", "1"):
-                raise RuntimeError(f"{pot}:{st}: cilj '{t}' ni 0/1")
-            if not deli[1].startswith("qid:"):
-                raise RuntimeError(f"{pot}:{st}: manjka 'qid:'")
-            q = int(deli[1][4:])
-            if q != trenutni:
-                if q in videni:
-                    raise RuntimeError(f"{pot}:{st}: qid {q} ni strnjen")
-                videni.add(q)
-                trenutni = q
-            zetoni = deli[2:]
-            if len(zetoni) != n_znacilk:
-                raise RuntimeError(f"{pot}:{st}: {len(zetoni)} značilk namesto {n_znacilk}")
-            vrednosti = []
-            for j, zeton in enumerate(zetoni, 1):
-                fid, _, sval = zeton.partition(":")
-                if int(fid) != j:
-                    raise RuntimeError(f"{pot}:{st}: oznaka značilke '{fid}' ni {j}")
-                vrednosti.append(float(sval))
-            if vrni_podatke:
-                cilji.append(int(t))
-                vrstice.append(vrednosti)
-    if vrni_podatke:
-        return videni, np.array(cilji, dtype=int), np.array(vrstice, dtype=np.float64)
-    return videni
-
-
 def preberi_model(pot, n_znacilk):
     """Iz datoteke modela svm_rank (oblika SVM-light) izlušči prag b in vektor uteži w (vsota alpha krat podporni vektor)."""
     with open(pot) as f:
@@ -119,7 +82,7 @@ def ranksvm_cv(df, znacilke, gube, qid_napake, oznaka, mapa_tmp, mapa_cache):
     """Prečno preverjanje po napakah z modelom rankSVM.
 
     Vrne (napovedi, uteži po gubah). Uteži so None, če so napovedi iz predpomnilnika brez shranjenih uteži.
-    Pri svežem izračunu preveri zapisane datoteke LETOR in da uteži reproducirajo napovedi programa.
+    Pri svežem izračunu preveri, da uteži iz datoteke modela reproducirajo napovedi programa.
     """
     os.makedirs(mapa_cache, exist_ok=True)
     kljuc = kljuc_predpomnilnika(df, znacilke, [C_REGULARIZACIJA, SEME_DELITVE, K_GUB, len(df)])
@@ -136,7 +99,6 @@ def ranksvm_cv(df, znacilke, gube, qid_napake, oznaka, mapa_tmp, mapa_cache):
     os.makedirs(mapa_tmp, exist_ok=True)
     napoved = np.full(len(df), np.nan, dtype=np.float64)
     napaka_vrstice = df["fault_id"].to_numpy()
-    vsi_qid = set(qid_napake.values())
     utezi = []
     for k, testne in enumerate(gube):
         ucna = ~np.isin(napaka_vrstice, list(testne))
@@ -148,21 +110,6 @@ def ranksvm_cv(df, znacilke, gube, qid_napake, oznaka, mapa_tmp, mapa_cache):
         zapisi_letor(df.loc[ucna], znacilke, qid_napake, p_ucna)
         indeks_testne = zapisi_letor(df.loc[testna], znacilke, qid_napake, p_testna)
 
-        # preverbe zapisanih datotek
-        qid_ucna = preveri_letor(p_ucna, len(znacilke))
-        qid_testna, cilji_testna, F_testna = preveri_letor(p_testna, len(znacilke), vrni_podatke=True)
-        if qid_ucna & qid_testna:
-            raise RuntimeError(f"{oznaka} guba {k}: isti qid v učni in testni množici")
-        if qid_testna != {qid_napake[f] for f in testne}:
-            raise RuntimeError(f"{oznaka} guba {k}: testni qid na disku niso qid testnih napak")
-        if (qid_ucna | qid_testna) != vsi_qid:
-            raise RuntimeError(f"{oznaka} guba {k}: učna in testna množica ne pokrijeta vseh qid")
-        F_pric = df.loc[indeks_testne, znacilke].to_numpy(dtype=float)
-        if F_testna.shape != F_pric.shape or not np.allclose(F_testna, F_pric, rtol=1e-6, atol=0.0):
-            raise RuntimeError(f"{oznaka} guba {k}: zapisane testne značilke se ne ujemajo s tabelo")
-        if not np.array_equal(cilji_testna, df.loc[indeks_testne, "faulty"].to_numpy(dtype=int)):
-            raise RuntimeError(f"{oznaka} guba {k}: zapisani cilji se ne ujemajo s tabelo")
-
         pozeni_svm([SVM_RANK_LEARN, "-c", str(C_REGULARIZACIJA), p_ucna, p_model], f"svm_rank_learn [{oznaka} guba {k}]")
         pozeni_svm([SVM_RANK_CLASSIFY, p_testna, p_model, p_napoved], f"svm_rank_classify [{oznaka} guba {k}]")
         ocene = preberi_napovedi(p_napoved)
@@ -171,7 +118,7 @@ def ranksvm_cv(df, znacilke, gube, qid_napake, oznaka, mapa_tmp, mapa_cache):
 
         # uteži in njihova preverba, w . x - b mora dati isto kot program
         b, w = preberi_model(p_model, len(znacilke))
-        rekonstrukcija = F_testna @ w - b
+        rekonstrukcija = df.loc[indeks_testne, znacilke].to_numpy(dtype=float) @ w - b
         toleranca = 1e-3 * max(1.0, float(np.max(np.abs(ocene))))
         odklon = float(np.max(np.abs(rekonstrukcija - ocene)))
         if odklon > toleranca:

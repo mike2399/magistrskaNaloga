@@ -15,24 +15,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija (nastavitve.py, skupno/)
 
-import os
-
 import numpy as np
-from scipy.stats import rankdata
 
 import nastavitve as N
-from skupno.metrike import metrike_po_napakah, wilcoxon_parni
+from skupno.metrike import metrike_po_napakah, top1_po_konvencijah, wilcoxon_parni
 from skupno.mlp import napovedi_cv
 from skupno.podatki import nalozi_matriko_metod, seznam_napak, normiraj_po_napaki, gube_po_napaki, v_intervalu_0_1
 from skupno.preverbe import Preverbe, glava
 
 EPOHE = 60
-
-
-def top1_optimisticno(df, stolpec):
-    """Top-1, če krivo metodo med enako ocenjenimi pregledamo prvo."""
-    return sum(1 for _, g in df.groupby("fault_id")
-               if rankdata(-g[stolpec].to_numpy(float), method="min")[g["faulty"].to_numpy() == 1].min() <= 1)
 
 
 def main():
@@ -61,8 +52,8 @@ def main():
     w = wilcoxon_parni(m_rang, o_rang, napake, "less")
     print(f"  Wilcoxon (MLP boljši od Ochiai): W = {w['W']:.0f}, p = {w['p']:.3g} "
           f"(MLP boljši {w['a_better']}, slabši {w['a_worse']}, enako {w['tie']})")
-    print(f"  Top-1 pri optimistični obravnavi enakih ocen: Ochiai {top1_optimisticno(df, 'ochiai')}, "
-          f"MLP {top1_optimisticno(df, 'mlp')} (pri povprečnem rangu {o_top[1]} in {m_top[1]})")
+    print(f"  Top-1 pri optimistični obravnavi enakih ocen: Ochiai {top1_po_konvencijah(df, 'ochiai')['min']}, "
+          f"MLP {top1_po_konvencijah(df, 'mlp')['min']} (pri povprečnem rangu {o_top[1]} in {m_top[1]})")
 
     df[["fault_id", "classname", "method", "m_start", "m_end", "faulty", "ochiai", "mlp"]].to_csv(
         N.pot(N.MLP_H9_NAPOVEDI), index=False)

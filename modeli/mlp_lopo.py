@@ -220,7 +220,7 @@ def main():
         "per_project_mfr_by_seed": {str(s): mfr_projektov[s] for s in N.SEMENA},
         "first_ranks_primary_seed": {f: {"project": projekt_napak[f], "h9": metrike["MLP H9"][PRIMARNO_SEME][3][f],
                                          "h9llm": metrike["MLP H9+LLM"][PRIMARNO_SEME][3][f]} for f in napake},
-        "context_10fold_05c": {"source": N.MLP_LLM_REZULTATI, "MLP H9": h9_10, "MLP H9+LLM": llm_10,
+        "context_10fold": {"source": N.MLP_LLM_REZULTATI, "MLP H9": h9_10, "MLP H9+LLM": llm_10,
                                "seed_delta_top1_mean": rez08["seed_delta_top1_mean"], "seed_delta_top1_sd": rez08["seed_delta_top1_sd"],
                                "seed_delta_mfr_mean": rez08["seed_delta_mfr_mean"], "seed_delta_mfr_sd": rez08["seed_delta_mfr_sd"],
                                "wilcoxon_fault_p": rez08["wilcoxon_fault_p"], "wilcoxon_project_p": rez08["wilcoxon_project_p"]},

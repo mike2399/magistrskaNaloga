@@ -250,7 +250,7 @@ def main():
             "oracle_top1_UPPER_BOUND": len(zgornja_meja),
             "best_single": {"technique": najboljsa, "top1": len(resene[najboljsa])},
             "realistic_union_ochiai_dstar": unija_sbfl,
-            "achieved_learned_combination_05c_MLP_H9_top1": dosezeno,
+            "achieved_learned_combination_MLP_H9_top1": dosezeno,
         },
         "statistics_family_representatives": stat,
         "statistics_reversals": {"direction_reversals": obrnitve, "lost_significance": izgube, "reversal_details": podrobnosti},

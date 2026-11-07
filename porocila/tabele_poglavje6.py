@@ -18,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitor
 
 import json
 import math
-import os
 
 import nastavitve as N
 
@@ -130,7 +129,7 @@ def main():
     # Tabela 6.4: komplementarnost
     cp = t14["complementarity"]
     un = {k: len(v) for k, v in cp["solved_only_by"].items() if v}
-    dosezeno = cp["achieved_learned_combination_05c_MLP_H9_top1"]
+    dosezeno = cp["achieved_learned_combination_MLP_H9_top1"]
     vr = [[f"unikatno rešene napake: {IME[k].split(' (')[0]}", n] for k, n in sorted(un.items(), key=lambda kv: -kv[1])]
     vr += [["unikatno rešene napake skupaj", sum(un.values())],
            ["Ochiai ∪ DStar (kombiniranje znotraj SBFL)", cp["realistic_union_ochiai_dstar"]],
@@ -196,7 +195,7 @@ def main():
             [("Ochiai (nenaučena referenca)", "Ochiai (netrenirana referenca)"), ("H9", "MLP H9 (LOPO)"), ("H9+LLM", "MLP H9+LLM (LOPO)")]])
 
     # Tabela 6.10: LOPO proti prečnemu preverjanju po napakah
-    ss, t10f = l11["seed_stats"]["mfr"], l11["context_10fold_05c"]
+    ss, t10f = l11["seed_stats"]["mfr"], l11["context_10fold"]
     vr = []
     for i, k, kp in [("H9", "MLP H9", "MLP H9 (LOPO)"), ("H9+LLM", "MLP H9+LLM", "MLP H9+LLM (LOPO)")]:
         a, b = t10f[k]["mfr"], po[kp]["mfr"]

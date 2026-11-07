@@ -26,7 +26,6 @@ import os
 import random
 import shutil
 
-import numpy as np
 import pandas as pd
 
 import nastavitve as N

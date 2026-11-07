@@ -20,7 +20,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija (nastavitve.py, skupno/)
 
 import json
-import os
 
 import numpy as np
 import pandas as pd
@@ -92,14 +91,14 @@ def main():
     pred = len(df)
     df = df.merge(r10[N.KLJUC + ["ranksvm_raw", "ranksvm_norm"]], on=N.KLJUC, how="left")
     p("napovedi iz ranksvm_h9.py so pripete brez izgube", len(df) == pred and bool(df[["ranksvm_raw", "ranksvm_norm"]].notna().all().all()))
-    r08 = r08[N.KLJUC + ["mlp_h9", "mlp_h9llm", "ochiai", "llm"]].rename(columns={"ochiai": "ochiai_08", "llm": "llm_08"})
+    r08 = r08[N.KLJUC + ["mlp_h9", "mlp_h9llm", "ochiai", "llm"]].rename(columns={"ochiai": "ochiai_mlp", "llm": "llm_mlp"})
     df = df.merge(r08, on=N.KLJUC, how="left")
     p("napovedi iz mlp_llm.py so pripete brez izgube", len(df) == pred and bool(df[["mlp_h9", "mlp_h9llm"]].notna().all().all()))
     # poravnava vrstic med skriptami, razlika sme biti le zaokrožitev pri zapisu v CSV
-    razlika = float(np.abs(df["ochiai"].to_numpy(dtype=float) - df["ochiai_08"].to_numpy(dtype=float)).max())
+    razlika = float(np.abs(df["ochiai"].to_numpy(dtype=float) - df["ochiai_mlp"].to_numpy(dtype=float)).max())
     p("Ochiai iz mlp_llm.py se ujema z matriko (toleranca 1e-9)", razlika < 1e-9, f"največja razlika {razlika:.3e}")
-    p("ocena LLM se ujema s stolpcem iz mlp_llm.py", bool(np.array_equal(df["llm"].to_numpy(), df["llm_08"].to_numpy())))
-    df.drop(columns=["ochiai_08", "llm_08"], inplace=True)
+    p("ocena LLM se ujema s stolpcem iz mlp_llm.py", bool(np.array_equal(df["llm"].to_numpy(), df["llm_mlp"].to_numpy())))
+    df.drop(columns=["ochiai_mlp", "llm_mlp"], inplace=True)
 
     print(f"\n[Rezultati, {len(napake)} napak, {N.K_GUB}-kratno prečno preverjanje po napakah]")
     print(f"  {'model':26s} " + "  ".join(f"Top-{n}" for n in N.NS) + "     MFR     MAR")
