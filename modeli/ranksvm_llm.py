@@ -2,22 +2,19 @@
 # -*- coding: utf-8 -*-
 """RankSVM z oceno jezikovnega modela kot deseto značilko.
 
-Oceno jezikovnega modela dodamo še linearnemu modelu in oba kombinatorja primerjamo z isto deseto
-značilko. Postopek je enak kot v ranksvm_h9.py (iste gube, C = 1, obe predobdelavi). Ker je surova
-ocena jezikovnega modela na lestvici od 0 do 100, poročamo tudi naučene uteži. Top-1 poročamo pri
-vseh treh obravnavah enakih ocen.
+Oceno jezikovnega modela dodamo še linearnemu modelu, da oba kombinatorja primerjamo z isto deseto
+značilko. Gube, C = 1 in obe predobdelavi so kot v ranksvm_h9.py. Poročamo tudi naučene uteži,
+ker je surova ocena na lestvici od 0 do 100, in Top-1 pri vseh treh obravnavah enakih ocen.
 
-Zagon:  python modeli/ranksvm_llm.py
-        (12. skripta v cevovodu, vrstni red je v README)
-Vhod:   izhod/podatki/matrika_metod.parquet, jezikovni_model/ocene.csv, modeli/mlp_llm_napovedi.csv,
-        modeli/ranksvm_h9_napovedi.csv, modeli/ranksvm_h9_rezultati.json
-Izhod:  izhod/modeli/ranksvm_llm_napovedi.csv, modeli/ranksvm_llm_rezultati.json, modeli/ranksvm_llm_cache/,
-        modeli/ranksvm_llm_tmp/
+Vhod:   izhod/podatki/matrika_metod.parquet, jezikovni_model/ocene.csv,
+        modeli/mlp_llm_napovedi.csv, modeli/ranksvm_h9_napovedi.csv in ranksvm_h9_rezultati.json
+Izhod:  izhod/modeli/ranksvm_llm_napovedi.csv, modeli/ranksvm_llm_rezultati.json,
+        modeli/ranksvm_llm_cache/, modeli/ranksvm_llm_tmp/
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija (nastavitve.py, skupno/)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija
 
 import json
 
@@ -27,7 +24,7 @@ import pandas as pd
 import nastavitve as N
 from skupno.metrike import metrike_po_napakah, top1_po_konvencijah, wilcoxon_parni
 from skupno.podatki import (nalozi_matriko_metod, seznam_napak, normiraj_po_napaki, gube_po_napaki,
-                            zdruzi_llm_ocene, v_intervalu_0_1)
+                            zdruzi_llm_ocene, v_intervalu_0_1, beri_json)
 from skupno.preverbe import Preverbe, glava
 from skupno.ranksvm import preveri_programa, ranksvm_cv, povzetek_utezi, C_REGULARIZACIJA
 
@@ -83,18 +80,18 @@ def main():
           bool(np.isfinite(df[c].to_numpy()).all()) and float(np.std(df[c])) > 0)
 
     # že izračunane napovedi iz ranksvm_h9.py in mlp_llm.py, ne računamo jih znova
-    r10 = pd.read_csv(N.pot(N.RANKSVM_NAPOVEDI))
-    r08 = pd.read_csv(N.pot(N.MLP_LLM_NAPOVEDI))
-    for t in (r10, r08):
+    nap_ranksvm = pd.read_csv(N.pot(N.RANKSVM_NAPOVEDI))
+    nap_mlp = pd.read_csv(N.pot(N.MLP_LLM_NAPOVEDI))
+    for t in (nap_ranksvm, nap_mlp):
         for c in ("m_start", "m_end"):
             t[c] = t[c].astype(int)
     pred = len(df)
-    df = df.merge(r10[N.KLJUC + ["ranksvm_raw", "ranksvm_norm"]], on=N.KLJUC, how="left")
+    df = df.merge(nap_ranksvm[N.KLJUC + ["ranksvm_raw", "ranksvm_norm"]], on=N.KLJUC, how="left")
     p("napovedi iz ranksvm_h9.py so pripete brez izgube", len(df) == pred and bool(df[["ranksvm_raw", "ranksvm_norm"]].notna().all().all()))
-    r08 = r08[N.KLJUC + ["mlp_h9", "mlp_h9llm", "ochiai", "llm"]].rename(columns={"ochiai": "ochiai_mlp", "llm": "llm_mlp"})
-    df = df.merge(r08, on=N.KLJUC, how="left")
+    nap_mlp = nap_mlp[N.KLJUC + ["mlp_h9", "mlp_h9llm", "ochiai", "llm"]].rename(columns={"ochiai": "ochiai_mlp", "llm": "llm_mlp"})
+    df = df.merge(nap_mlp, on=N.KLJUC, how="left")
     p("napovedi iz mlp_llm.py so pripete brez izgube", len(df) == pred and bool(df[["mlp_h9", "mlp_h9llm"]].notna().all().all()))
-    # poravnava vrstic med skriptami, razlika sme biti le zaokrožitev pri zapisu v CSV
+    # vrstice obeh skript se morajo ujemati, razlika sme biti le zaokrožitev v CSV
     razlika = float(np.abs(df["ochiai"].to_numpy(dtype=float) - df["ochiai_mlp"].to_numpy(dtype=float)).max())
     p("Ochiai iz mlp_llm.py se ujema z matriko (toleranca 1e-9)", razlika < 1e-9, f"največja razlika {razlika:.3e}")
     p("ocena LLM se ujema s stolpcem iz mlp_llm.py", bool(np.array_equal(df["llm"].to_numpy(), df["llm_mlp"].to_numpy())))
@@ -108,11 +105,14 @@ def main():
         rez[ime] = {"top": top, "mfr": mfr, "mar": mar, "_rang": rang}
         print(f"  {ime:26s} " + "  ".join(f"{top[n]:5d}" for n in N.NS) + f"   {mfr:6.2f}  {mar:6.2f}")
 
-    with open(N.pot(N.RANKSVM_REZULTATI), encoding="utf-8") as f:
-        rez10 = json.load(f)["results"]
-    odstopanja = [ime for ime in rez10 if not (all(rez[ime]["top"][n] == rez10[ime]["top"][str(n)] for n in N.NS)
-                                               and abs(rez[ime]["mfr"] - rez10[ime]["mfr"]) < 1e-9
-                                               and abs(rez[ime]["mar"] - rez10[ime]["mar"]) < 1e-9)]
+    rez_ranksvm = beri_json(N.RANKSVM_REZULTATI)["results"]
+    odstopanja = []
+    for ime, shranjeno in rez_ranksvm.items():
+        enako = (all(rez[ime]["top"][n] == shranjeno["top"][str(n)] for n in N.NS)
+                 and abs(rez[ime]["mfr"] - shranjeno["mfr"]) < 1e-9
+                 and abs(rez[ime]["mar"] - shranjeno["mar"]) < 1e-9)
+        if not enako:
+            odstopanja.append(ime)
     p("naložene napovedi reproducirajo rezultate ranksvm_h9.py", not odstopanja, ", ".join(odstopanja))
 
     print("\n[Top-1 po obravnavi enakih ocen: optimistična / povprečna / pesimistična]")

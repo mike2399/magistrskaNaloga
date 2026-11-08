@@ -1,30 +1,26 @@
 # -*- coding: utf-8 -*-
-"""Sprotne preverbe pravilnosti z izhodno kodo.
+"""Sprotne preverbe pravilnosti cevovoda, ki določijo izhodno kodo skripte.
 
-Preverbe se nanašajo na pravilnost cevovoda (oblika podatkov, nič izgubljenih vrstic, nič uhajanja
-med učno in testno množico). Izida poskusa ne preverjajo, tega poročamo v tabelah.
+Preverjajo obliko podatkov, število vrstic in uhajanje med učno in testno množico, ne izida poskusa
 """
 
 
 class Preverbe:
-    """Zbirka preverb ene skripte. Klic `p(ime, pogoj, podrobnost)` izpiše in shrani izid."""
+    """Preverbe ene skripte, klic p(ime, pogoj, podrobnost) izpiše izid in šteje neuspehe"""
 
     def __init__(self):
-        self.izidi = []
+        self.n_napak = 0
 
     def __call__(self, ime, pogoj, podrobnost=""):
         pogoj = bool(pogoj)
-        self.izidi.append((ime, pogoj))
+        if not pogoj:
+            self.n_napak += 1
         print(f"  [{'OK' if pogoj else 'NAPAKA'}] {ime}" + (f" ({podrobnost})" if podrobnost else ""))
         return pogoj
 
-    @property
-    def st_napak(self):
-        return sum(1 for _, ok in self.izidi if not ok)
-
     def zakljuci(self):
-        """Izpiše skupni izid in konča program (izhodna koda 0 ob uspehu, 2 sicer)."""
-        n = self.st_napak
+        """Izpiše skupni izid in konča program, izhodna koda 0 ob uspehu in 2 sicer"""
+        n = self.n_napak
         print("=" * 78)
         print("PREVERBE: vse uspešne." if n == 0 else f"PREVERBE: {n} ni uspelo (glej [NAPAKA] zgoraj).")
         print("=" * 78)
@@ -32,7 +28,7 @@ class Preverbe:
 
 
 def glava(naslov):
-    """Izpiše naslov skripte."""
+    """Izpiše naslov skripte"""
     print("=" * 78)
     print(naslov)
     print("=" * 78)

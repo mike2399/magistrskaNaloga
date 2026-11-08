@@ -2,18 +2,16 @@
 # -*- coding: utf-8 -*-
 """Izhodišče Ochiai in DStar na nivoju metod.
 
-Ponovi izračun iz ochiai_stavki.py na matriki metod in ga primerja z nivojem stavkov. Pričakujemo ožji
-razpon med optimistično in pesimistično obravnavo enakih ocen in višji Top-N.
+Ponovi izračun iz ochiai_stavki.py na matriki metod in ga primerja z nivojem stavkov. Pričakujemo
+ožji razpon med optimistično in pesimistično obravnavo enakih ocen in višji Top-N.
 
-Zagon:  python izhodisca/ochiai_metode.py
-        (4. skripta v cevovodu, vrstni red je v README)
 Vhod:   izhod/podatki/matrika_metod.parquet, izhodisca/ochiai_stavki_rangi.csv (za primerjavo)
 Izhod:  izhod/izhodisca/ochiai_metode_rangi.csv, izhodisca/ochiai_metode.txt
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija (nastavitve.py, skupno/)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija
 
 import os
 
@@ -39,16 +37,17 @@ def main():
     skupine = {fid: g for fid, g in df.groupby("fault_id")}
     rezultati, po_napakah = {}, []
     for t in TEHNIKI:
-        spodnje, zgornje = {}, {}
+        spodnje, zgornje = [], []
         for fid in ocenljive:
             g = skupine[fid]
             s, z = meji_ranga(g[t].to_numpy(float), g["faulty"].to_numpy() == 1)
-            spodnje[fid], zgornje[fid] = s, z
+            spodnje.append(s)
+            zgornje.append(z)
             if t == "ochiai":
                 po_napakah.append({"fault_id": fid, "n_methods": len(g), "n_faulty": int(g["faulty"].sum()),
                                    "ochiai_best": s, "ochiai_worst": z})
-        rezultati[t] = {n: (sum(spodnje[f] <= n for f in ocenljive), sum(zgornje[f] <= n for f in ocenljive))
-                        for n in N.NS}
+        # za vsak n število napak z rangom <= n, optimistična in pesimistična meja
+        rezultati[t] = {n: (sum(1 for r in spodnje if r <= n), sum(1 for r in zgornje if r <= n)) for n in N.NS}
 
     print(f"\n[Top-N na nivoju metod, od {len(ocenljive)} napak, optimistična..pesimistična meja]")
     for t in TEHNIKI:
@@ -58,11 +57,11 @@ def main():
     stavki = None
     pot_stavki = N.pot(N.OCHIAI_STAVKI_RANGI)
     if os.path.isfile(pot_stavki):
-        s = pd.read_csv(pot_stavki)
-        s = s[s["tehnika"] == "ochiai"]
-        stavki = {"n": s["fault_id"].nunique(),
-                  "top": {n: (int((s["best_rank"] <= n).sum()), int((s["worst_rank"] <= n).sum())) for n in N.NS},
-                  "razpon": float((s["worst_rank"] - s["best_rank"]).mean())}
+        rs = pd.read_csv(pot_stavki)
+        rs = rs[rs["tehnika"] == "ochiai"]
+        stavki = {"n": rs["fault_id"].nunique(),
+                  "top": {n: (int((rs["best_rank"] <= n).sum()), int((rs["worst_rank"] <= n).sum())) for n in N.NS},
+                  "razpon": float((rs["worst_rank"] - rs["best_rank"]).mean())}
         print(f"\n[Ochiai: stavki ({stavki['n']} napak) proti metodam]")
         for n in N.NS:
             print(f"  Top-{n:<2d} stavki {stavki['top'][n][0]}..{stavki['top'][n][1]}   metode "

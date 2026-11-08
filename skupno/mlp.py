@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Večplastni perceptron (MLP), ki se nauči kombinirati ocene posameznih tehnik v eno oceno sumljivosti."""
+"""Večplastni perceptron (MLP), ki ocene posameznih tehnik združi v eno oceno sumljivosti"""
 import numpy as np
 import torch
 import torch.nn as nn
@@ -10,7 +10,7 @@ torch.set_num_threads(1)      # ena nit, da so seštevanja ponovljiva med račun
 
 
 class MLP(nn.Module):
-    """Dva skrita sloja (64 in 32 nevronov), ReLU, izpuščanje 0,2, en izhodni logit."""
+    """Dva skrita sloja (64 in 32 nevronov), ReLU, izpuščanje 0,2, en izhodni logit"""
 
     def __init__(self, d, h1=64, h2=32, p=0.2):
         super().__init__()
@@ -23,13 +23,13 @@ class MLP(nn.Module):
 
 
 def uci_z_mejniki(Xtr, ytr, Xev, d, seme, mejniki):
-    """Nauči en MLP do največjega mejnika in vrne napovedi na Xev pri vsakem mejniku ({epohe: napovedi})."""
+    """Nauči MLP do največjega mejnika, vrne {epohe: napovedi na Xev} za vsak mejnik"""
     torch.manual_seed(seme)
     model = MLP(d=d)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
     pos = float(ytr.sum())
     neg = float(len(ytr) - pos)
-    # utež pozitivnega razreda uravna neuravnoteženost (okoli 459 krivih od 111.348 metod)
+    # utež pozitivnega razreda uravna redkost krivih metod (459 od 111.348)
     izguba = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([neg / max(pos, 1.0)]))
     zeleni, out, najvec = set(mejniki), {}, max(mejniki)
     for ep in range(1, najvec + 1):
@@ -46,7 +46,7 @@ def uci_z_mejniki(Xtr, ytr, Xev, d, seme, mejniki):
 
 
 def napovedi_cv(dfn, df, znacilke, gube, napaka_vrstice, seme, epohe):
-    """Prečno preverjanje po napakah, guba k dobi seme (seme + k). Vrne napovedi, poravnane z vrsticami df."""
+    """Napovedi prečnega preverjanja po napakah, poravnane z vrsticami df, guba k dobi seme + k"""
     X = dfn[znacilke].to_numpy(dtype=np.float32)
     y = df["faulty"].to_numpy(dtype=np.float32)
     napoved = np.full(len(df), np.nan, dtype=np.float64)
@@ -61,7 +61,7 @@ def napovedi_cv(dfn, df, znacilke, gube, napaka_vrstice, seme, epohe):
 def izberi_epohe(dfn, df, znacilke, gube, napaka_vrstice, seme, mreza, delez_validacije, oznaka):
     """Izbere število epoh po MFR na notranji validacijski gubi, testne napake ostanejo nedotaknjene.
 
-    Vrne (izbrane epohe, {epohe: validacijski MFR}).
+    Vrne (izbrane epohe, {epohe: validacijski MFR})
     """
     X = dfn[znacilke].to_numpy(dtype=np.float32)
     y = df["faulty"].to_numpy(dtype=np.float32)

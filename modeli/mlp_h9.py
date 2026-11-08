@@ -5,15 +5,13 @@
 Preveri, ali naučena kombinacija devetih tehnik rangira bolje kot Ochiai. Model, normalizacija in
 delitev v gube so enaki kot v glavnem poskusu (mlp_llm.py), le število epoh je tu fiksno (60).
 
-Zagon:  python modeli/mlp_h9.py
-        (5. skripta v cevovodu, vrstni red je v README)
 Vhod:   izhod/podatki/matrika_metod.parquet
 Izhod:  izhod/modeli/mlp_h9_napovedi.csv, modeli/mlp_h9.txt
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija (nastavitve.py, skupno/)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija
 
 import numpy as np
 
@@ -55,8 +53,7 @@ def main():
     print(f"  Top-1 pri optimistični obravnavi enakih ocen: Ochiai {top1_po_konvencijah(df, 'ochiai')['min']}, "
           f"MLP {top1_po_konvencijah(df, 'mlp')['min']} (pri povprečnem rangu {o_top[1]} in {m_top[1]})")
 
-    df[["fault_id", "classname", "method", "m_start", "m_end", "faulty", "ochiai", "mlp"]].to_csv(
-        N.pot(N.MLP_H9_NAPOVEDI), index=False)
+    df[N.KLJUC + ["faulty", "ochiai", "mlp"]].to_csv(N.pot(N.MLP_H9_NAPOVEDI), index=False)
     with open(N.pot(N.MLP_H9_TXT), "w", encoding="utf-8") as f:
         f.write(f"MLP (9 klasičnih ocen) proti Ochiai, nivo metod, {len(napake)} napak, "
                 f"{N.K_GUB}-kratno prečno preverjanje po napakah, {EPOHE} epoh\n")

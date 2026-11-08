@@ -1,6 +1,6 @@
-# Tabele šestega poglavja (samodejno iz rezultatov, porocila/tabele_poglavje6.py)
+# Tabele rezultatov, šesto poglavje in dodatek A (samodejno iz rezultatov, porocila/tabele_poglavje6.py)
 
-<!-- TABELA 6.1 -->
+<!-- Tabela 6.1: devet tehnik samostojno -->
 | Tehnika | Družina | Uporabnost (strogo) | Top-1 (netrivialne) | Top-3 | Top-5 | Top-10 | MFR | MAR |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | DStar | SBFL | 328 | 92 (83) | 184 | 210 | 243 | 26,10 | 32,37 |
@@ -13,7 +13,7 @@
 | slicing (unija) | rezanje | 165 | 26 (17) | 78 | 96 | 137 | 149,51 | 150,31 |
 | menjava predikatov | PS | 121 | 23 (14) | 82 | 99 | 128 | 146,88 | 149,05 |
 
-<!-- TABELA 6.2 -->
+<!-- Tabela 6.2: tehnika proti Ochiai na podmnožici s signalom -->
 | Tehnika | n (podmnožica) | MFR: tehnika / Ochiai | Mediana prvega ranga: tehnika / Ochiai | Top-1: tehnika / Ochiai | Zmage / porazi / vezi (parni n) | Holm p (družina 8) | Sodba |
 |---|---:|---:|---:|---:|---:|---:|---|
 | DStar | 328 | 27,17 / 27,14 | 3,0 / 3,0 | 83 / 80 | 18 / 9 / 301 (n = 328) | 0,90 | ni značilne razlike |
@@ -25,7 +25,7 @@
 | slicing_intersection (presek) | 147 | 22,95 / 11,53 | 8,0 / 2,5 | 18 / 37 | 34 / 96 / 13 (n = 143) | 5,3 · 10⁻⁷ | Ochiai značilno boljši |
 | menjava predikatov | 121 | 205,42 / 34,84 | 35,5 / 7,5 | 14 / 18 | 29 / 76 / 15 (n = 120) | 2,8 · 10⁻⁹ | Ochiai značilno boljši |
 
-<!-- TABELA 6.3 -->
+<!-- Tabela A.1: predstavniki družin -->
 | Par (A – B) | Predstavnika | Vseh 343: W | Holm p | zmage / porazi / vezi (za A) | smer v prid | Presek: n | W | Holm p | zmage / porazi / vezi (za A) | smer v prid | Opozorilo |
 |---|---|---:|---:|---:|---|---:|---:|---:|---:|---|---|
 | SBFL – MBFL | Ochiai – Metallaxis | 10.857,5 | 7,2 · 10⁻⁶ | 156 / 100 / 87 | SBFL | 280 | 9.438 | 0,94 (n. z.) | 112 / 93 / 75 | SBFL | izgubi značilnost |
@@ -38,9 +38,9 @@
 | PS – rezanje | menjava predikatov – slicing_count | 8.609 | 5,0 · 10⁻⁷ | 62 / 176 / 105 | rezanje | 47 | 447 | 1,0 (n. z.) | 25 / 19 / 3 | PS | izgubi značilnost |
 | PS – sled sklada | menjava predikatov – sled sklada | 5.332 | 0,0017 | 47 / 126 / 170 | sled sklada | 26 | 91 | 0,99 (n. z.) | 8 / 14 / 4 | sled sklada | izgubi značilnost |
 | rezanje – sled sklada | slicing_count – sled sklada | 5.975 | 0,0074 | 102 / 74 / 167 | rezanje | 58 | 176 | 0,0034 | 8 / 34 / 16 | sled sklada | OBRNITEV SMERI |
-<!-- 6.3 kontrola: izgubi značilnost = 5, obrnitev smeri = 1 -->
+<!-- A.1 kontrola: izgubi značilnost = 5, obrnitev smeri = 1 -->
 
-<!-- TABELA 6.4 -->
+<!-- Komplementarnost tehnik (številke v besedilu) -->
 | Količina (Top-1) | Vrednost |
 |---|---:|
 | unikatno rešene napake: MUSE | 17 |
@@ -53,10 +53,10 @@
 | Ochiai ∪ DStar (kombiniranje znotraj SBFL) | 92 |
 | najboljša posamezna tehnika (DStar) | 92 |
 | zgornja meja popolnega izbiralnika (ne rezultat) | 156 |
-| dosežena naučena kombinacija (razdelek 6.3) | 141 |
+| dosežena naučena kombinacija (MLP H9) | 141 |
 | delež zgornje meje | 141 / 156 ≈ 90 % |
 
-<!-- TABELA 6.5 -->
+<!-- Tabela 6.3: polni in okrnjeni pogled -->
 | Pogled | Model | Top-1 | Top-3 | Top-5 | Top-10 | MFR |
 |---|---|---:|---:|---:|---:|---:|
 | polni pogled (n = 151, pokritost izbora 100 %) | LLM sam | 122 | 145 | 146 | 151 | 1,39 |
@@ -68,18 +68,18 @@
 | okrnjeni pogled (n = 192, pokritost izbora 92,2 %) | H9+LLM | 128 | 159 | 165 | 169 | 20,53 |
 | okrnjeni pogled (n = 192, pokritost izbora 92,2 %) | kaskada | 126 | 158 | 165 | 170 | 21,72 |
 
-<!-- TABELA 6.6 -->
+<!-- Tabela 6.4: osrednja primerjava modelov -->
 | Model | Top-1 | Top-3 | Top-5 | Top-10 | MFR | MAR |
 |---|---:|---:|---:|---:|---:|---:|
 | Ochiai | 89 | 182 | 209 | 245 | 26,07 | 32,30 |
 | rankSVM (surove značilke) | 149 | 228 | 250 | 275 | 14,93 | 20,12 |
 | MLP H9 (kontrola) | 141 | 224 | 261 | 283 | 15,78 | 21,39 |
 | **MLP H9+LLM** | 255 | 305 | 311 | 319 | 12,11 | 17,61 |
-| MLP H9 s premešanimi ocenami LLM (kontrolni preizkus, 6.4) | 124 | 204 | 251 | 278 | 16,13 | 21,35 |
-| kaskada LLM→H9 (brez dodatnega učenja, 6.5) | 248 | 303 | 311 | 321 | 12,77 | 18,23 |
+| MLP H9 s premešanimi ocenami LLM (kontrolni preizkus) | 124 | 204 | 251 | 278 | 16,13 | 21,35 |
+| kaskada LLM→H9 (brez dodatnega učenja) | 248 | 303 | 311 | 321 | 12,77 | 18,23 |
 | LLM sam (ožji izbor + preureditev) | 248 | 303 | 311 | 321 | 22,81 | 32,05 |
 
-<!-- TABELA 6.7 (n = 327) -->
+<!-- Tabela 6.6: napake s krivo metodo z oceno (n = 327) -->
 | Model | MFR | Top-1 |
 |---|---:|---:|
 | LLM sam | 1,76 | 248 |
@@ -88,9 +88,9 @@
 | H9 | 5,15 | 141 |
 | H9 s premešanimi ocenami | 6,00 | 124 |
 | Ochiai | 15,32 | 89 |
-<!-- 6.7 MAR samo pokrite: H9+LLM 7,07, kaskada 7,06, LLM sam 11,45 -->
+<!-- 6.6 MAR samo pokrite: H9+LLM 7,07, kaskada 7,06, LLM sam 11,45 -->
 
-<!-- TABELA 6.8 -->
+<!-- Tabela 6.7: rankSVM in MLP z oceno LLM -->
 | Model | Top-1 | Top-3 | Top-5 | Top-10 | MFR | MAR | Top-1: optimistična / povprečna / pesimistična |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Ochiai | 89 | 182 | 209 | 245 | 26,07 | 32,30 | 162 / 89 / 89 |
@@ -102,7 +102,7 @@
 | MLP H9+LLM | 255 | 305 | 311 | 319 | 12,11 | 17,61 | 257 / 255 / 255 |
 <!-- utež LLM: surove 0,0691 ± 0,0138, min-max 1,938 ± 0,0853 -->
 
-<!-- TABELA 6.9a (LOPO po projektih, primarno seme) -->
+<!-- Tabela 6.8: LOPO po projektih (primarno seme) -->
 | Projekt (napak) | MFR: H9 → H9+LLM | Top-1: H9 → H9+LLM |
 |---|---:|---:|
 | Chart (25) | 12,06 → 23,82 | 9 → 19 |
@@ -111,14 +111,14 @@
 | Math (104) | 6,10 → 4,08 | 46 → 73 |
 | Time (25) | 6,82 → 2,36 | 8 → 18 |
 
-<!-- TABELA 6.9b (LOPO združeno, primarno seme) -->
+<!-- LOPO združeno (primarno seme, številke v besedilu) -->
 | Model | Top-1 | MFR |
 |---|---:|---:|
 | Ochiai (nenaučena referenca) | 89 | 26,07 |
 | H9 | 138 | 34,08 |
 | H9+LLM | 258 | 13,44 |
 
-<!-- TABELA 6.10 -->
+<!-- LOPO proti desetkratni CV (številke v besedilu) -->
 | Model | MFR, desetkratna CV | MFR, LOPO | Sprememba | MFR po semenih (LOPO): razpon | povprečje ± st. odklon |
 |---|---:|---:|---:|---:|---:|
 | H9 | 15,78 | 34,08 | +116 % | 23,1 … 68,0 | 37,18 ± 17,91 |
@@ -127,7 +127,7 @@
 <!-- LOPO p (napake): 2018: 2,8 · 10⁻²⁰ (175 / 32 / 136), 7: 1,6 · 10⁻¹⁸ (179 / 32 / 132), 101: 1,1 · 10⁻¹⁸ (174 / 33 / 136), 2024: 1,6 · 10⁻²² (178 / 27 / 138), 31337: 5,5 · 10⁻²⁴ (178 / 26 / 139) -->
 <!-- LOPO p (projekti): 2018: 0.21875 (4/5), 7: 0.3125 (4/5), 101: 0.03125 (5/5), 2024: 0.03125 (5/5), 31337: 0.03125 (5/5) -->
 
-<!-- TABELA 6.12 -->
+<!-- Tabela 6.5: po projektih (desetkratna CV) -->
 | Projekt (napak) | MFR: H9 → H9+LLM | Top-1: H9 → H9+LLM |
 |---|---:|---:|
 | Chart (25) | 25,10 → 11,30 | 11 → 20 |
@@ -136,7 +136,7 @@
 | Math (104) | 5,71 → 4,22 | 46 → 72 |
 | Time (25) | 6,78 → 2,56 | 8 → 17 |
 
-<!-- TABELA 6.13 -->
+<!-- Tabela A.2: statistični testi -->
 | Primerjava | Test | p | Zmage / porazi / vezi |
 |---|---|---:|---:|
 | H9+LLM proti H9 (glavna primerjava, desetkratna CV) | enostranski | 2,8 · 10⁻²¹ | 169 / 31 / 143 |
@@ -158,7 +158,7 @@
 | H9+LLM proti LLM samemu (polni pogled, n = 151) | enostranski | 0,55 (test skoraj brez moči) | 9 / 5 / 137 |
 <!-- LOPO raven napak, razpon p čez semena: 5,5 · 10⁻²⁴ … 1,6 · 10⁻¹⁸ -->
 
-<!-- TABELA 6.14 -->
+<!-- Robustnost na semena (številke v besedilu) -->
 | Protokol | Količina | Povprečje ± st. odklon | Izboljšanje po semenih |
 |---|---|---:|---|
 | desetkratna CV | Δ Top-1 (H9+LLM − H9) | +111,0 ± 2,1 | 5 od 5 |
@@ -166,7 +166,7 @@
 | LOPO | Δ Top-1 (H9+LLM − H9) | +117,0 ± 2,7 | 5 od 5 (vrednosti 113–120) |
 | LOPO | Δ MFR | −20,87 ± 21,01 | 4 od 5 (pri enem semenu se predznak obrne) |
 
-<!-- TABELA 6.15 -->
+<!-- Top-1 po obravnavi enakih ocen (zadnji stolpec tabele 6.7) -->
 | Model | optimistična (najmanjši rang) | povprečna | pesimistična (največji rang) |
 |---|---:|---:|---:|
 | Ochiai | 162 | 89 | 89 |
@@ -177,7 +177,7 @@
 | rankSVM+LLM, surove značilke | 259 | 256 | 256 |
 | rankSVM+LLM, min-max | 242 | 239 | 239 |
 
-<!-- TABELA 6.12z (desetkratna CV po projektih + združeno) -->
+<!-- Tabela 6.5 z združeno vrstico -->
 | Projekt (napak) | MFR: H9 → H9+LLM | Top-1: H9 → H9+LLM |
 |---|---:|---:|
 | Chart (25) | 25,10 → 11,30 | 11 → 20 |
@@ -187,7 +187,7 @@
 | Time (25) | 6,78 → 2,56 | 8 → 17 |
 | **Združeno (343)** | 15,78 → 12,11 | 141 → 255 |
 
-<!-- TABELA 6.9z (LOPO po projektih + združeno, primarno seme) -->
+<!-- Tabela 6.8 z združeno vrstico -->
 | Projekt (napak) | MFR: H9 → H9+LLM | Top-1: H9 → H9+LLM |
 |---|---:|---:|
 | Chart (25) | 12,06 → 23,82 | 9 → 19 |

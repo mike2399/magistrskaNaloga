@@ -2,25 +2,21 @@
 # -*- coding: utf-8 -*-
 """Matrika ocen na nivoju metod z oznakami krivih metod.
 
-Za vsako napako pripravi delovni kopiji napačne in popravljene različice programa, iz razlike med njima
-določi krive metode, vsak stavek preslika v objemajočo metodo (meje metod da tree-sitter) in za vsako
-metodo vzame največjo oceno njenih stavkov. Napake brez lokalizabilne krive metode in napake, ki jih
-Defects4J 3.0.1 več ne podpira, izloči in razlog zapiše v razvrstitev napak. Zagon je dolg, rezultati
-se zapisujejo sproti in prekinjen zagon nadaljuje tam, kjer je ostal.
+Za vsako napako pripravi delovni kopiji napačne in popravljene različice in iz razlike med njima
+določi krive metode. Vsak stavek preslika v objemajočo metodo (meje metod da tree-sitter), metoda
+dobi največjo oceno svojih stavkov. Napake brez lokalizabilne krive metode in napake, ki jih
+Defects4J 3.0.1 ne podpira več, izloči z razlogom. Zapisuje sproti, prekinjen zagon nadaljuje.
 
-Zagon:  python priprava_podatkov/matrika_metod.py                   vse napake
-        python priprava_podatkov/matrika_metod.py Lang              samo projekt
-        python priprava_podatkov/matrika_metod.py lang1,lang23      naštete napake
-        python priprava_podatkov/matrika_metod.py 10                prvih 10 napak
-        (3. skripta v cevovodu, vrstni red je v README)
+Zagon:  python priprava_podatkov/matrika_metod.py [izbor] [--brisi-kopije]
+        izbor je projekt (Lang), naštete napake (lang1,lang23) ali število prvih napak (10)
 Vhod:   izhod/podatki/matrika_stavkov.parquet, Defects4J
-Izhod:  izhod/podatki/matrika_metod.parquet (pri delnem zagonu s pripono izbora), podatki/matrika_metod_sprotno.csv
-        (sprotni zapis), podatki/napake_razvrstitev.csv (razvrstitev vsake napake)
+Izhod:  izhod/podatki/matrika_metod.parquet, podatki/napake_razvrstitev.csv,
+        podatki/matrika_metod_sprotno.csv, pri delnem zagonu vse s pripono izbora
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija (nastavitve.py, skupno/)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija
 
 import argparse
 import os
@@ -33,21 +29,27 @@ import pandas as pd
 import nastavitve as N
 from skupno.defects4j import preveri_defects4j, checkout, export, mapa_kopije, pot_razreda
 from skupno.java_metode import nalozi_parser, metode_v_datoteki, objemajoca_metoda, krive_metode_iz_popravka
-from skupno.podatki import ime_d4j
+from skupno.podatki import ime_d4j, seznam_napak
 from skupno.preverbe import Preverbe, glava
 
 STOLPCI_INFO = ["fault_id", "kind", "n_methods", "n_faulty", "gt_total", "gt_covered", "unmapped_stmts", "xcheck"]
 
 
 def info_vrstica(fid, vrsta, **kw):
+    """Vrstica razvrstitve napake, nenavedena polja so 0 in xcheck True"""
     v = {"fault_id": fid, "kind": vrsta, "n_methods": 0, "n_faulty": 0, "gt_total": 0,
          "gt_covered": 0, "unmapped_stmts": 0, "xcheck": True}
     v.update(kw)
     return v
 
 
+def pobrisi_kopiji(wb, wf):
+    shutil.rmtree(wb, ignore_errors=True)
+    shutil.rmtree(wf, ignore_errors=True)
+
+
 def obdelaj_napako(fid, sub_df, parser, brisi_kopije):
-    """Vrne (vrstice metod ali None, info o napaki)."""
+    """Vrne vrstice metod (None, če napaka ni lokalizabilna) in njeno vrstico razvrstitve"""
     projekt, bug = ime_d4j(fid)
     wb, wf = mapa_kopije(projekt, bug, "b"), mapa_kopije(projekt, bug, "f")
     if not (checkout(projekt, bug, "b", wb) and checkout(projekt, bug, "f", wf)):
@@ -56,15 +58,14 @@ def obdelaj_napako(fid, sub_df, parser, brisi_kopije):
     _, srcdir_b = export("dir.src.classes", wb)
     _, srcdir_f = export("dir.src.classes", wf)
     rc, spremenjeni = export("classes.modified", wb)
-    spremenjeni = [m for m in spremenjeni.split() if m.strip()]
+    spremenjeni = spremenjeni.split()
     if rc != 0 or not spremenjeni:
         return None, info_vrstica(fid, "EXPORT-FAIL", xcheck=False)
     krive, nove, vrsta, ujemanje = krive_metode_iz_popravka(wb, wf, srcdir_b, srcdir_f, spremenjeni, parser)
 
     if vrsta != "LOKALIZABILNO":
         if brisi_kopije:
-            shutil.rmtree(wb, ignore_errors=True)
-            shutil.rmtree(wf, ignore_errors=True)
+            pobrisi_kopiji(wb, wf)
         return None, info_vrstica(fid, vrsta, gt_total=len(krive), xcheck=ujemanje)
 
     # preslikava stavkov v metode in največja ocena na metodo
@@ -95,13 +96,13 @@ def obdelaj_napako(fid, sub_df, parser, brisi_kopije):
     info = info_vrstica(fid, vrsta, n_methods=len(vrstice), n_faulty=sum(v["faulty"] for v in vrstice),
                         gt_total=len(krive), gt_covered=pokritih, unmapped_stmts=nepreslikanih, xcheck=ujemanje)
     if brisi_kopije:
-        shutil.rmtree(wb, ignore_errors=True)
-        shutil.rmtree(wf, ignore_errors=True)
+        pobrisi_kopiji(wb, wf)
     return vrstice, info
 
 
 def razcleni_izbor(vse, izbor):
-    """Vrne (seznam napak, oznaka izbora za imena datotek)."""
+    """Vrne izbrane napake in oznako izbora za imena datotek"""
+    izbor = izbor.lower()
     if not izbor:
         return vse, ""
     if izbor.isdigit():
@@ -109,10 +110,11 @@ def razcleni_izbor(vse, izbor):
     if "," in izbor or re.fullmatch(r"[a-z]+\d+", izbor):
         zelene = set(izbor.split(","))
         return [f for f in vse if f in zelene], "izbor"
-    return [f for f in vse if f.startswith(izbor.lower())], izbor.lower()
+    return [f for f in vse if f.startswith(izbor)], izbor
 
 
 def pripni(pot, vrstice, stolpci=None):
+    """Pripne vrstice v CSV, glavo zapiše samo v novo datoteko"""
     pd.DataFrame(vrstice, columns=stolpci).to_csv(pot, mode="a", header=not os.path.isfile(pot), index=False)
 
 
@@ -125,7 +127,7 @@ def main():
     glava("matrika ocen na nivoju metod")
     preveri_defects4j()
     df = pd.read_parquet(N.pot(N.MATRIKA_STAVKOV))
-    vse = list(dict.fromkeys(df["fault_id"].tolist()))
+    vse = seznam_napak(df)
     napake, oznaka = razcleni_izbor(vse, args.izbor)
     pripona = f"_{oznaka}" if oznaka else ""
     pot_info = N.pot(N.NAPAKE_INFO.replace(".csv", f"{pripona}.csv"))
@@ -157,7 +159,7 @@ def main():
     info = info.drop_duplicates(subset=["fault_id"], keep="last")
     metode = pd.read_csv(pot_csv) if os.path.isfile(pot_csv) else pd.DataFrame()
     if len(metode):
-        metode = metode.drop_duplicates(subset=["fault_id", "classname", "method", "m_start", "m_end"])
+        metode = metode.drop_duplicates(subset=N.KLJUC)
 
     print("\n[Statistika]")
     print(f"  razvrstitev napak: {info['kind'].value_counts().to_dict()}")
@@ -171,8 +173,7 @@ def main():
     neuspeli_checkouti = info[info["kind"] == "CHECKOUT-FAIL"]["fault_id"].tolist()
     napake_zagona = info[info["kind"].str.startswith("ERROR") | (info["kind"] == "EXPORT-FAIL")]["fault_id"].tolist()
     p("vsaka napaka iz izbora ima vrstico v razvrstitvi napak", set(info["fault_id"].astype(str)) >= set(napake))
-    p("razredi z razlikami se ujemajo s classes.modified pri vseh obdelanih napakah",
-      bool(uspesne["xcheck"].all()) if len(uspesne) else True)
+    p("razredi z razlikami se ujemajo s classes.modified pri vseh obdelanih napakah", bool(uspesne["xcheck"].all()))
     p("ni napak zagona ali neuspelih izvozov", len(napake_zagona) == 0, f"{napake_zagona[:10]}")
     if neuspeli_checkouti:
         print(f"  opomba: checkout ni uspel pri {len(neuspeli_checkouti)} napakah (v Defects4J 3.0.1 opuščene): "

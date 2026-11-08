@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Skupne nastavitve cevovoda: poti do podatkov in orodij, konstante in imena izhodnih datotek.
+"""Skupne nastavitve: poti do podatkov in orodij, konstante in imena izhodnih datotek.
 
-Vse skripte berejo poti od tod, zato je dovolj, da jih prilagodite na enem mestu. Poti je mogoče
-nastaviti tudi z okoljskimi spremenljivkami, kar pride prav, kadar podatki niso v mapi repozitorija:
-
-  FL_IZHOD        mapa z rezultati                     (privzeto <repozitorij>/izhod)
-  FL_COMBINEFL    mapa s paketom CombineFL             (privzeto <repozitorij>/combinefl)
-  DEFECTS4J_HOME  koren namestitve Defects4J           (privzeto ~/defects4j)
-  D4J_CHECKOUTS   mapa za delovne kopije programov     (privzeto ~/d4j_checkouts)
+Vse skripte berejo poti od tod. Kadar podatki niso v mapi repozitorija, poti nastavimo z okoljskimi
+spremenljivkami:
+  FL_IZHOD        mapa z rezultati                   (privzeto <repozitorij>/izhod)
+  FL_COMBINEFL    mapa s paketom CombineFL           (privzeto <repozitorij>/combinefl)
+  DEFECTS4J_HOME  koren namestitve Defects4J         (privzeto ~/defects4j)
+  D4J_CHECKOUTS   mapa za delovne kopije programov   (privzeto ~/d4j_checkouts)
 """
 import os
 from pathlib import Path
 
-# ----------------------------------------------------------------------------- poti
+# ------------------------------------------------------------------------ poti
 KOREN = Path(__file__).resolve().parent
 IZHOD = Path(os.environ.get("FL_IZHOD", KOREN / "izhod"))
 COMBINEFL = Path(os.environ.get("FL_COMBINEFL", KOREN / "combinefl"))
@@ -27,19 +26,18 @@ D4J_CHECKOUTS = Path(os.environ.get("D4J_CHECKOUTS", Path.home() / "d4j_checkout
 
 
 def pot(ime):
-    """Polna pot do datoteke ali mape z relativnim imenom `ime` v mapi IZHOD. Manjkajoče nadmape ustvari."""
+    """Pot do ime v mapi IZHOD, manjkajoče mape ustvari"""
     p = IZHOD / ime
     p.parent.mkdir(parents=True, exist_ok=True)
     return str(p)
 
 
-# ----------------------------------------------------------------------------- konstante
-# Devet klasičnih tehnik iz zbirke CombineFL. Vrstni red je pomemben, ker so v tem redu
-# zložene značilke v vseh modelih (in v datotekah LETOR za rankSVM)
+# ------------------------------------------------------------------- konstante
+# devet tehnik iz CombineFL, vrstni red določa vrstni red značilk v vseh modelih
 TEHNIKE = ["ochiai", "dstar", "metallaxis", "muse", "slicing",
            "slicing_count", "slicing_intersection", "stacktrace", "predicateswitching"]
 
-# Družine tehnik (za analize/primerjava_druzin.py)
+# družine tehnik, uporablja jih primerjava_druzin.py
 DRUZINE = {
     "SBFL": ["ochiai", "dstar"],
     "MBFL": ["metallaxis", "muse"],
@@ -48,38 +46,38 @@ DRUZINE = {
     "SledSklada": ["stacktrace"],
 }
 
-# Enolična identiteta metode v vseh tabelah (razred, ime, prva in zadnja vrstica)
+# imena tehnik v tabelah in slikah
+IMENA_TEHNIK = {"dstar": "DStar", "ochiai": "Ochiai", "metallaxis": "Metallaxis", "muse": "MUSE",
+                "stacktrace": "sled sklada", "slicing_count": "slicing_count (frekvenca)",
+                "slicing_intersection": "slicing_intersection (presek)", "slicing": "slicing (unija)",
+                "predicateswitching": "menjava predikatov"}
+
+# enolična identiteta metode v vseh tabelah
 KLJUC = ["fault_id", "classname", "method", "m_start", "m_end"]
 
 NS = [1, 3, 5, 10]                      # Top-N, ki jih poročamo
-SEME_DELITVE = 2018                     # seme za delitev napak v gube (kot v CombineFL)
-K_GUB = 10                              # število gub pri prečnem preverjanju po napakah
-SEMENA = [2018, 7, 101, 2024, 31337]    # semena inicializacije uteži MLP (prvo je primarno)
-K_KANDIDATOV = 50                       # koliko metod na napako dobi jezikovni model
+SEME_DELITVE = 2018                     # seme delitve napak v gube, kot v CombineFL
+K_GUB = 10                              # število gub pri prečnem preverjanju
+SEMENA = [2018, 7, 101, 2024, 31337]    # semena uteži MLP, prvo je primarno
+K_KANDIDATOV = 50                       # kandidatov na napako v pozivu
 
-# Jezikovni model (jezikovni_model/klici.py) in okvirna cena v USD na milijon žetonov (paketni vmesnik, julij 2026)
 LLM_MODEL = "claude-sonnet-5"
+# okvirna cena paketnega vmesnika julija 2026, USD na milijon žetonov
 CENA_VHOD_USD = 1.0
 CENA_IZHOD_USD = 5.0
 
-# Pričakovana sestava zbirke CombineFL (357 napak v petih projektih Defects4J)
+# pričakovana sestava zbirke CombineFL, 357 napak v petih projektih
 PROJEKTI_COMBINEFL = {"math": 106, "closure": 133, "time": 27, "chart": 26, "lang": 65}
 
-# ----------------------------------------------------------------------------- imena izhodnih datotek
-# Vse so relativne na mapo IZHOD in razvrščene v podmape po vsebini (enako kot skripte):
-#   podatki/          matriki ocen in razvrstitev napak
-#   izhodisca/        Ochiai in DStar na stavkih in metodah
-#   jezikovni_model/  pozivi, odgovori in ocene jezikovnega modela
-#   modeli/           naučeni modeli (MLP, rankSVM, LOPO) z napovedmi in predpomnilniki
-#   analize/          polni pogled, primerjava družin, kvalitativni primeri
-#   porocila/         tabele in slike za besedilo naloge
+# ------------------------------------------------------- imena izhodnih datotek
+# relativne na IZHOD, podmape po vsebini (priprava_podatkov piše v podatki/)
 
 MATRIKA_STAVKOV = "podatki/matrika_stavkov.parquet"
 MATRIKA_STAVKOV_VZOREC = "podatki/matrika_stavkov_vzorec.csv"
 NAPAKE_BREZ_OZNAK = "podatki/napake_brez_oznak_stavkov.txt"
 MATRIKA_METOD = "podatki/matrika_metod.parquet"
-MATRIKA_METOD_CSV = "podatki/matrika_metod_sprotno.csv"    # sprotni zapis (omogoča nadaljevanje prekinjenega zagona)
-NAPAKE_INFO = "podatki/napake_razvrstitev.csv"             # razvrstitev vsake napake (lokalizabilna ali razlog izločitve)
+MATRIKA_METOD_CSV = "podatki/matrika_metod_sprotno.csv"    # sprotni zapis za nadaljevanje prekinjenega zagona
+NAPAKE_INFO = "podatki/napake_razvrstitev.csv"             # vsaka napaka: lokalizabilna ali razlog izločitve
 
 OCHIAI_STAVKI_RANGI = "izhodisca/ochiai_stavki_rangi.csv"
 OCHIAI_STAVKI_TXT = "izhodisca/ochiai_stavki.txt"

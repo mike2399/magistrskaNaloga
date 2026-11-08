@@ -1,31 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Klici jezikovnega modela (Claude) prek paketnega vmesnika in zbiranje ocen.
+"""Klici modela Claude prek paketnega vmesnika in zbiranje ocen.
 
-Podukazi:
-  count   prešteje žetone vseh pozivov (brezplačno) in oceni strošek
-  send    ustvari en paket zahtev (plačljivo, zahteva možnost --potrdi)
-  poll    izpiše stanje paketa
-  fetch   prenese odgovore, iz njih izlušči ocene in jih pripne k metodam, surove odgovore shrani.
-          Ob ponovnem paketu zamenja samo ocene napak iz tega paketa, ostale ohrani.
+Podukaz count prešteje žetone pozivov (brezplačno) in oceni strošek, send ustvari paket zahtev
+(plačljivo, zahteva --potrdi), poll izpiše stanje paketa, fetch pa prenese odgovore, jih shrani
+in ocene pripne k metodam. Ponovni paket zamenja le ocene napak iz tega paketa. Ključ API je v
+spremenljivki ANTHROPIC_API_KEY ali v datoteki ~/.anthropic_api_key.
 
-Ključ API je v okoljski spremenljivki ANTHROPIC_API_KEY ali v datoteki ~/.anthropic_api_key.
-Parameter max_tokens je skupna meja za razmišljanje in odgovor. Pri premajhni meji model ves proračun
-porabi za razmišljanje in vrne prazen odgovor, zato je privzeta meja 8000.
-
-Zagon:  python jezikovni_model/klici.py count
-        python jezikovni_model/klici.py send --potrdi [--napake a,b | --seznam datoteka] [--max-tokens 8000]
-        python jezikovni_model/klici.py poll
-        python jezikovni_model/klici.py fetch
-        (7. skripta v cevovodu, vrstni red je v README)
+Zagon:  python jezikovni_model/klici.py count | poll | fetch
+        python jezikovni_model/klici.py send --potrdi [--napake a,b | --seznam datoteka]
 Vhod:   izhod/jezikovni_model/pozivi/, jezikovni_model/manifest_pozivov.csv
-Izhod:  izhod/jezikovni_model/tokeni.csv, jezikovni_model/batch_id.txt, jezikovni_model/surovi_odgovori.jsonl,
-        jezikovni_model/ocene.csv
+Izhod:  izhod/jezikovni_model/tokeni.csv, batch_id.txt, surovi_odgovori.jsonl, ocene.csv
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija (nastavitve.py, skupno/)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija
 
 import argparse
 import json
@@ -37,12 +27,16 @@ import pandas as pd
 
 import nastavitve as N
 
-MODEL = N.LLM_MODEL
-CENA_VHOD, CENA_IZHOD = N.CENA_VHOD_USD, N.CENA_IZHOD_USD
 POZIVI = N.pot(N.POZIVI_MAPA)
 
 
+def strosek_usd(vhodnih, izhodnih):
+    """Okvirni strošek v USD za vhodne in izhodne žetone"""
+    return vhodnih / 1e6 * N.CENA_VHOD_USD + izhodnih / 1e6 * N.CENA_IZHOD_USD
+
+
 def kljuc_api():
+    """Ključ API iz okolja ali iz datoteke v domači mapi"""
     k = os.environ.get("ANTHROPIC_API_KEY")
     if k:
         return k.strip()
@@ -59,7 +53,7 @@ def odjemalec():
 
 
 def napake_s_pozivom():
-    """Napake, za katere je pozivi.py uspešno sestavil poziv."""
+    """Napake, za katere je pozivi.py uspešno sestavil poziv"""
     m = pd.read_csv(N.pot(N.POZIVI_MANIFEST))
     return list(m[m["status"].astype(str).str.startswith("OK")]["fault_id"].astype(str))
 
@@ -69,21 +63,25 @@ def preberi_poziv(fid):
         return f.read()
 
 
+def shranjeni_batch_id():
+    with open(N.pot(N.LLM_BATCH_ID)) as f:
+        return f.read().strip()
+
+
 def parametri_zahteve(poziv, max_tokens):
-    return dict(model=MODEL, max_tokens=max_tokens, thinking={"type": "adaptive"},
+    return dict(model=N.LLM_MODEL, max_tokens=max_tokens, thinking={"type": "adaptive"},
                 messages=[{"role": "user", "content": poziv}])
 
 
 def izbrane_napake(args):
-    """Napake iz --napake ali --seznam (ena napaka na vrstico), privzeto vse s pozivom."""
+    """Napake iz --napake ali --seznam (ena napaka na vrstico), privzeto vse s pozivom"""
     vse = napake_s_pozivom()
-    zelene = None
     if args.napake:
         zelene = set(args.napake.split(","))
     elif args.seznam:
         with open(args.seznam, encoding="utf-8") as f:
             zelene = {v.strip() for v in f if v.strip()}
-    if zelene is None:
+    else:
         return vse
     izbrane = [f for f in vse if f in zelene]
     manjka = zelene - set(izbrane)
@@ -95,10 +93,10 @@ def izbrane_napake(args):
 def ukaz_count(args):
     klient = odjemalec()
     napake = napake_s_pozivom()
-    print(f"[count] štejem žetone za {len(napake)} pozivov (model {MODEL}, brezplačno) ...")
+    print(f"[count] štejem žetone za {len(napake)} pozivov (model {N.LLM_MODEL}, brezplačno) ...")
     vrstice, zacetek = [], time.time()
     for i, fid in enumerate(napake, 1):
-        r = klient.messages.count_tokens(model=MODEL, messages=[{"role": "user", "content": preberi_poziv(fid)}])
+        r = klient.messages.count_tokens(model=N.LLM_MODEL, messages=[{"role": "user", "content": preberi_poziv(fid)}])
         vrstice.append({"fault_id": fid, "input_tokens": int(r.input_tokens)})
         if i % 25 == 0 or i == len(napake):
             print(f"  ... {i}/{len(napake)} ({time.time() - zacetek:.0f} s)")
@@ -107,7 +105,7 @@ def ukaz_count(args):
     vhodnih = int(d["input_tokens"].sum())
     izhodnih = len(napake) * 400                  # konservativna ocena, odgovor je kratek JSON
     print(f"[count] vhodnih žetonov: {vhodnih:,}, ocena izhodnih: {izhodnih:,}")
-    print(f"[count] ocena stroška (paketni vmesnik): {vhodnih / 1e6 * CENA_VHOD + izhodnih / 1e6 * CENA_IZHOD:.2f} USD")
+    print(f"[count] ocena stroška (paketni vmesnik): {strosek_usd(vhodnih, izhodnih):.2f} USD")
     print(f"[count] shranjeno: {N.LLM_TOKENI}")
 
 
@@ -120,7 +118,7 @@ def ukaz_send(args):
     napake = izbrane_napake(args)
     zahteve = [Request(custom_id=fid, params=MessageCreateParamsNonStreaming(
         **parametri_zahteve(preberi_poziv(fid), args.max_tokens))) for fid in napake]
-    print(f"[send] ustvarjam paket z {len(zahteve)} zahtevami (model {MODEL}, max_tokens {args.max_tokens}) ...")
+    print(f"[send] ustvarjam paket z {len(zahteve)} zahtevami (model {N.LLM_MODEL}, max_tokens {args.max_tokens}) ...")
     paket = klient.messages.batches.create(requests=zahteve)
     with open(N.pot(N.LLM_BATCH_ID), "w") as f:
         f.write(paket.id)
@@ -129,8 +127,7 @@ def ukaz_send(args):
 
 def ukaz_poll(args):
     klient = odjemalec()
-    with open(N.pot(N.LLM_BATCH_ID)) as f:
-        bid = f.read().strip()
+    bid = shranjeni_batch_id()
     b = klient.messages.batches.retrieve(bid)
     print(f"[poll] {bid}: stanje {b.processing_status}, števci {b.request_counts}")
 
@@ -139,7 +136,7 @@ _JSON = re.compile(r"\{.*\}", re.DOTALL)
 
 
 def izlusci_ocene(besedilo, n_kandidatov):
-    """Iz odgovora izlušči JSON {indeks: ocena} in vrne {int: float v [0, 100]}, ob neveljavnem odgovoru {}."""
+    """Ocene {indeks: ocena v [0, 100]} iz JSON v odgovoru, ob neveljavnem odgovoru prazen slovar"""
     m = _JSON.search(besedilo)
     if not m:
         return {}
@@ -160,8 +157,7 @@ def izlusci_ocene(besedilo, n_kandidatov):
 
 def ukaz_fetch(args):
     klient = odjemalec()
-    with open(N.pot(N.LLM_BATCH_ID)) as f:
-        bid = f.read().strip()
+    bid = shranjeni_batch_id()
     b = klient.messages.batches.retrieve(bid)
     if b.processing_status != "ended":
         sys.exit(f"[fetch] paket še ni končan (stanje {b.processing_status}), počakajte in poženite 'poll'.")
@@ -185,11 +181,12 @@ def ukaz_fetch(args):
             surovo.write(json.dumps({"fault_id": fid, "type": vrsta, "text": besedilo}) + "\n")
             n_ok += 1
             for _, k in kandidati.iterrows():
+                idx = int(k["idx"])
                 vrstice.append({"fault_id": fid, "classname": k["classname"], "method": k["method"],
-                                "m_start": int(k["m_start"]), "m_end": int(k["m_end"]), "idx": int(k["idx"]),
+                                "m_start": int(k["m_start"]), "m_end": int(k["m_end"]), "idx": idx,
                                 "ochiai": float(k["ochiai"]), "combined": float(k["combined"]),
-                                "faulty": int(k["faulty"]), "llm_score": ocene.get(int(k["idx"]), 0.0),
-                                "llm_missing": int(int(k["idx"]) not in ocene)})
+                                "faulty": int(k["faulty"]), "llm_score": ocene.get(idx, 0.0),
+                                "llm_missing": int(idx not in ocene)})
     d = pd.DataFrame(vrstice)
     if os.path.isfile(pot_ocene) and len(d):
         stare = pd.read_csv(pot_ocene)
@@ -199,7 +196,7 @@ def ukaz_fetch(args):
     d.to_csv(pot_ocene, index=False)
     print(f"[fetch] uspešnih napak {n_ok}, neuspešnih {n_napak}")
     print(f"[fetch] žetoni: vhod {vhodnih:,}, izhod {izhodnih:,}, strošek paketa približno "
-          f"{vhodnih / 1e6 * CENA_VHOD + izhodnih / 1e6 * CENA_IZHOD:.2f} USD")
+          f"{strosek_usd(vhodnih, izhodnih):.2f} USD")
     print(f"[fetch] metod skupaj {len(d)}, brez ocene (privzeto 0): {int(d['llm_missing'].sum()) if len(d) else 0}")
     print(f"[fetch] shranjeno: {N.LLM_OCENE}, {N.LLM_SUROVI_ODGOVORI}")
 
@@ -212,6 +209,7 @@ def main():
     s.add_argument("--potrdi", action="store_true", help="potrditev, da se strinjate s stroškom")
     s.add_argument("--napake", default="", help="seznam napak a,b,c (privzeto vse s pozivom)")
     s.add_argument("--seznam", default="", help="datoteka z napakami, ena na vrstico")
+    # pri premajhni meji gre ves proračun za razmišljanje in odgovor je prazen
     s.add_argument("--max-tokens", type=int, default=8000, help="skupna meja za razmišljanje in odgovor")
     sub.add_parser("poll", help="stanje paketa")
     sub.add_parser("fetch", help="prenesi odgovore in pripni ocene k metodam")

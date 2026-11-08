@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Meje metod v izvorni kodi Java (tree-sitter) in krive metode iz razvijalčevega popravka."""
+"""Meje metod v izvorni kodi Java (tree-sitter) in krive metode iz razvijalčevega popravka"""
 import difflib
 import os
 
@@ -7,14 +7,14 @@ from skupno.defects4j import pot_razreda
 
 
 def nalozi_parser():
-    """Vrne razčlenjevalnik tree-sitter za Javo."""
+    """Razčlenjevalnik tree-sitter za Javo"""
     import tree_sitter_java as tsjava
     from tree_sitter import Language, Parser
     return Parser(Language(tsjava.language()))
 
 
 def _zberi_metode(vozlisce, bajti, out):
-    """Rekurzivno zbere (ime, prva vrstica, zadnja vrstica) za metode in konstruktorje, vrstice od 1."""
+    """Rekurzivno zbere (ime, prva vrstica, zadnja vrstica) metod in konstruktorjev, vrstice od 1"""
     if vozlisce.type in ("method_declaration", "constructor_declaration"):
         ime_v = vozlisce.child_by_field_name("name")
         ime = bajti[ime_v.start_byte:ime_v.end_byte].decode("utf-8", "replace") if ime_v else "?"
@@ -24,8 +24,8 @@ def _zberi_metode(vozlisce, bajti, out):
 
 
 def metode_v_datoteki(pot, parser):
-    """Seznam (ime, prva vrstica, zadnja vrstica) vseh metod in konstruktorjev, ali None, če datoteke ni."""
-    if not pot or not os.path.isfile(pot):
+    """Seznam (ime, prva, zadnja vrstica) metod in konstruktorjev, None, če datoteke ni"""
+    if not os.path.isfile(pot):
         return None
     with open(pot, "rb") as f:
         bajti = f.read()
@@ -35,24 +35,21 @@ def metode_v_datoteki(pot, parser):
 
 
 def objemajoca_metoda(metode, vrstica):
-    """Najbolj notranja metoda, ki vsebuje vrstico (pri gnezdenju tista z največjim začetkom), ali None."""
+    """Najbolj notranja metoda, ki vsebuje vrstico (ta ima največji začetek), ali None"""
     kandidati = [m for m in metode if m[1] <= vrstica <= m[2]]
     return max(kandidati, key=lambda m: m[1]) if kandidati else None
 
 
 def _vrstice(pot):
-    """Vrstice datoteke, razdeljene samo na znak za novo vrstico, enako kot šteje tree-sitter."""
+    """Vrstice datoteke, deljene le na znak za novo vrstico, enako kot šteje tree-sitter"""
     with open(pot, "rb") as f:
         return f.read().decode("utf-8", "replace").split("\n")
 
 
 def krive_metode_iz_popravka(mapa_b, mapa_f, srcdir_b, srcdir_f, spremenjeni_razredi, parser):
-    """Metode, ki jih spremeni razvijalčev popravek.
+    """Krive metode iz razvijalčevega popravka, iz razlike med napačno in popravljeno različico.
 
-    Zamenjane in izbrisane vrstice pripišemo objemajoči metodi napačne različice, vstavljene vrstice
-    metodi, v katero padejo. Če popravek doda samo novo metodo, napaka na nivoju metode ni lokalizabilna
-    (NEW-METHOD-OMISSION), spremembe zunaj metod so razrednega nivoja (RAZREDNI-NIVO).
-    Vrne (krive, nove_metode, vrsta, ujemanje razredov z razliko s seznamom classes.modified).
+    Vrne krive in nove metode, vrsto napake in ali se spremenjeni razredi ujemajo s classes.modified
     """
     krive, nove, razredni_nivo, z_razliko = set(), set(), False, set()
     for razred in spremenjeni_razredi:
@@ -62,32 +59,29 @@ def krive_metode_iz_popravka(mapa_b, mapa_f, srcdir_b, srcdir_f, spremenjeni_raz
         if not (os.path.isfile(fb) and os.path.isfile(ff)):
             continue
         bl, fl = _vrstice(fb), _vrstice(ff)
-        mb = metode_v_datoteki(fb, parser) or []
-        mf = metode_v_datoteki(ff, parser) or []
+        mb = metode_v_datoteki(fb, parser)
+        mf = metode_v_datoteki(ff, parser)
         imena_b = {m[0] for m in mb}
         for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, bl, fl, autojunk=False).get_opcodes():
             if tag == "equal":
                 continue
             z_razliko.add(zunanji)
             if tag in ("replace", "delete"):
+                # zamenjane in izbrisane vrstice pripišemo objemajoči metodi napačne različice
                 for ln in range(i1 + 1, i2 + 1):
                     m = objemajoca_metoda(mb, ln)
                     if m:
                         krive.add((zunanji, m[0], m[1], m[2]))
                     else:
                         razredni_nivo = True
-            if tag == "insert":
-                # vstavno mesto v napačni različici je med vrsticama i1 in i1+1 (štetje od 1)
-                objema = None
-                for kandidat in (i1, i1 + 1):
-                    if 1 <= kandidat <= len(bl):
-                        mm = objemajoca_metoda(mb, kandidat)
-                        if mm:
-                            objema = mm
-                            break
-                if objema is not None:
+            elif tag == "insert":
+                # vstavljene vrstice pripišemo metodi okoli mesta vstavljanja,
+                # to je vrstica i1 ali i1+1 napačne različice (štetje od 1)
+                objema = objemajoca_metoda(mb, i1) or objemajoca_metoda(mb, i1 + 1)
+                if objema:
                     krive.add((zunanji, objema[0], objema[1], objema[2]))
                 else:
+                    # zunaj metod napačne različice: nova metoda ali sprememba na nivoju razreda
                     for ln in range(j1 + 1, j2 + 1):
                         mfm = objemajoca_metoda(mf, ln)
                         if mfm is None:

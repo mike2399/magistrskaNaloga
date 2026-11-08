@@ -2,22 +2,19 @@
 # -*- coding: utf-8 -*-
 """Glavni poskus, MLP z oceno jezikovnega modela kot deseto značilko.
 
-Primerja tri različice istega modela z isto delitvijo v gube: MLP H9 (devet klasičnih ocen, kontrola),
-MLP H9+LLM (še ocena jezikovnega modela) in MLP H9+premešan (kontrolni preizkus, ocene jezikovnega
-modela so znotraj vsake napake naključno premešane med kandidati). Poleg tega poroča Ochiai, jezikovni
-model sam in kaskado brez učenja. Število epoh izbere na notranji validacijski gubi, končne zagone
-ponovi s petimi semeni, izračuna statistične teste iz naloge in rezultate po projektih.
+Tri različice MLP z isto delitvijo v gube: MLP H9 (kontrola), MLP H9+LLM in MLP H9+premešan
+(kontrolni preizkus, ocene jezikovnega modela so znotraj napake naključno premešane med kandidati).
+Poroča še Ochiai, jezikovni model sam in kaskado brez učenja, statistične teste in rezultate po
+projektih. Število epoh izbere na notranji validacijski gubi, končne zagone ponovi s petimi semeni.
 
-Zagon:  python modeli/mlp_llm.py
-        (8. skripta v cevovodu, vrstni red je v README)
 Vhod:   izhod/podatki/matrika_metod.parquet, jezikovni_model/ocene.csv
-Izhod:  izhod/modeli/mlp_llm_izbrane_epohe.json, modeli/mlp_llm_cache/, modeli/mlp_llm_napovedi.csv,
-        modeli/mlp_llm_rezultati.json
+Izhod:  izhod/modeli/mlp_llm_izbrane_epohe.json, modeli/mlp_llm_cache/,
+        modeli/mlp_llm_napovedi.csv, modeli/mlp_llm_rezultati.json
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija (nastavitve.py, skupno/)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija
 
 import json
 import os
@@ -26,10 +23,10 @@ import numpy as np
 from scipy.stats import spearmanr
 
 import nastavitve as N
-from skupno.metrike import metrike_po_napakah, wilcoxon_parni
+from skupno.metrike import metrike_iz_napovedi, metrike_po_napakah, wilcoxon_parni
 from skupno.mlp import izberi_epohe, napovedi_cv
 from skupno.podatki import (nalozi_matriko_metod, seznam_napak, normiraj_po_napaki, gube_po_napaki,
-                            zdruzi_llm_ocene, v_intervalu_0_1, projekt_napake)
+                            zdruzi_llm_ocene, v_intervalu_0_1, projekt_napake, beri_json)
 from skupno.preverbe import Preverbe, glava
 
 MREZA_EPOH = [60, 150, 300, 600]
@@ -61,7 +58,7 @@ def main():
     # premešane ocene znotraj kandidatov iste napake (kontrolni preizkus)
     rs = np.random.default_rng(12345)
     df["llm_shuf"] = df["llm"].to_numpy(dtype=float)
-    for fid, g in df.groupby("fault_id"):
+    for _, g in df.groupby("fault_id"):
         idx = g.index[g["llm_scored"].to_numpy()]
         if len(idx) > 1:
             v = df.loc[idx, "llm"].to_numpy(dtype=float).copy()
@@ -71,8 +68,8 @@ def main():
 
     napake = seznam_napak(df)
     krive = df[df["faulty"] == 1]
-    pokrite = set(df[(df["faulty"] == 1) & (df["llm"] > 0)]["fault_id"])          # kriva metoda z oceno > 0
-    med_kandidati = set(df[(df["faulty"] == 1) & df["llm_scored"]]["fault_id"])   # kriva metoda med kandidati
+    pokrite = set(krive.loc[krive["llm"] > 0, "fault_id"])
+    med_kandidati = set(krive.loc[krive["llm_scored"], "fault_id"])
     print(f"\nMatrika: {len(df):,} metod, {len(napake)} napak, {int(df['faulty'].sum())} krivih metod")
     print(f"Jezikovni model je videl {n_ocenjenih:,} metod ({n_ocenjenih / len(df):.1%}), "
           f"ocena > 0 pri {int((df['llm'] > 0).sum()):,}")
@@ -92,8 +89,7 @@ def main():
     print("\n[Izbira števila epoh na notranji validacijski gubi]")
     pot_epoh = N.pot(N.MLP_LLM_EPOHE)
     if os.path.isfile(pot_epoh):
-        with open(pot_epoh, encoding="utf-8") as f:
-            shranjeno = json.load(f)
+        shranjeno = beri_json(N.MLP_LLM_EPOHE)
         izbrane, krivulje = shranjeno["chosen"], shranjeno["val_curves"]
         print(f"  naloženo iz {N.MLP_LLM_EPOHE}: {izbrane}")
     else:
@@ -123,7 +119,7 @@ def main():
     for ime in ROKE:
         df[STOLPEC_ROKE[ime]] = napovedi[ime][N.SEMENA[0]]
 
-    # kaskada brez učenja: ocena jezikovnega modela, kjer obstaja, sicer normirana kontrola H9
+    # kaskada brez učenja: ocena LLM, kjer obstaja, sicer normirana kontrola H9
     r = df.groupby("fault_id")["mlp_h9"].transform(lambda v: (v - v.min()) / (v.max() - v.min() + 1e-12))
     df["kaskada"] = np.where(df["llm_scored"], 2.0 + df["llm"] / 100.0, r)
     p("kaskada uvrsti ocenjene metode pred neocenjene",
@@ -171,9 +167,7 @@ def main():
     for ime in ROKE:
         t1, mfr = [], []
         for s in N.SEMENA:
-            tmp = df.copy()
-            tmp["_p"] = napovedi[ime][s]
-            top, m, _, _ = metrike_po_napakah(tmp, "_p")
+            top, m, _, _ = metrike_iz_napovedi(df, napovedi[ime][s])
             t1.append(top[1])
             mfr.append(m)
         po_semenih[ime] = (t1, mfr)
@@ -196,8 +190,7 @@ def main():
           f"(kandidati so že izbrani po klasičnih ocenah, zato je razpon omejen)")
 
     print("\n[Jezikovni model glede na težavnost napake za Ochiai]")
-    _, _, _, rang_och = metrike_po_napakah(df, "ochiai")
-    _, _, _, rang_l = metrike_po_napakah(df, "llm")
+    rang_och, rang_l = rang["Ochiai"], rang["LLM (izbor+preureditev)"]
     print(f"  {'rang krive po Ochiai':>20s} | {'napak':>5s} | {'med kandidati':>13s} | {'LLM Top-1 (vse)':>15s} | {'LLM Top-1 (med kandidati)':>25s}")
     for lo, hi, oznaka in [(1, 1, "1"), (2, 3, "2 do 3"), (4, 20, "4 do 20"), (21, 10**9, "nad 20")]:
         izbor = [f for f in napake if lo <= rang_och[f] <= hi]

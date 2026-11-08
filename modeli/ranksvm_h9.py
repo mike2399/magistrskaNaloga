@@ -2,20 +2,18 @@
 # -*- coding: utf-8 -*-
 """Izhodišče iz literature, rankSVM (CombineFL) na matriki metod.
 
-Linearni model rankSVM naučimo na istih devetih ocenah, z isto delitvijo v gube in isto metriko kot MLP.
-Poročamo dve različici, surove ocene (kot v CombineFL) in znotraj napake normirane ocene (kot pri MLP).
+Linearni model rankSVM naučimo na istih devetih ocenah, z isto delitvijo v gube in isto metriko kot
+MLP. Dve različici: surove ocene (kot v CombineFL) in znotraj napake normirane ocene (kot pri MLP).
 Regularizacija C = 1 je privzeta vrednost iz CombineFL in je ne uglašujemo.
 
-Zagon:  python modeli/ranksvm_h9.py
-        (10. skripta v cevovodu, vrstni red je v README)
-Vhod:   izhod/podatki/matrika_metod.parquet, modeli/mlp_llm_napovedi.csv, programa svm_rank iz CombineFL
-Izhod:  izhod/modeli/ranksvm_h9_napovedi.csv, modeli/ranksvm_h9_rezultati.json, modeli/ranksvm_h9_rezultati.txt,
-        modeli/ranksvm_h9_cache/ (napovedi in uteži), modeli/ranksvm_h9_tmp/ (datoteke LETOR in modeli)
+Vhod:   izhod/podatki/matrika_metod.parquet, modeli/mlp_llm_napovedi.csv, programa svm_rank
+Izhod:  izhod/modeli/ranksvm_h9_napovedi.csv, modeli/ranksvm_h9_rezultati.json,
+        modeli/ranksvm_h9_rezultati.txt, modeli/ranksvm_h9_cache/, modeli/ranksvm_h9_tmp/
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija (nastavitve.py, skupno/)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija
 
 import json
 
@@ -51,9 +49,6 @@ def main():
     gube = gube_po_napaki(napake)
     p("gube pokrijejo vsako napako natanko enkrat",
       sum(len(g) for g in gube) == len(napake) and set().union(*gube) == set(napake))
-    napaka_vrstice = df["fault_id"].to_numpy()
-    p("nobena testna napaka ni v učni množici svoje gube",
-      all(not (set(napaka_vrstice[~np.isin(napaka_vrstice, list(t))]) & set(t)) for t in gube))
 
     print(f"\n[rankSVM na surovih ocenah (kot CombineFL, C = {C_REGULARIZACIJA})]")
     df["ranksvm_raw"], utezi_raw = ranksvm_cv(df, N.TEHNIKE, gube, qid, "raw", tmp, cache)

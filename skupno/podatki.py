@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Nalaganje in priprava podatkov: matrika metod, normalizacija, delitev v gube, ocene LLM, predpomnilnik."""
+"""Priprava podatkov: matrika metod, normalizacija, gube, ocene jezikovnega modela, predpomnilnik"""
 import hashlib
+import json
 
 import numpy as np
 import pandas as pd
 
-from nastavitve import KLJUC, SEME_DELITVE, K_GUB
+from nastavitve import KLJUC, SEME_DELITVE, K_GUB, pot
 
 
 def razcleni_fault_id(fid):
-    """'closure127' -> ('closure', '127'). Števke na koncu so številka napake."""
+    """'closure127' -> ('closure', '127'), števke na koncu so številka napake"""
     i = len(fid)
     while i > 0 and fid[i - 1].isdigit():
         i -= 1
@@ -17,19 +18,25 @@ def razcleni_fault_id(fid):
 
 
 def projekt_napake(fid):
-    """Ime projekta iz oznake napake: 'closure127' -> 'closure'."""
+    """Ime projekta iz oznake napake, 'closure127' -> 'closure'"""
     return razcleni_fault_id(fid)[0]
 
 
 def ime_d4j(fid):
-    """Oznaka napake v obliki, ki jo pričakuje Defects4J: 'lang1' -> ('Lang', '1')."""
+    """Oznaka napake, kot jo pričakuje Defects4J, 'lang1' -> ('Lang', '1')"""
     projekt, bug = razcleni_fault_id(fid)
     return projekt.capitalize(), bug
 
 
-def nalozi_matriko_metod(pot):
-    """Prebere matriko metod in poskrbi za cele tipe stolpcev."""
-    df = pd.read_parquet(pot).reset_index(drop=True)
+def beri_json(ime):
+    """Vsebina datoteke JSON ime v mapi IZHOD"""
+    with open(pot(ime), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def nalozi_matriko_metod(pot_parqueta):
+    """Matrika metod iz parqueta, faulty in meje metod kot cela števila"""
+    df = pd.read_parquet(pot_parqueta).reset_index(drop=True)
     df["faulty"] = df["faulty"].astype(int)
     for c in ("m_start", "m_end"):
         df[c] = df[c].astype(int)
@@ -37,33 +44,32 @@ def nalozi_matriko_metod(pot):
 
 
 def seznam_napak(df):
-    """Napake v vrstnem redu prve pojavitve v tabeli. Ta red določa delitev v gube."""
+    """Napake v vrstnem redu prve pojavitve v tabeli, ta red določa delitev v gube"""
     return list(dict.fromkeys(df["fault_id"].tolist()))
 
 
 def normiraj_po_napaki(df, znacilke):
-    """Min-max normalizacija vsake značilke znotraj posamezne napake v [0, 1], konstantna značilka dobi 0."""
+    """Min-max normalizacija značilk znotraj vsake napake v [0, 1], konstantna značilka dobi 0"""
     out = df.copy()
     g = df.groupby("fault_id")
     for t in znacilke:
         mn, mx = g[t].transform("min"), g[t].transform("max")
-        razpon = (mx - mn)
+        razpon = mx - mn
         out[t] = ((df[t] - mn) / razpon.where(razpon > 0, 1.0)).where(razpon > 0, 0.0)
     return out
 
 
 def gube_po_napaki(napake, seme=SEME_DELITVE, k=K_GUB):
-    """Razdeli napake v k gub (seznam množic fault_id). Vse metode iste napake so v isti gubi."""
+    """Razdeli napake v k gub s semenom seme, vrne seznam množic fault_id"""
     napake = np.array(napake)
     perm = np.random.default_rng(seme).permutation(len(napake))
     return [set(napake[perm[i::k]]) for i in range(k)]
 
 
 def zdruzi_llm_ocene(df, pot_ocene):
-    """Pripne ocene jezikovnega modela k matriki metod, metode brez ocene dobijo 0.
+    """Pripne ocene jezikovnega modela k matriki metod, vrne (df, n_ocenjenih).
 
-    Vrne (df, n_ocenjenih). Stolpec `llm` je ocena od 0 do 100, `llm_scored` pove, ali je bila metoda
-    med kandidati, torej jo je model sploh videl.
+    Stolpec llm je ocena 0 do 100 (brez ocene 0), llm_scored pove, ali je bila metoda med kandidati
     """
     ocene = pd.read_csv(pot_ocene)[KLJUC + ["llm_score"]]
     for c in ("m_start", "m_end"):
@@ -80,14 +86,14 @@ def zdruzi_llm_ocene(df, pot_ocene):
 
 
 def v_intervalu_0_1(df, znacilke):
-    """True, če so vse navedene značilke v [0, 1]."""
+    """True, če so vse navedene značilke v [0, 1]"""
     return float(df[znacilke].min().min()) >= 0.0 and float(df[znacilke].max().max()) <= 1.0
 
 
 def kljuc_predpomnilnika(df, znacilke, parametri, predpona=b""):
-    """Zgoščena vrednost nastavitev in vhodnih podatkov za ime datoteke v predpomnilniku napovedi.
+    """Zgoščena vrednost nastavitev in podatkov za ime datoteke v predpomnilniku napovedi.
 
-    Sprememba značilk, parametrov, vrednosti ali vrstnega reda napak razveljavi shranjene napovedi.
+    Sprememba značilk, parametrov, vrednosti ali vrstnega reda napak razveljavi shranjene napovedi
     """
     h = hashlib.sha1()
     h.update(predpona)

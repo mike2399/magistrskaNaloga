@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Linearni model rankSVM (program svm_rank), kot ga uporablja CombineFL.
 
-Podatke zapišemo v obliki LETOR, model naučimo s programom svm_rank_learn in napovemo s svm_rank_classify.
-Napovedi shranimo v predpomnilnik, katerega ključ je izračunan iz nastavitev in vhodnih podatkov.
+Podatke zapišemo v obliki LETOR, model naučimo s svm_rank_learn in napovemo s svm_rank_classify
 """
 import json
 import os
@@ -13,18 +12,18 @@ import numpy as np
 from nastavitve import SVM_RANK_LEARN, SVM_RANK_CLASSIFY, SEME_DELITVE, K_GUB
 from skupno.podatki import kljuc_predpomnilnika
 
-C_REGULARIZACIJA = 1          # privzeta vrednost iz skripte 3-crossvalidation.sh paketa CombineFL
+C_REGULARIZACIJA = 1          # kot v datoteki 3-crossvalidation.sh paketa CombineFL
 
 
 def preveri_programa():
-    """Ustavi se, če programa svm_rank nista na voljo ali nista izvršljiva."""
+    """Ustavi se, če programa svm_rank nista izvršljiva"""
     for p in (SVM_RANK_LEARN, SVM_RANK_CLASSIFY):
         if not os.access(p, os.X_OK):
-            raise RuntimeError(f"program {p} ne obstaja ali ni izvršljiv (glej README, razdelek o CombineFL)")
+            raise RuntimeError(f"program {p} ne obstaja ali ni izvršljiv (navodila so v combinefl/README.md)")
 
 
 def zapisi_letor(sub, znacilke, qid_napake, pot):
-    """Zapiše tabelo v datoteko LETOR, urejeno po qid. Vrne oznake vrstic v zapisanem vrstnem redu."""
+    """Zapiše tabelo v datoteko LETOR urejeno po qid, vrne indekse vrstic v tem vrstnem redu"""
     q = sub["fault_id"].map(qid_napake).to_numpy()
     vrstni_red = np.argsort(q, kind="mergesort")        # stabilno urejanje ohrani vrstni red znotraj qid
     q2 = q[vrstni_red]
@@ -50,15 +49,15 @@ def pozeni_svm(args, kaj):
 
 
 def preberi_model(pot, n_znacilk):
-    """Iz datoteke modela svm_rank (oblika SVM-light) izlušči prag b in vektor uteži w (vsota alpha krat podporni vektor)."""
+    """Prag b in uteži w iz modela svm_rank (SVM-light), w je vsota alpha krat podporni vektor"""
     with open(pot) as f:
         vrstice = f.read().splitlines()
     if "SVM-light" not in vrstice[0]:
         raise RuntimeError(f"{pot}: ni model SVM-light (prva vrstica: {vrstice[0]!r})")
-    najvisji = int(vrstice[7].split()[0])
+    najvisji = int(vrstice[7].split()[0])       # najvišji indeks značilke
     if najvisji > n_znacilk + 1:
         raise RuntimeError(f"{pot}: najvišji indeks značilke {najvisji} > {n_znacilk}+1")
-    n_sv1 = int(vrstice[9].split()[0])
+    n_sv1 = int(vrstice[9].split()[0])          # število podpornih vektorjev + 1
     b = float(vrstice[10].split()[0])
     sv = [v for v in vrstice[11:] if v.strip()]
     if len(sv) != n_sv1 - 1:
@@ -68,7 +67,7 @@ def preberi_model(pot, n_znacilk):
         deli = line.split()
         alpha = float(deli[0])
         for zeton in deli[1:]:
-            if zeton == "#":
+            if zeton == "#":                    # od tod naprej je komentar
                 break
             fid, _, sval = zeton.partition(":")
             i = int(fid)
@@ -79,10 +78,9 @@ def preberi_model(pot, n_znacilk):
 
 
 def ranksvm_cv(df, znacilke, gube, qid_napake, oznaka, mapa_tmp, mapa_cache):
-    """Prečno preverjanje po napakah z modelom rankSVM.
+    """Prečno preverjanje po napakah z rankSVM, vrne (napovedi, uteži po gubah).
 
-    Vrne (napovedi, uteži po gubah). Uteži so None, če so napovedi iz predpomnilnika brez shranjenih uteži.
-    Pri svežem izračunu preveri, da uteži iz datoteke modela reproducirajo napovedi programa.
+    Uteži so None, če so napovedi iz predpomnilnika brez shranjenih uteži
     """
     os.makedirs(mapa_cache, exist_ok=True)
     kljuc = kljuc_predpomnilnika(df, znacilke, [C_REGULARIZACIJA, SEME_DELITVE, K_GUB, len(df)])
@@ -137,7 +135,7 @@ def ranksvm_cv(df, znacilke, gube, qid_napake, oznaka, mapa_tmp, mapa_cache):
 
 
 def povzetek_utezi(utezi, znacilke):
-    """Povprečje in standardni odklon uteži čez gube za vsako značilko."""
+    """Povprečje in standardni odklon uteži čez gube za vsako značilko"""
     W = np.vstack(utezi)
     return {ime: {"mean": float(W[:, j].mean()), "sd": float(W[:, j].std(ddof=1))}
             for j, ime in enumerate(znacilke)}

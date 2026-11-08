@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """Metrike lokalizacije napak in statistični testi.
 
-Povsod velja isto merilo. Znotraj ene napake metode uredimo padajoče po oceni, enake ocene dobijo
-povprečni rang, rang napake pa je rang njene najbolje uvrščene krive metode. Iz teh rangov izhajajo
-Top-N, MFR in MAR.
+Merilo je povsod enako. Metode ene napake uredimo padajoče po oceni, enake ocene dobijo povprečni
+rang, rang napake je rang njene prve krive metode. Iz teh rangov izhajajo Top-N, MFR in MAR
 """
 import math
 
@@ -14,16 +13,15 @@ from nastavitve import NS
 
 
 def rangi_krivih(g, stolpec, metoda="average"):
-    """Rangi krivih metod ene napake. Metode uredimo padajoče po oceni, enake ocene dobijo rang po pravilu `metoda`."""
+    """Rangi krivih metod ene napake, enake ocene po pravilu metoda"""
     r = rankdata(-g[stolpec].to_numpy(dtype=float), method=metoda)
     return r[g["faulty"].to_numpy() == 1]
 
 
 def metrike_po_napakah(df, stolpec, podmnozica=None):
-    """Top-N, MFR, MAR in rang prve krive metode za vsako napako iz ocen v stolpcu `stolpec`.
+    """Vrne (top, mfr, mar, prvi_rang) iz ocen v stolpcu, po želji le za napake v podmnozica.
 
-    Vrne (top, mfr, mar, prvi_rang). top je slovar {n: število napak s prvo krivo metodo med prvimi n},
-    prvi_rang pa slovar {fault_id: rang prve krive metode}. S podmnozica se omejimo na del napak.
+    top je {n: število napak v Top-n}, prvi_rang je {fault_id: rang prve krive metode}
     """
     top = {n: 0 for n in NS}
     prvi, povprecni, prvi_po_napaki = [], [], {}
@@ -41,24 +39,31 @@ def metrike_po_napakah(df, stolpec, podmnozica=None):
     return top, float(np.mean(prvi)), float(np.mean(povprecni)), prvi_po_napaki
 
 
+def metrike_iz_napovedi(df, napovedi, podmnozica=None):
+    """Kot metrike_po_napakah, a za napovedi v polju, poravnanem z vrsticami df"""
+    tmp = df[["fault_id", "faulty"]].copy()
+    tmp["_p"] = napovedi
+    return metrike_po_napakah(tmp, "_p", podmnozica)
+
+
 def prvi_rangi(df, stolpec):
-    """Slovar {fault_id: rang prve krive metode} po pravilu povprečnega ranga."""
+    """Slovar {fault_id: rang prve krive metode} pri povprečnem rangu enakih ocen"""
     return {fid: float(rangi_krivih(g, stolpec).min()) for fid, g in df.groupby("fault_id")}
 
 
 def top1_po_konvencijah(df, stolpec):
-    """Top-1 pri treh obravnavah enakih ocen: optimistični (min), povprečni (avg) in pesimistični (max)."""
+    """Top-1 pri optimistični (min), povprečni (avg) in pesimistični (max) obravnavi enakih ocen"""
     out = {}
     for metoda, oznaka in (("min", "min"), ("average", "avg"), ("max", "max")):
-        out[oznaka] = sum(1 for _, g in df.groupby("fault_id") if rangi_krivih(g, stolpec, metoda).min() <= 1.0)
+        out[oznaka] = sum(1 for _, g in df.groupby("fault_id")
+                          if rangi_krivih(g, stolpec, metoda).min() <= 1.0)
     return out
 
 
 def meji_ranga(ocene, krivo):
-    """Spodnja in zgornja meja ranga prvega krivega elementa glede na obravnavo enakih ocen.
+    """Spodnja in zgornja meja ranga prvega krivega elementa pri enakih ocenah.
 
-    Spodnja meja šteje le elemente z višjo oceno od najboljšega krivega, zgornja doda še nekrive
-    elemente z enako oceno.
+    Spodnja šteje elemente z višjo oceno od najboljšega krivega, zgornja še nekrive z enako oceno
     """
     s_max = ocene[krivo].max()
     visjih = int(np.sum(ocene > s_max))
@@ -68,16 +73,15 @@ def meji_ranga(ocene, krivo):
 
 
 def wilcoxon_parni(rang_a, rang_b, napake, alternativa="less", metoda="auto"):
-    """Parni Wilcoxonov test na rangih prve krive metode modelov A in B.
+    """Parni Wilcoxonov test rangov modelov A in B, pri "less" preverjamo, ali ima A manjše range.
 
-    Pri alternativa="less" preverjamo, ali ima A manjše (boljše) range. Vrne statistiko W, vrednost p
-    in število napak, pri katerih je A boljši, slabši ali enak. Če test ni izračunljiv, sta W in p nan.
+    Vrne W, p in število napak, kjer je A boljši, slabši ali enak. Če test ni mogoč, sta W in p nan
     """
     x = np.array([rang_a[f] for f in napake], dtype=float)
     y = np.array([rang_b[f] for f in napake], dtype=float)
     izid = {"W": float("nan"), "p": float("nan"), "alternative": alternativa,
             "a_better": int((x < y).sum()), "a_worse": int((x > y).sum()), "tie": int((x == y).sum())}
-    if len(napake) >= 3 and not bool(np.all(x == y)):
+    if len(napake) >= 3 and not np.all(x == y):
         try:
             W, p = wilcoxon(x, y, zero_method="wilcox", alternative=alternativa, method=metoda)
             izid["W"], izid["p"] = float(W), float(p)
@@ -87,9 +91,9 @@ def wilcoxon_parni(rang_a, rang_b, napake, alternativa="less", metoda="auto"):
 
 
 def holm(pvals):
-    """Holm-Bonferronijev popravek za več primerjav. Vrne popravljene vrednosti p v istem vrstnem redu, nan ostane nan."""
+    """Holm-Bonferronijev popravek vrednosti p, vrne jih v istem vrstnem redu, nan ostane nan"""
     m = len(pvals)
-    vrstni_red = np.argsort([2.0 if math.isnan(p) else p for p in pvals])
+    vrstni_red = np.argsort([2.0 if math.isnan(p) else p for p in pvals])      # nan na konec
     popravljeni = [float("nan")] * m
     tekoci_max = 0.0
     for k, idx in enumerate(vrstni_red):

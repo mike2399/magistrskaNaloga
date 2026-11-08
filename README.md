@@ -21,7 +21,7 @@ jezikovni_model/         pozivi za jezikovni model in klici prek vmesnika API
 modeli/                  naučeni modeli: MLP, rankSVM, prečno preverjanje po projektih
 analize/                 polni pogled, primerjava družin tehnik, kvalitativni primeri
 porocila/                tabele in slike za besedilo naloge
-izhod/                   rezultati, v podmapah z enakimi imeni kot skripte
+izhod/                   rezultati, v podmapah po vsebini (priprava_podatkov piše v podatki/)
 combinefl/               paket CombineFL (ni v gitu, glej combinefl/README.md)
 requirements.txt         različice paketov Python
 ```
@@ -44,7 +44,7 @@ requirements.txt         različice paketov Python
 | 12 | `modeli/ranksvm_llm.py` | rankSVM z oceno jezikovnega modela kot deseto značilko | 3, 7, 8, 10, svm_rank | s predpomnilnikom sekunde, sicer ure |
 | 13 | `analize/kvalitativni_primeri.py` | izbor 20 napak za kvalitativno analizo z dokaznimi izpisi | 6, 7, 8, 10 | sekunde |
 | 14 | `analize/primerjava_druzin.py` | primerjava posameznih tehnik in družin, uporabnost, komplementarnost | 3, 8 | pod minuto |
-| 15 | `porocila/tabele_poglavje6.py` | tabele šestega poglavja (Markdown) iz rezultatov | 8 do 14 | sekunde |
+| 15 | `porocila/tabele_poglavje6.py` | tabele rezultatov (šesto poglavje in dodatek A) v Markdownu | 8 do 12, 14 | sekunde |
 | 16 | `porocila/slike.py` | slike 5.2, 6.1 in 6.2 (PDF in PNG) iz rezultatov | 8, 14 | sekunde |
 
 Skripte poženete s potjo do datoteke, iz katere koli mape, na primer:
@@ -70,7 +70,8 @@ Poleg paketov Python so potrebni:
   `~/d4j_checkouts` (spremenljivka `D4J_CHECKOUTS`). Potrebujeta ju skripti 3 in 6.
 - **Paket CombineFL** v mapi `combinefl/` (glej `combinefl/README.md`). Datoteka `release.json` je vhod
   skripte 1, programa `svm_rank_learn` in `svm_rank_classify` pa uporabljata skripti 10 in 12.
-- **Ključ API Anthropic** za skripto 7 (okoljska spremenljivka `ANTHROPIC_API_KEY`).
+- **Ključ API Anthropic** za skripto 7 (okoljska spremenljivka `ANTHROPIC_API_KEY` ali datoteka
+  `~/.anthropic_api_key`).
 
 Mapo z rezultati lahko preusmerite s spremenljivko `FL_IZHOD`.
 
@@ -80,14 +81,14 @@ Mapo z rezultati lahko preusmerite s spremenljivko `FL_IZHOD`.
 izhod/podatki/           matriki ocen na nivoju stavkov in metod, razvrstitev vseh 357 napak
 izhod/izhodisca/         rangi in povzetki za Ochiai in DStar
 izhod/jezikovni_model/   pozivi (pozivi/), manifest, žetoni, surovi odgovori, izluščene ocene, seznama ponovitev
-izhod/modeli/            rezultati in napovedi modelov, izbrano število epoh, predpomnilniki napovedi (*_cache/)
+izhod/modeli/            rezultati modelov, izbrano število epoh, predpomnilniki napovedi (*_cache/)
 izhod/analize/           polni pogled, primerjava družin, dokazni izpisi dvajsetih primerov
-izhod/porocila/          tabele šestega poglavja (Markdown) in slike (PDF, PNG)
+izhod/porocila/          tabele rezultatov (Markdown) in slike (PDF, PNG)
 ```
 
 Velike tabele napovedi po metodah (`*_napovedi.csv`, 13 do 21 MB) niso v gitu. Skripte jih zapišejo
-znova, s predpomnilnikom v nekaj sekundah. V gitu prav tako niso začasne datoteke LETOR (`modeli/*_tmp/`)
-in sprotni zapis skripte 3 (`podatki/matrika_metod_sprotno.csv`).
+znova, s predpomnilnikom v nekaj sekundah, skripta 5 v nekaj minutah. V gitu prav tako niso začasne
+datoteke LETOR (`modeli/*_tmp/`) in sprotni zapis skripte 3 (`podatki/matrika_metod_sprotno.csv`).
 
 Predpomnilnik napovedi je označen z zgoščeno vrednostjo nastavitev in vhodnih podatkov (skripte 10, 11
 in 12), zato spremenjeni podatki samodejno sprožijo ponoven izračun. Za učenje iz nič izbrišite
@@ -126,4 +127,4 @@ ustrezno mapo `*_cache/`.
 | tabela 6.8 (prečno preverjanje po projektih) | `modeli/mlp_lopo.py` |
 | tabela A.2 (vsi statistični testi) | skripte 8 do 12 |
 | poglavje 7 in tabela B.1 (kvalitativna analiza dvajsetih primerov) | `analize/kvalitativni_primeri.py` |
-| vse tabele in slike v obliki za nalogo | `porocila/tabele_poglavje6.py`, `porocila/slike.py` |
+| tabele iz rezultatov modelov in analiz, slike 5.2, 6.1 in 6.2 | `porocila/tabele_poglavje6.py`, `porocila/slike.py` |

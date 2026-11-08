@@ -2,21 +2,19 @@
 # -*- coding: utf-8 -*-
 """Prečno preverjanje po projektih (leave-one-project-out, LOPO).
 
-Pet gub je pet projektov. Za vsak projekt model naučimo na napakah ostalih štirih in ga preizkusimo na
-izpuščenem, tako da je vsaka napaka napovedana z modelom, ki njenega projekta ni videl. Primerjamo
-MLP H9 in MLP H9+LLM. Model, normalizacija, metrika in semena so enaki kot v mlp_llm.py, od tam je
-prevzeto tudi število epoh. Ker so testne množice zelo neenake, poročamo rezultate po projektih in združeno.
+Pet gub je pet projektov. Za vsak projekt model naučimo na napakah ostalih štirih in ga preizkusimo
+na izpuščenem, tako da je vsaka napaka napovedana z modelom, ki njenega projekta ni videl.
+Primerjamo MLP H9 in MLP H9+LLM. Model, normalizacija, metrika, semena in število epoh so iz
+mlp_llm.py. Ker so testne množice zelo neenake, poročamo rezultate po projektih in združeno.
 
-Zagon:  python modeli/mlp_lopo.py
-        (11. skripta v cevovodu, vrstni red je v README)
-Vhod:   izhod/podatki/matrika_metod.parquet, jezikovni_model/ocene.csv, modeli/mlp_llm_izbrane_epohe.json,
-        modeli/mlp_llm_rezultati.json
+Vhod:   izhod/podatki/matrika_metod.parquet, jezikovni_model/ocene.csv,
+        modeli/mlp_llm_izbrane_epohe.json, modeli/mlp_llm_rezultati.json
 Izhod:  izhod/modeli/mlp_lopo_napovedi.csv, modeli/mlp_lopo_rezultati.json, modeli/mlp_lopo_cache/
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija (nastavitve.py, skupno/)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija
 
 import json
 import os
@@ -26,17 +24,17 @@ import numpy as np
 import torch
 
 import nastavitve as N
-from skupno.metrike import metrike_po_napakah, wilcoxon_parni
+from skupno.metrike import metrike_iz_napovedi, metrike_po_napakah, wilcoxon_parni
 from skupno.mlp import uci_z_mejniki
 from skupno.podatki import (nalozi_matriko_metod, seznam_napak, normiraj_po_napaki, zdruzi_llm_ocene,
-                            v_intervalu_0_1, projekt_napake, kljuc_predpomnilnika)
+                            v_intervalu_0_1, projekt_napake, kljuc_predpomnilnika, beri_json)
 from skupno.preverbe import Preverbe, glava
 
 PRIMARNO_SEME = N.SEMENA[0]
 
 
 def lopo(dfn, df, znacilke, projekti, projekt_vrstice, seme, epohe, oznaka, cache):
-    """Za vsak projekt uči na ostalih in napove vse metode izpuščenega projekta. Guba k dobi seme (seme + k)."""
+    """Napovedi LOPO, model za vsak projekt je naučen na ostalih štirih, guba k dobi seme + k"""
     kljuc = kljuc_predpomnilnika(dfn, znacilke, [epohe, seme, len(dfn)], predpona=b"LOPO|")
     pot = os.path.join(cache, f"lopo_{oznaka}_{seme}_{epohe}_{kljuc}.npy")
     if os.path.isfile(pot):
@@ -97,8 +95,7 @@ def main():
     dfn = normiraj_po_napaki(df, znacilke_llm)
     p("po normalizaciji so vse značilke v [0, 1]", v_intervalu_0_1(dfn, znacilke_llm))
 
-    with open(N.pot(N.MLP_LLM_EPOHE), encoding="utf-8") as f:
-        epohe = json.load(f)["chosen"]
+    epohe = beri_json(N.MLP_LLM_EPOHE)["chosen"]
     roke = {"MLP H9": (N.TEHNIKE, int(epohe["MLP H9"])), "MLP H9+LLM": (znacilke_llm, int(epohe["MLP H9+LLM"]))}
     print(f"\n[Število epoh iz mlp_llm.py: H9 {roke['MLP H9'][1]}, H9+LLM {roke['MLP H9+LLM'][1]}, semena {N.SEMENA}]")
 
@@ -115,17 +112,14 @@ def main():
     metrike = {ime: {} for ime in roke}
     for ime in roke:
         for s in N.SEMENA:
-            tmp = df.copy()
-            tmp["_p"] = napovedi[ime][s]
-            metrike[ime][s] = metrike_po_napakah(tmp, "_p")
+            metrike[ime][s] = metrike_iz_napovedi(df, napovedi[ime][s])
 
-    # Ochiai ni naučen, zato mora biti enak kot v mlp_llm.py (preverba poravnave podatkov)
+    # Ochiai ni naučen, zato mora biti enak kot v mlp_llm.py
     och = metrike_po_napakah(df, "ochiai")
-    with open(N.pot(N.MLP_LLM_REZULTATI), encoding="utf-8") as f:
-        rez08 = json.load(f)
-    o08 = rez08["all"]["Ochiai"]
-    p("Ochiai je enak kot v mlp_llm.py", all(och[0][n] == o08["top"][str(n)] for n in N.NS)
-      and abs(och[1] - o08["mfr"]) < 1e-9 and abs(och[2] - o08["mar"]) < 1e-9)
+    rez_mlp = beri_json(N.MLP_LLM_REZULTATI)
+    och_mlp = rez_mlp["all"]["Ochiai"]
+    p("Ochiai je enak kot v mlp_llm.py", all(och[0][n] == och_mlp["top"][str(n)] for n in N.NS)
+      and abs(och[1] - och_mlp["mfr"]) < 1e-9 and abs(och[2] - och_mlp["mar"]) < 1e-9)
 
     print(f"\n[Rezultati po projektih, seme {PRIMARNO_SEME}]")
     print(f"  {'projekt':9s}{'n':>4s}  {'roka':8s} " + "  ".join(f"Top-{n}" for n in N.NS) + "      MFR      MAR")
@@ -148,7 +142,7 @@ def main():
         zdruzeno[ime] = {"top": m[0], "mfr": m[1], "mar": m[2]}
         print(f"  {ime:34s} " + "  ".join(f"{m[0][n]:5d}" for n in N.NS) + f"  {m[1]:7.2f}  {m[2]:7.2f}")
 
-    h9_10, llm_10 = rez08["all"]["MLP H9 (kontrola)"], rez08["all"]["MLP H9+LLM"]
+    h9_10, llm_10 = rez_mlp["all"]["MLP H9 (kontrola)"], rez_mlp["all"]["MLP H9+LLM"]
     lo_h9, lo_llm = metrike["MLP H9"][PRIMARNO_SEME], metrike["MLP H9+LLM"][PRIMARNO_SEME]
     print(f"\n[Primerjava zasnov: LOPO proti {N.K_GUB}-kratnemu prečnemu preverjanju po napakah iz mlp_llm.py]")
     print(f"  {'roka':8s} {'zasnova':28s} {'Top-1':>6s} {'MFR':>8s}")
@@ -167,10 +161,8 @@ def main():
     d_mfr = np.array(po_semenih["MLP H9+LLM"][1]) - np.array(po_semenih["MLP H9"][1])
     print(f"  razlika Top-1 (H9+LLM minus H9): {d_top1.mean():+.1f} ± {d_top1.std(ddof=1):.1f}, izboljšanje pri {(d_top1 > 0).sum()}/{len(d_top1)} semenih")
     print(f"  razlika MFR   (H9+LLM minus H9): {d_mfr.mean():+.2f} ± {d_mfr.std(ddof=1):.2f}, izboljšanje pri {(d_mfr < 0).sum()}/{len(d_mfr)} semenih")
-    print(f"  (pri prečnem preverjanju po napakah: razlika Top-1 {rez08['seed_delta_top1_mean']:+.1f} ± "
-          f"{rez08['seed_delta_top1_sd']:.1f}, razlika MFR {rez08['seed_delta_mfr_mean']:+.2f} ± {rez08['seed_delta_mfr_sd']:.2f})")
-    print("  Opomba: pri LOPO se poslabša predvsem kontrola H9, roka z LLM se premakne malo. Razlika MFR je zato "
-          "velika, a nestabilna med semeni, razlika Top-1 je stabilna.")
+    print(f"  (pri prečnem preverjanju po napakah: razlika Top-1 {rez_mlp['seed_delta_top1_mean']:+.1f} ± "
+          f"{rez_mlp['seed_delta_top1_sd']:.1f}, razlika MFR {rez_mlp['seed_delta_mfr_mean']:+.2f} ± {rez_mlp['seed_delta_mfr_sd']:.2f})")
 
     print("\n[Statistika: H9+LLM proti H9 pod LOPO]")
     w_napake, w_projekti, mfr_projektov = {}, {}, {}
@@ -221,9 +213,9 @@ def main():
         "first_ranks_primary_seed": {f: {"project": projekt_napak[f], "h9": metrike["MLP H9"][PRIMARNO_SEME][3][f],
                                          "h9llm": metrike["MLP H9+LLM"][PRIMARNO_SEME][3][f]} for f in napake},
         "context_10fold": {"source": N.MLP_LLM_REZULTATI, "MLP H9": h9_10, "MLP H9+LLM": llm_10,
-                               "seed_delta_top1_mean": rez08["seed_delta_top1_mean"], "seed_delta_top1_sd": rez08["seed_delta_top1_sd"],
-                               "seed_delta_mfr_mean": rez08["seed_delta_mfr_mean"], "seed_delta_mfr_sd": rez08["seed_delta_mfr_sd"],
-                               "wilcoxon_fault_p": rez08["wilcoxon_fault_p"], "wilcoxon_project_p": rez08["wilcoxon_project_p"]},
+                               "seed_delta_top1_mean": rez_mlp["seed_delta_top1_mean"], "seed_delta_top1_sd": rez_mlp["seed_delta_top1_sd"],
+                               "seed_delta_mfr_mean": rez_mlp["seed_delta_mfr_mean"], "seed_delta_mfr_sd": rez_mlp["seed_delta_mfr_sd"],
+                               "wilcoxon_fault_p": rez_mlp["wilcoxon_fault_p"], "wilcoxon_project_p": rez_mlp["wilcoxon_project_p"]},
     }
     with open(N.pot(N.LOPO_REZULTATI), "w", encoding="utf-8") as f:
         json.dump(povzetek, f, ensure_ascii=False, indent=2)

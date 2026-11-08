@@ -2,19 +2,18 @@
 # -*- coding: utf-8 -*-
 """Izhodišče Ochiai in DStar na nivoju stavkov.
 
-Za vsako napako uredi mesta po oceni in prešteje, pri koliko napakah je kriva vrstica med prvimi n (Top-N).
-Ker je na nivoju stavkov veliko enakih ocen, rang poroča kot interval med optimistično in pesimistično
-obravnavo enakih ocen. Devet napak brez oznake faulty na nivoju stavka je izločenih, ostane 348 napak.
+Mesta vsake napake uredi po oceni in šteje napake s krivim mestom med prvimi n (Top-N). Ker je na
+nivoju stavkov veliko enakih ocen, rang poroča kot interval med optimistično in pesimistično
+obravnavo. Devet napak brez oznake faulty na nivoju stavka je izločenih, ostane 348 napak.
 
-Zagon:  python izhodisca/ochiai_stavki.py
-        (2. skripta v cevovodu, vrstni red je v README)
 Vhod:   izhod/podatki/matrika_stavkov.parquet, podatki/napake_brez_oznak_stavkov.txt
-Izhod:  izhod/izhodisca/ochiai_stavki_rangi.csv (meji ranga za vsako napako), izhodisca/ochiai_stavki.txt
+Izhod:  izhod/izhodisca/ochiai_stavki_rangi.csv (meji ranga za vsako napako),
+        izhodisca/ochiai_stavki.txt (povzetek Top-N)
 """
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija (nastavitve.py, skupno/)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # koren repozitorija
 
 import os
 
@@ -50,14 +49,15 @@ def main():
     skupine = {fid: g for fid, g in df.groupby("fault_id")}
     rezultati, vrstice = {}, []
     for t in TEHNIKI:
-        spodnje, zgornje = {}, {}
+        spodnje, zgornje = [], []
         for fid in ocenljive:
             g = skupine[fid]
             s, z = meji_ranga(g[t].to_numpy(dtype=float), g["faulty"].to_numpy() == 1)
-            spodnje[fid], zgornje[fid] = s, z
+            spodnje.append(s)
+            zgornje.append(z)
             vrstice.append({"fault_id": fid, "tehnika": t, "best_rank": s, "worst_rank": z})
-        rezultati[t] = {n: (sum(1 for f in ocenljive if spodnje[f] <= n),
-                            sum(1 for f in ocenljive if zgornje[f] <= n)) for n in N.NS}
+        # za vsak n število napak z rangom <= n, optimistična in pesimistična meja
+        rezultati[t] = {n: (sum(1 for r in spodnje if r <= n), sum(1 for r in zgornje if r <= n)) for n in N.NS}
 
     print(f"\n[Top-N na nivoju stavkov, od {len(ocenljive)} napak, optimistična..pesimistična meja]")
     for t in TEHNIKI:
